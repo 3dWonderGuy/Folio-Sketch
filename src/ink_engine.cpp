@@ -274,13 +274,11 @@ FinishedStrokeData InkEngine::FinishStroke() {
     data.outlinePath = InkGenerator::GenerateStroke(
         m_liveModeledPoints, m_activeStyle.capType, m_activeStyle.pattern);        // builds closed polygon ribbon for blend2d
 
-    // Auto-dump stroke reproducer if self-intersections or retrograde folds were detected
-    if (InkGenerator::IsDebugCaptureEnabled()) {
-        const auto& dbg = InkGenerator::GetLastDebugInfo();
-        if (!dbg.selfIntersections.empty() || !dbg.retrogradeIndices.empty()) {
-            InkGenerator::DumpLastStrokeToConsole();
-        }
+    // Auto-dump stroke reproducer if geometry defects (self-intersections or retrograde folds) were detected
+    if (InkGenerator::IsDebugCaptureEnabled() && InkGenerator::GetLastDebugInfo().hasDefects) {
+        InkGenerator::DumpLastStrokeToConsole();
     }
+
 
     // Stage 4: Reset live state
     CancelStroke();                                                                    // wipe live inking buffers for next stroke
