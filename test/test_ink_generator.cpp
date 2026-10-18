@@ -447,6 +447,29 @@ void TestWidthEvaluatorAndPostProcessor() {
     assert(analysis.totalArcLengthMm > 50.0);
     assert(analysis.endpointDistanceMm < 0.1);
 
+    // 4b. Self-intersecting open stroke (figure-8 / loop crossover)
+    FinishedStrokeData crossStrokeData;
+    crossStrokeData.modeledPoints = {
+        StrokePoint(0.0, 0.0, 0.5f),
+        StrokePoint(20.0, 20.0, 0.5f),
+        StrokePoint(20.0, 0.0, 0.5f),
+        StrokePoint(0.0, 20.0, 0.5f)
+    };
+    auto analysisCross = Folio::StrokePostProcessor::Analyze(crossStrokeData);
+    assert(!analysisCross.isClosed);
+    assert(analysisCross.hasSelfIntersections);
+    assert(analysisCross.topology == Folio::StrokeTopology::SelfIntersecting);
+
+    // 5. Inverted min/max width multipliers and zero velocityThinningMaxSpeed
+    InkingConfig edgeConfig = config;
+    edgeConfig.minWidthMultiplier = 2.0f;
+    edgeConfig.maxWidthMultiplier = 0.5f;
+    edgeConfig.useVelocity = true;
+    edgeConfig.velocityThinningMaxSpeed = 0.0f;
+    float pEdge = Folio::StrokeWidthEvaluator::CalculateDynamicWidth(1.0f, 0.5f, 100.0f, 0.0f, 0.0f, -1.0f, 1.0f, edgeConfig);
+    assert(!std::isnan(pEdge));
+    assert(pEdge > 0.0f);
+
     std::cout << "  -> Width evaluator and post-processor tests passed successfully." << std::endl;
 }
 

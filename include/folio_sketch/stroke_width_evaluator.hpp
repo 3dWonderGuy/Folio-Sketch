@@ -113,8 +113,8 @@ private:
         }
 
         float pressureCurved = ApplyPressureCurve(rawPressure, config);
-        float minFrac = config.minWidthMultiplier;
-        float maxFrac = config.maxWidthMultiplier;
+        float minFrac = std::min(config.minWidthMultiplier, config.maxWidthMultiplier);
+        float maxFrac = std::max(config.minWidthMultiplier, config.maxWidthMultiplier);
         float widthMultiplier = minFrac + pressureCurved * (maxFrac - minFrac);
         return baseWidth * std::clamp(widthMultiplier, minFrac, maxFrac);
     }
@@ -133,9 +133,10 @@ private:
         }
 
         float speed = speedMmPerSec * zoomScale;
+        float maxSpeed = std::max(1.0f, config.velocityThinningMaxSpeed);
         float normalizedSpeed = std::clamp(
-            speed / config.velocityThinningMaxSpeed, 0.0f, 1.0f);
-        float minThin = config.minWidthMultiplier;
+            speed / maxSpeed, 0.0f, 1.0f);
+        float minThin = std::clamp(config.minWidthMultiplier, 0.01f, 1.0f);
         return 1.0f - normalizedSpeed * (1.0f - minThin);
     }
 

@@ -91,7 +91,7 @@ public:
         const double qMaxY = std::max(w0.y, w1.y);
 
         for (const auto& seg : segments) {
-            const double maxR = queryRadius + static_cast<double>(seg.width) * 0.5;
+            const double maxR = std::max(0.0, queryRadius + static_cast<double>(seg.width) * 0.5);
             const double segMinX = std::min(seg.p0.x, seg.p1.x) - maxR;
             const double segMaxX = std::max(seg.p0.x, seg.p1.x) + maxR;
             const double segMinY = std::min(seg.p0.y, seg.p1.y) - maxR;
@@ -118,7 +118,7 @@ private:
         double qx, double qy, double queryRadius,
         float& outT, double& outDistSq) noexcept
     {
-        const double maxR = static_cast<double>(width) * 0.5 + queryRadius;
+        const double maxR = std::max(0.0, static_cast<double>(width) * 0.5 + queryRadius);
 
         // 1. Transient segment mini-AABB in CPU registers (zero memory allocation)
         const double segMinX = std::min(p0.x, p1.x) - maxR;
@@ -269,7 +269,7 @@ public:
         };
 
         for (const auto& seg : segments) {
-            const double effR = eraserRadius + static_cast<double>(seg.width) * 0.5;
+            const double effR = std::max(0.0, eraserRadius + static_cast<double>(seg.width) * 0.5);
             const double effRSq = effR * effR;
 
             const double dx0 = seg.p0.x - ex;

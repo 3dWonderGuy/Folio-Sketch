@@ -417,10 +417,10 @@ BLPath InkGenerator::BuildTexturedPencilPattern(const std::vector<StrokePoint>& 
         double uy = (tiltMag > 1e-4f) ? (pt.tiltY / tiltMag) : 0.0;
 
         float tiltFactor = 1.0f;
-        if (tiltMag > 0.20f) {
-            float t = std::clamp((tiltMag - 0.20f) / (1.10f - 0.20f), 0.0f, 1.0f);
+        if (tiltMag > 0.22f) {
+            float t = std::clamp((tiltMag - 0.22f) / (1.05f - 0.22f), 0.0f, 1.0f);
             float smoothT = t * t * (3.0f - 2.0f * t);
-            tiltFactor = 1.0f + smoothT * 1.5f;
+            tiltFactor = 1.0f + smoothT * 1.8f;
         }
         float rTip = pt.r / tiltFactor;
         float rTiltExtra = std::max(0.0f, pt.r - rTip);

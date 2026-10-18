@@ -58,12 +58,13 @@ public:
     [[nodiscard]] static StrokeAnalysisResult Analyze(const FinishedStrokeData& stroke) noexcept {
         StrokeAnalysisResult result;
 
-        if (stroke.modeledPoints.size() >= 2) {
+        const size_t ptCount = stroke.modeledPoints.size();
+        if (ptCount >= 2) {
             const auto& first = stroke.modeledPoints.front();
             const auto& last  = stroke.modeledPoints.back();
             result.endpointDistanceMm = std::hypot(last.x - first.x, last.y - first.y);
 
-            for (size_t i = 1; i < stroke.modeledPoints.size(); ++i) {
+            for (size_t i = 1; i < ptCount; ++i) {
                 result.totalArcLengthMm += std::hypot(
                     stroke.modeledPoints[i].x - stroke.modeledPoints[i - 1].x,
                     stroke.modeledPoints[i].y - stroke.modeledPoints[i - 1].y);
@@ -72,6 +73,52 @@ public:
             result.isClosed = DetectClosedLoop(stroke.modeledPoints);
             if (result.isClosed) {
                 result.topology = StrokeTopology::ClosedLoop;
+            }
+
+            // Check for self-intersections between non-adjacent segments
+            if (ptCount >= 4) {
+                auto segmentsCross = [](const StrokePoint& a, const StrokePoint& b,
+                                        const StrokePoint& c, const StrokePoint& d) noexcept -> bool {
+                    double d1 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+                    double d2 = (b.x - a.x) * (d.y - a.y) - (b.y - a.y) * (d.x - a.x);
+                    double d3 = (d.x - c.x) * (a.y - c.y) - (d.y - c.y) * (a.x - c.x);
+                    double d4 = (d.x - c.x) * (b.y - c.y) - (d.y - c.y) * (b.x - c.x);
+
+                    if (((d1 > 1e-6 && d2 < -1e-6) || (d1 < -1e-6 && d2 > 1e-6)) &&
+                        ((d3 > 1e-6 && d4 < -1e-6) || (d3 < -1e-6 && d4 > 1e-6))) {
+                        return true;
+                    }
+                    return false;
+                };
+
+                size_t step = (ptCount <= 300) ? 1 : (ptCount / 300);
+                for (size_t i = 0; i + step < ptCount && !result.hasSelfIntersections; i += step) {
+                    const auto& pA = stroke.modeledPoints[i];
+                    const auto& pB = stroke.modeledPoints[i + step];
+                    double minX1 = std::min(pA.x, pB.x), maxX1 = std::max(pA.x, pB.x);
+                    double minY1 = std::min(pA.y, pB.y), maxY1 = std::max(pA.y, pB.y);
+
+                    for (size_t j = i + 2 * step; j + step < ptCount; j += step) {
+                        if (i == 0 && j + step >= ptCount - 1 && result.isClosed) continue;
+
+                        const auto& pC = stroke.modeledPoints[j];
+                        const auto& pD = stroke.modeledPoints[j + step];
+
+                        if (std::max(pC.x, pD.x) < minX1 || std::min(pC.x, pD.x) > maxX1 ||
+                            std::max(pC.y, pD.y) < minY1 || std::min(pC.y, pD.y) > maxY1) {
+                            continue;
+                        }
+
+                        if (segmentsCross(pA, pB, pC, pD)) {
+                            result.hasSelfIntersections = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (result.hasSelfIntersections && !result.isClosed) {
+                    result.topology = StrokeTopology::SelfIntersecting;
+                }
             }
         }
 
