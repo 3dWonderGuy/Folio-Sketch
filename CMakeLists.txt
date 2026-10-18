@@ -47,9 +47,51 @@ if(NOT TARGET blend2d::blend2d)
 endif()
 
 # ==============================================================================
+# InkStrokeModeler Dependency Resolution
+# ==============================================================================
+set(INK_STROKE_MODELER_DIR "")
+if(NOT TARGET InkStrokeModeler::stroke_modeler)
+    find_package(InkStrokeModeler QUIET)
+    if(NOT InkStrokeModeler_FOUND)
+        # 1. Check local third_party/ink-stroke-modeler
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ink-stroke-modeler/CMakeLists.txt")
+            set(INK_STROKE_MODELER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ink-stroke-modeler")
+            set(INK_STROKE_MODELER_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+            add_subdirectory(third_party/ink-stroke-modeler ink_sm EXCLUDE_FROM_ALL)
+        # 2. Check sibling FolioNote repository
+        elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/ink-stroke-modeler/CMakeLists.txt")
+            set(INK_STROKE_MODELER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/ink-stroke-modeler")
+            set(INK_STROKE_MODELER_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+            if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/abseil-cpp")
+                set(FETCHCONTENT_SOURCE_DIR_ABSEIL-CPP "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/abseil-cpp" CACHE PATH "" FORCE)
+                set(FETCHCONTENT_SOURCE_DIR_ABSEIL_CPP "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/abseil-cpp" CACHE PATH "" FORCE)
+            endif()
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/ink-stroke-modeler" ink_sm EXCLUDE_FROM_ALL)
+        else()
+            include(FetchContent)
+            FetchContent_Declare(
+                ink_stroke_modeler
+                GIT_REPOSITORY https://github.com/google/ink-stroke-modeler.git
+                GIT_TAG main
+            )
+            set(INK_STROKE_MODELER_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+            FetchContent_MakeAvailable(ink_stroke_modeler)
+            set(INK_STROKE_MODELER_DIR "${ink_stroke_modeler_SOURCE_DIR}")
+        endif()
+    endif()
+else()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ink-stroke-modeler")
+        set(INK_STROKE_MODELER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ink-stroke-modeler")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/ink-stroke-modeler")
+        set(INK_STROKE_MODELER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/ink-stroke-modeler")
+    endif()
+endif()
+
+# ==============================================================================
 # FolioSketch Library Target
 # ==============================================================================
 set(FOLIO_SKETCH_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_engine.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_polygon.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_stroke.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_ribbon.cpp"
@@ -59,8 +101,13 @@ set(FOLIO_SKETCH_SOURCES
 )
 
 set(FOLIO_SKETCH_HEADERS
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_generator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_engine.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_config.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_stroke_data.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_collision.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_width_evaluator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_post_processor.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_generator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_internal.hpp"
 )
 
@@ -76,13 +123,16 @@ target_include_directories(FolioSketch
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
+        $<BUILD_INTERFACE:${INK_STROKE_MODELER_DIR}>
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${INK_STROKE_MODELER_DIR}"
 )
 
 target_link_libraries(FolioSketch
     PUBLIC
         blend2d::blend2d
+        InkStrokeModeler::stroke_modeler
 )
 
 # Compiler warnings and optimization flags

@@ -16,14 +16,20 @@ Originally engineered for **FolioNote**, Folio-Sketch provides ultra-low latency
 
 ```text
 Folio-Sketch/
-├── CMakeLists.txt                 # Modern CMake build system
+├── CMakeLists.txt                 # Modern CMake build system (C++20, static library, tests)
 ├── LICENSE                        # GNU AGPLv3
 ├── README.md                      # Documentation
 ├── include/
 │   └── folio_sketch/
-│       ├── ink_generator.hpp      # Primary vector stroke & infill generator API
-│       └── ink_stroke_data.hpp    # Geometric primitives (StrokePoint, CapType, InfillStyle)
+│       ├── ink_engine.hpp         # Central inking facade, Google Ink Modeler & predictive pipeline
+│       ├── ink_config.hpp         # Spring physics parameters, noise filtering & pressure calibration
+│       ├── ink_stroke_data.hpp    # Geometric primitives (StrokePoint, CapType, InfillStyle)
+│       ├── stroke_collision.hpp   # Two-tier capsule broadphase/narrowphase & stroke slicer
+│       ├── stroke_width_evaluator.hpp # Dynamic width, velocity thinning, and EMA smoothing
+│       ├── stroke_post_processor.hpp  # Topological analysis, loop detection & curve simplification
+│       └── ink_generator.hpp      # Primary vector stroke & infill generator API
 ├── src/
+│   ├── ink_engine.cpp             # Inking lifecycle, predictive continuation & modeler bridge
 │   ├── ink_generator_internal.hpp # Shared internal math, nib geometries, and cap tracers
 │   ├── ink_generator_caps.cpp     # Oriented nib profiles (Round, Square, Chisel) & endcaps
 │   ├── ink_generator_ribbon.cpp   # Miter-clipped single contour ribbon tessellator
