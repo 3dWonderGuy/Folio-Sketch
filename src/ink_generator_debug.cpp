@@ -168,11 +168,12 @@ void InkGenerator::ClearDebugInfo() noexcept {
     s_lastDebugInfo.selfIntersections.clear();
     s_lastDebugInfo.retrogradeIndices.clear();
     s_lastDebugInfo.hasDefects = false;
+    s_lastDebugInfo.builtPath.clear();
     s_lastDebugInfo.generatedPath.clear();
 }
 
-void InkGenerator::DumpLastStrokeToConsole() {
-    FormatStrokeDump(std::cout, s_lastDebugInfo);
+void InkGenerator::DumpLastStrokeToConsole(const StrokeDebugInfo* info) {
+    FormatStrokeDump(std::cout, info ? *info : s_lastDebugInfo);
 }
 
 void InkGenerator::DumpStrokeToFile(const std::string& filepath, const StrokeDebugInfo* info) {
@@ -181,3 +182,4 @@ void InkGenerator::DumpStrokeToFile(const std::string& filepath, const StrokeDeb
         FormatStrokeDump(ofs, info ? *info : s_lastDebugInfo);
     }
 }
+

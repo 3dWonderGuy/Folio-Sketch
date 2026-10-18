@@ -42,8 +42,11 @@ struct StrokeDebugInfo {
     std::vector<Point2D>     rightRail;          ///< Right boundary vertices generated for the ribbon
     std::vector<Point2D>     selfIntersections;  ///< Exact world coordinates where non-adjacent edges intersect
     std::vector<size_t>      retrogradeIndices;  ///< Indices where boundary stepped backward against tangent
+    BLPath                   builtPath;          ///< Final tessellated BLPath
+    BLPath                   generatedPath;      ///< Alias for builtPath
+    CapType                  capType = CapType::Round;
+    bool                     isClosedPolygon = false;
     bool                     hasDefects = false; ///< True if selfIntersections or retrogradeIndices is non-empty
-    BLPath                   generatedPath;      ///< Resulting BLPath outline
 };
 
 class InkGenerator {
@@ -59,12 +62,19 @@ public:
 
     static void RenderDebugOverlay(BLContext& ctx,
                                    const StrokeDebugInfo& info,
-                                   double zoomScale,
+                                   double zoomScale = 1.0,
                                    const BLPath* outlinePath = nullptr);
 
-    static void DumpLastStrokeToConsole();
+    static void DumpLastStrokeToConsole(const StrokeDebugInfo* info = nullptr);
     static void DumpStrokeToFile(const std::string& filepath = "debug_stroke_dump.txt",
                                  const StrokeDebugInfo* info = nullptr);
+
+    /**
+     * @brief Builds a continuous 2D closed ribbon polygon from an ordered list of points.
+     */
+    static BLPath BuildSolidRibbon(const std::vector<StrokePoint>& pts,
+                                   CapType capType = CapType::Round,
+                                   bool isClosedPolygon = false);
 
     /**
      * @brief Builds a 2D closed ribbon polygon or patterned outline (solid, dashed, dotted) from an ordered list of points.
@@ -179,11 +189,6 @@ private:
     // =========================================================================
     // STEP 2: STROKE & RIBBON TESSELLATION
     // =========================================================================
-
-    // Builds a continuous 2D closed ribbon polygon from an ordered list of points
-    static BLPath BuildSolidRibbon(const std::vector<StrokePoint>& pts,
-                                   CapType capType = CapType::Round,
-                                   bool isClosedPolygon = false);
 
     // Dispatches non-solid discontinuous patterns (Dotted, Dashed, DashDot)
     static BLPath ApplyDiscontinuousPattern(const std::vector<StrokePoint>& pts,

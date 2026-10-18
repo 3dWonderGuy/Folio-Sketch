@@ -438,6 +438,10 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         dbg.rightRail.clear();
         dbg.selfIntersections.clear();
         dbg.retrogradeIndices.clear();
+        dbg.hasDefects = false;
+        dbg.capType = capType;
+        dbg.isClosedPolygon = isClosedPolygon;
+        dbg.builtPath.clear();
         dbg.generatedPath.clear();
     }
 
@@ -448,6 +452,7 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         if (isDbg) {
             auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
             dbg.cleanPts = pts;
+            dbg.builtPath = single;
             dbg.generatedPath = single;
         }
         return single;
@@ -549,6 +554,7 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         if (isDbg) {
             auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
             dbg.cleanPts = cleanPts;
+            dbg.builtPath = closedPath;
             dbg.generatedPath = closedPath;
         }
         return closedPath;
@@ -585,7 +591,9 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
     if (splitIndices.empty()) {
         BLPath singlePath = BuildSingleRibbon(cleanPts, capType, false);
         if (isDbg) {
-            Folio::InkInternal::GetMutableDebugInfo().generatedPath = singlePath;
+            auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
+            dbg.builtPath = singlePath;
+            dbg.generatedPath = singlePath;
         }
         return singlePath;
     }
@@ -612,7 +620,9 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
     }
 
     if (isDbg) {
-        Folio::InkInternal::GetMutableDebugInfo().generatedPath = combinedPath;
+        auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
+        dbg.builtPath = combinedPath;
+        dbg.generatedPath = combinedPath;
     }
 
     return combinedPath;
