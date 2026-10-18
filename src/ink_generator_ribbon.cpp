@@ -227,15 +227,11 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
             double bInY = sumInY / bInLen;
 
             double cosHalf = std::sqrt(std::max(0.0, (1.0 + dot) * 0.5));
-            double sinHalf = std::sqrt(std::max(0.0, (1.0 - dot) * 0.5));
 
             double innerDist = r;
             if (cosHalf > 1e-4) {
-                innerDist = r / cosHalf;
+                innerDist = std::min(r / cosHalf, 2.0 * r);
             }
-            // Clamp miter to avoid extreme spikes on sharp turns, and avoid overshooting segments
-            double maxAllowedDist = (0.85 * std::min(sIn.len, sOut.len)) / std::max(1e-4, sinHalf);
-            innerDist = std::min({ innerDist, maxAllowedDist, 2.0 * r });
 
             inPts.push_back({ Pi.x + bInX * innerDist, Pi.y + bInY * innerDist });
         };
