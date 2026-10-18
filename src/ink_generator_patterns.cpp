@@ -31,6 +31,12 @@ BLPath InkGenerator::ApplyDiscontinuousPattern(const std::vector<StrokePoint>& p
 
 BLPath InkGenerator::BuildDottedPattern(const std::vector<StrokePoint>& pts) {
     BLPath path;
+    if (pts.empty()) return path;
+    if (pts.size() == 1) {
+        path.add_circle(BLCircle{pts[0].x, pts[0].y, pts[0].r});
+        return path;
+    }
+
     double nextDotDist = 0.0;
     double distAccum = 0.0;
 
@@ -69,6 +75,12 @@ BLPath InkGenerator::BuildDottedPattern(const std::vector<StrokePoint>& pts) {
 
 BLPath InkGenerator::BuildDashedPattern(const std::vector<StrokePoint>& pts) {
     BLPath path;
+    if (pts.empty()) return path;
+    if (pts.size() == 1) {
+        path.add_circle(BLCircle{pts[0].x, pts[0].y, pts[0].r});
+        return path;
+    }
+
     const size_t N = pts.size();
     std::vector<double> cumDist(N, 0.0);
     for (size_t i = 1; i < N; ++i) {
@@ -140,6 +152,12 @@ BLPath InkGenerator::BuildDashedPattern(const std::vector<StrokePoint>& pts) {
 
 BLPath InkGenerator::BuildDashDotPattern(const std::vector<StrokePoint>& pts) {
     BLPath path;
+    if (pts.empty()) return path;
+    if (pts.size() == 1) {
+        path.add_circle(BLCircle{pts[0].x, pts[0].y, pts[0].r});
+        return path;
+    }
+
     const size_t N = pts.size();
     std::vector<double> cumDist(N, 0.0);
     for (size_t i = 1; i < N; ++i) {
@@ -492,7 +510,7 @@ void InkGenerator::RenderPencilStroke(BLContext& ctx,
                 ++idx;
             }
             size_t end = (idx < sz) ? idx : (sz - 1);
-            if (end > start) {
+            if (end >= start) {
                 subSpan.assign(band.begin() + start, band.begin() + end + 1);
                 BLPath subPath = BuildSolidRibbon(subSpan, CapType::Round);
                 if (!subPath.is_empty()) {

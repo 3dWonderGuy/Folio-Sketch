@@ -12,7 +12,7 @@
 #include <cassert>
 #include <blend2d/blend2d.h>
 
-#include "folio_sketch/ink_generator.hpp"
+#include "folio_sketch/folio_sketch.hpp"
 
 void TestStrokeTessellationAndRasterPerformance() {
     std::cout << "[Test 1/2] Running Stroke Tessellation & Rasterization Performance..." << std::endl;
@@ -265,6 +265,270 @@ void TestStrokePressureTransitions() {
     std::cout << "  -> Pressure step transition, 180 deg turnaround, and J-turn inner corner tests passed successfully." << std::endl;
 }
 
+void TestCollisionAndSlicer() {
+    std::cout << "[Test 3/6] Running Collision Engine & Stroke Slicer Unit Tests..." << std::endl;
+
+    // 1. Point hit test on dot
+    Point2D dotCenter{ 50.0, 50.0 };
+    assert(StrokeCollisionEngine::HitTestPoint(dotCenter, 2.0f, 50.5, 50.0, 1.0));
+    assert(!StrokeCollisionEngine::HitTestPoint(dotCenter, 2.0f, 60.0, 60.0, 1.0));
+
+    // 2. Segment hit test
+    std::vector<Segment1D> strokeSegments = {
+        Segment1D{ Point2D{ 0.0, 0.0 }, Point2D{ 100.0, 0.0 }, 1.0f }
+    };
+
+    auto hitRes = StrokeCollisionEngine::HitTestStroke(strokeSegments, 50.0, 0.2, 0.5);
+    assert(hitRes.hit);
+    assert(hitRes.segmentIndex == 0);
+    assert(std::abs(hitRes.t - 0.5f) < 0.01f);
+
+    auto missRes = StrokeCollisionEngine::HitTestStroke(strokeSegments, 50.0, 10.0, 0.5);
+    assert(!missRes.hit);
+
+    // 3. Swept hit test (moving query capsule)
+    // 3a. Crossing stroke
+    Point2D sweepStart{ 50.0, -5.0 };
+    Point2D sweepEnd{ 50.0, 5.0 };
+    assert(StrokeCollisionEngine::HitTestStrokeSwept(strokeSegments, sweepStart, sweepEnd, 0.5));
+
+    // 3b. Completely distant stroke (validates AABB broadphase culling)
+    Point2D farStart{ 200.0, 200.0 };
+    Point2D farEnd{ 210.0, 210.0 };
+    assert(!StrokeCollisionEngine::HitTestStrokeSwept(strokeSegments, farStart, farEnd, 1.0));
+
+    // 4. Degenerate segments (points) in swept collision - must not divide by zero or NaN
+    std::vector<Segment1D> degenSegments = {
+        Segment1D{ Point2D{ 10.0, 10.0 }, Point2D{ 10.0, 10.0 }, 1.0f }
+    };
+    Point2D degenQuery0{ 10.0, 10.0 };
+    Point2D degenQuery1{ 10.0, 10.0 };
+    assert(StrokeCollisionEngine::HitTestStrokeSwept(degenSegments, degenQuery0, degenQuery1, 0.5));
+
+    Point2D degenFar0{ 99.0, 99.0 };
+    Point2D degenFar1{ 99.0, 99.0 };
+    assert(!StrokeCollisionEngine::HitTestStrokeSwept(degenSegments, degenFar0, degenFar1, 0.5));
+
+    // 5. Stroke Slicer Tests
+    std::vector<std::vector<Segment1D>> subStrokes;
+
+    // 5a. Midpoint punch-through split
+    bool modified = StrokeSlicer::SliceSegments(strokeSegments, 50.0, 0.0, 5.0, subStrokes);
+    assert(modified);
+    assert(subStrokes.size() == 2);
+    assert(subStrokes[0].front().p0.x < 1.0);
+    assert(subStrokes[1].back().p1.x > 99.0);
+
+    // 5b. Near-start punch-through (tests fix where t1 close to 0 was skipped by t1 > 0.001)
+    subStrokes.clear();
+    bool cutNearStart = StrokeSlicer::SliceSegments(strokeSegments, 1.0, 0.0, 0.999, subStrokes);
+    assert(cutNearStart);
+    assert(subStrokes.size() >= 1);
+
+    // 5c. Miss (no intersection)
+    subStrokes.clear();
+    bool missed = StrokeSlicer::SliceSegments(strokeSegments, 50.0, 50.0, 2.0, subStrokes);
+    assert(!missed);
+    assert(subStrokes.size() == 1);
+    assert(subStrokes[0].size() == 1);
+
+    // 5d. Total erasure
+    subStrokes.clear();
+    bool erased = StrokeSlicer::SliceSegments(strokeSegments, 50.0, 0.0, 100.0, subStrokes);
+    assert(erased);
+    assert(subStrokes.empty());
+
+    std::cout << "  -> Collision engine and stroke slicer tests passed successfully." << std::endl;
+}
+
+void TestWidthEvaluatorAndPostProcessor() {
+    std::cout << "[Test 4/6] Running Stroke Width Evaluator & Post-Processor Tests..." << std::endl;
+
+    InkingConfig config;
+
+    // 1. StrokeWidthEvaluator pressure curve & boundary safety
+    float pMin = Folio::StrokeWidthEvaluator::CalculateDynamicWidth(1.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, config);
+    float pMax = Folio::StrokeWidthEvaluator::CalculateDynamicWidth(1.0f, 1.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, config);
+    assert(pMin < pMax);
+
+    // NaN pressure input must be safely handled without NaN output
+    float pNan = Folio::StrokeWidthEvaluator::CalculateDynamicWidth(1.0f, std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, config);
+    assert(!std::isnan(pNan));
+    assert(pNan >= 0.0f);
+
+    // Zero-range pressure config (deadzone == saturation)
+    InkingConfig brokenConfig = config;
+    brokenConfig.pressureDeadzoneMin = 0.5f;
+    brokenConfig.pressureSaturationMax = 0.5f;
+    float pSafe = Folio::StrokeWidthEvaluator::CalculateDynamicWidth(1.0f, 0.7f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, brokenConfig);
+    assert(!std::isnan(pSafe));
+
+    // 2. StrokePostProcessor::Simplify on collinear points
+    std::vector<StrokePoint> collinearPts;
+    for (int i = 0; i < 20; ++i) {
+        collinearPts.emplace_back(i * 1.0, 0.0, 0.5f);
+    }
+    auto simplified = Folio::StrokePostProcessor::Simplify(collinearPts, 0.05f);
+    assert(simplified.size() == 2); // 20 collinear points reduced to 2 endpoints
+    assert(simplified.front().x == 0.0);
+    assert(simplified.back().x == 19.0);
+
+    // 3. StrokePostProcessor::DetectClosedLoop
+    // 3a. Tiny 1mm open stroke must NOT be detected as closed loop
+    std::vector<StrokePoint> tinyStroke = {
+        StrokePoint(0.0, 0.0, 0.5f),
+        StrokePoint(0.5, 0.1, 0.5f),
+        StrokePoint(1.0, 0.0, 0.5f)
+    };
+    assert(!Folio::StrokePostProcessor::DetectClosedLoop(tinyStroke, 2.0f));
+
+    // 3b. Genuine closed circle (circumference ~ 62.8mm > 6mm) returning to start
+    std::vector<StrokePoint> loopStroke;
+    for (int i = 0; i <= 36; ++i) {
+        double a = (i * 10.0) * M_PI / 180.0;
+        loopStroke.emplace_back(50.0 + 10.0 * std::cos(a), 50.0 + 10.0 * std::sin(a), 0.5f);
+    }
+    assert(Folio::StrokePostProcessor::DetectClosedLoop(loopStroke, 2.0f));
+
+    // 4. StrokePostProcessor::Analyze
+    FinishedStrokeData strokeData;
+    strokeData.modeledPoints = loopStroke;
+    auto analysis = Folio::StrokePostProcessor::Analyze(strokeData);
+    assert(analysis.isClosed);
+    assert(analysis.topology == Folio::StrokeTopology::ClosedLoop);
+    assert(analysis.totalArcLengthMm > 50.0);
+    assert(analysis.endpointDistanceMm < 0.1);
+
+    std::cout << "  -> Width evaluator and post-processor tests passed successfully." << std::endl;
+}
+
+void TestInkEngineLifecycle() {
+    std::cout << "[Test 5/6] Running InkEngine Full Lifecycle & Move Semantics Tests..." << std::endl;
+
+    Folio::InkEngine engine;
+    StrokeStyle style;
+    style.baseWidth = 1.0f;
+    style.capType = CapType::Round;
+    style.pattern = StrokePattern::Solid;
+
+    // 1. Normal Multi-Point Gesture
+    engine.BeginStroke(10.0, 10.0, 0.5f, 1.0, style);
+    assert(engine.IsStrokeActive());
+    assert(!engine.GetLiveOutlinePath().is_empty());
+
+    for (int i = 1; i <= 10; ++i) {
+        engine.AppendPoint(10.0 + i * 2.0, 10.0 + i * 0.5, 0.6f, 1.0 + i * 0.02);
+    }
+
+    assert(engine.GetLiveModeledPoints().size() > 1);
+
+    FinishedStrokeData stroke1 = engine.FinishStroke();
+    assert(!engine.IsStrokeActive());
+    assert(!stroke1.modeledPoints.empty());
+    assert(!stroke1.liveSegments.empty());
+    assert(!stroke1.outlinePath.is_empty());
+
+    // 2. Single-Tap Dot Gesture
+    engine.BeginStroke(50.0, 50.0, 0.8f, 2.0, style);
+    FinishedStrokeData tapStroke = engine.FinishStroke();
+    assert(tapStroke.modeledPoints.size() == 1);
+    assert(tapStroke.liveSegments.size() == 1);
+    assert(!tapStroke.outlinePath.is_empty());
+
+    // 3. Cancel Gesture
+    engine.BeginStroke(30.0, 30.0, 0.5f, 3.0, style);
+    engine.AppendPoint(31.0, 31.0, 0.5f, 3.01);
+    assert(engine.IsStrokeActive());
+    engine.CancelStroke();
+    assert(!engine.IsStrokeActive());
+    assert(engine.GetLiveModeledPoints().empty());
+    assert(engine.GetLiveOutlinePath().is_empty());
+
+    // 4. Move Construction & Move Assignment
+    engine.BeginStroke(100.0, 100.0, 0.5f, 4.0, style);
+    Folio::InkEngine movedEngine(std::move(engine));
+    assert(!engine.IsStrokeActive()); // Moved-from engine is inactive
+    assert(movedEngine.IsStrokeActive());
+
+    movedEngine.AppendPoint(105.0, 105.0, 0.6f, 4.05);
+    FinishedStrokeData movedStroke = movedEngine.FinishStroke();
+    assert(!movedStroke.modeledPoints.empty());
+
+    // Moved-from engine can safely start a new stroke without crashing
+    engine.BeginStroke(200.0, 200.0, 0.5f, 5.0, style);
+    assert(engine.IsStrokeActive());
+    FinishedStrokeData freshStroke = engine.FinishStroke();
+    assert(!freshStroke.modeledPoints.empty());
+
+    std::cout << "  -> InkEngine lifecycle and move semantics tests passed successfully." << std::endl;
+}
+
+void TestPatternAndInfillEdgeCases() {
+    std::cout << "[Test 6/6] Running Pattern & Infill Edge Cases & Invariant Tests..." << std::endl;
+
+    std::vector<StrokePoint> emptyPts;
+    std::vector<StrokePoint> singlePt = { StrokePoint(50.0, 50.0, 0.8f, 0.7f) };
+
+    std::vector<StrokePattern> patterns = {
+        StrokePattern::Solid,
+        StrokePattern::Dashed,
+        StrokePattern::Dotted,
+        StrokePattern::DashDot,
+        StrokePattern::TexturedPencil
+    };
+
+    // 1. Verify all patterns handle empty and 1-point inputs without crashing
+    for (auto pat : patterns) {
+        BLPath emptyPath = InkGenerator::GenerateStroke(emptyPts, CapType::Round, pat);
+        assert(emptyPath.is_empty());
+
+        BLPath singlePath = InkGenerator::GenerateStroke(singlePt, CapType::Round, pat);
+        assert(!singlePath.is_empty());
+    }
+
+    // 2. BuildInfill tests
+    std::vector<Point2D> openPoly = {
+        { 0.0, 0.0 }, { 20.0, 0.0 }, { 20.0, 20.0 }, { 0.0, 20.0 }
+    };
+    BLPath infillOpen = InkGenerator::BuildInfill(openPoly);
+    assert(!infillOpen.is_empty());
+
+    // Already closed polygon (endpoint == startpoint) deduplication
+    std::vector<Point2D> closedPoly = openPoly;
+    closedPoly.push_back(openPoly.front());
+    BLPath infillClosed = InkGenerator::BuildInfill(closedPoly);
+    assert(!infillClosed.is_empty());
+
+    // 3. FillInfill tests with all hatch and gradient variants and auto-computed bounds
+    BLImage img(200, 200, BL_FORMAT_PRGB32);
+    BLContext ctx(img);
+
+    std::vector<InfillType> infillTypes = {
+        InfillType::Solid,
+        InfillType::SemiTransparent,
+        InfillType::LinearGradient,
+        InfillType::RadialGradient,
+        InfillType::HatchDiagonal,
+        InfillType::HatchCross,
+        InfillType::HatchHorizontal,
+        InfillType::HatchVertical,
+        InfillType::HatchDots
+    };
+
+    for (auto infType : infillTypes) {
+        ctx.clear_all();
+        InfillStyle style;
+        style.type = infType;
+        style.primaryColor = BLRgba32(0xFF0055AA);
+        style.secondaryColor = BLRgba32(0xFF00AAFF);
+        style.outlineWidthMm = 1.0;
+        // Notice style.bounds is left default BLBox(0,0,0,0) - tests auto-bounding box inference!
+        InkGenerator::FillInfill(ctx, infillOpen, style);
+    }
+
+    std::cout << "  -> Pattern and infill edge case tests passed successfully." << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Starting Folio-Sketch Test Suite" << std::endl;
@@ -272,6 +536,10 @@ int main() {
 
     TestStrokeTessellationAndRasterPerformance();
     TestStrokePressureTransitions();
+    TestCollisionAndSlicer();
+    TestWidthEvaluatorAndPostProcessor();
+    TestInkEngineLifecycle();
+    TestPatternAndInfillEdgeCases();
 
     std::cout << "========================================" << std::endl;
     std::cout << "All Folio-Sketch Tests Passed!" << std::endl;

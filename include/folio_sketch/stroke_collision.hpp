@@ -85,14 +85,21 @@ public:
         const std::vector<Segment1D>& segments,
         const Point2D& w0, const Point2D& w1, double queryRadius) noexcept
     {
+        const double qMinX = std::min(w0.x, w1.x);
+        const double qMaxX = std::max(w0.x, w1.x);
+        const double qMinY = std::min(w0.y, w1.y);
+        const double qMaxY = std::max(w0.y, w1.y);
+
         for (const auto& seg : segments) {
             const double maxR = queryRadius + static_cast<double>(seg.width) * 0.5;
-            const double minX = std::min({ seg.p0.x, seg.p1.x, w0.x, w1.x }) - maxR;
-            const double maxX = std::max({ seg.p0.x, seg.p1.x, w0.x, w1.x }) + maxR;
-            const double minY = std::min({ seg.p0.y, seg.p1.y, w0.y, w1.y }) - maxR;
-            const double maxY = std::max({ seg.p0.y, seg.p1.y, w0.y, w1.y }) + maxR;
+            const double segMinX = std::min(seg.p0.x, seg.p1.x) - maxR;
+            const double segMaxX = std::max(seg.p0.x, seg.p1.x) + maxR;
+            const double segMinY = std::min(seg.p0.y, seg.p1.y) - maxR;
+            const double segMaxY = std::max(seg.p0.y, seg.p1.y) + maxR;
 
-            if (minX > maxX || minY > maxY) continue;
+            if (qMinX > segMaxX || qMaxX < segMinX || qMinY > segMaxY || qMaxY < segMinY) {
+                continue;
+            }
 
             const double distSq = SegmentSegmentDistanceSq(seg.p0, seg.p1, w0, w1);
             if (distSq <= maxR * maxR) {
@@ -174,53 +181,51 @@ private:
         const double c = vx * vx + vy * vy;
         const double d = ux * wx + uy * wy;
         const double e = vx * wx + vy * wy;
-        const double D = a * c - b * b;
 
-        double sN, sD = D;
-        double tN, tD = D;
+        // Handle degenerate segment cases (points) to eliminate division-by-zero
+        if (a < 1e-9 && c < 1e-9) {
+            return wx * wx + wy * wy;
+        }
+        if (a < 1e-9) {
+            const double t = std::clamp(e / c, 0.0, 1.0);
+            const double dx = wx - t * vx;
+            const double dy = wy - t * vy;
+            return dx * dx + dy * dy;
+        }
+        if (c < 1e-9) {
+            const double s = std::clamp(-d / a, 0.0, 1.0);
+            const double dx = wx + s * ux;
+            const double dy = wy + s * uy;
+            return dx * dx + dy * dy;
+        }
+
+        const double D = a * c - b * b;
+        double s = 0.0;
+        double t = 0.0;
 
         if (D < 1e-9) {
-            sN = 0.0;
-            sD = 1.0;
-            tN = e;
-            tD = c;
+            // Parallel segments
+            s = 0.0;
+            t = std::clamp(e / c, 0.0, 1.0);
+            if (t <= 0.0) {
+                s = std::clamp(-d / a, 0.0, 1.0);
+            } else if (t >= 1.0) {
+                s = std::clamp((-d + b) / a, 0.0, 1.0);
+            }
         } else {
-            sN = (b * e - c * d);
-            tN = (a * e - b * d);
-            if (sN < 0.0) {
-                sN = 0.0;
-                tN = e;
-                tD = c;
-            } else if (sN > sD) {
-                sN = sD;
-                tN = e + b;
-                tD = c;
+            s = std::clamp((b * e - c * d) / D, 0.0, 1.0);
+            t = (b * s + e) / c;
+            if (t < 0.0) {
+                t = 0.0;
+                s = std::clamp(-d / a, 0.0, 1.0);
+            } else if (t > 1.0) {
+                t = 1.0;
+                s = std::clamp((-d + b) / a, 0.0, 1.0);
             }
         }
 
-        if (tN < 0.0) {
-            tN = 0.0;
-            if (-d < 0.0) sN = 0.0;
-            else if (-d > a) sN = sD;
-            else {
-                sN = -d;
-                sD = a;
-            }
-        } else if (tN > tD) {
-            tN = tD;
-            if ((-d + b) < 0.0) sN = 0.0;
-            else if ((-d + b) > a) sN = sD;
-            else {
-                sN = (-d + b);
-                sD = a;
-            }
-        }
-
-        const double sc = (std::abs(sN) < 1e-9 ? 0.0 : sN / sD);
-        const double tc = (std::abs(tN) < 1e-9 ? 0.0 : tN / tD);
-
-        const double dpx = wx + (sc * ux) - (tc * vx);
-        const double dpy = wy + (sc * uy) - (tc * vy);
+        const double dpx = wx + (s * ux) - (t * vx);
+        const double dpy = wy + (s * uy) - (t * vy);
         return dpx * dpx + dpy * dpy;
     }
 };
@@ -301,11 +306,13 @@ public:
 
             if (!p0In && !p1In) {
                 // Both endpoints outside eraser
-                if (hasIntersection && t1 > 0.001 && t2 < 0.999 && t1 < t2) {
+                double tIn = hasIntersection ? std::max(0.0, t1) : 0.0;
+                double tOut = hasIntersection ? std::min(1.0, t2) : 0.0;
+                if (hasIntersection && tOut > tIn + 1e-5) {
                     // Segment punches entirely through the eraser: splits into 2 pieces!
                     modified = true;
-                    Point2D cutIn  = LerpPoint(seg.p0, seg.p1, t1);
-                    Point2D cutOut = LerpPoint(seg.p0, seg.p1, t2);
+                    Point2D cutIn  = LerpPoint(seg.p0, seg.p1, tIn);
+                    Point2D cutOut = LerpPoint(seg.p0, seg.p1, tOut);
 
                     // First part terminates current sub-stroke
                     PushSegmentIfNonDegenerate(seg.p0, cutIn, seg.width);
@@ -320,7 +327,7 @@ public:
             } else if (!p0In && p1In) {
                 // Enters eraser: cut at t1 and finish current sub-stroke
                 modified = true;
-                double tCut = (hasIntersection && t1 >= 0.0 && t1 <= 1.0) ? t1 : 0.5;
+                double tCut = hasIntersection ? std::clamp(t1, 0.0, 1.0) : 0.5;
                 Point2D cutPt = LerpPoint(seg.p0, seg.p1, tCut);
 
                 PushSegmentIfNonDegenerate(seg.p0, cutPt, seg.width);
@@ -328,7 +335,7 @@ public:
             } else if (p0In && !p1In) {
                 // Exits eraser: cut at t2 and start new sub-stroke
                 modified = true;
-                double tCut = (hasIntersection && t2 >= 0.0 && t2 <= 1.0) ? t2 : 0.5;
+                double tCut = hasIntersection ? std::clamp(t2, 0.0, 1.0) : 0.5;
                 Point2D cutPt = LerpPoint(seg.p0, seg.p1, tCut);
 
                 PushSegmentIfNonDegenerate(cutPt, seg.p1, seg.width);

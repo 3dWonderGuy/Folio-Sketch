@@ -78,16 +78,22 @@ private:
         if (!config.enablePressureCurve) {
             return 1.0f;
         }
-        if (rawPressure <= config.pressureDeadzoneMin) {
+        if (std::isnan(rawPressure) || rawPressure <= config.pressureDeadzoneMin) {
             return config.minRelativeThicknessFraction;
         }
         if (rawPressure >= config.pressureSaturationMax) {
             return 1.0f;
         }
 
-        float norm = (rawPressure - config.pressureDeadzoneMin) /
-                     (config.pressureSaturationMax - config.pressureDeadzoneMin);
-        float curved = (config.pressureGamma == 1.0f) ? norm : std::pow(norm, config.pressureGamma);
+        float denom = config.pressureSaturationMax - config.pressureDeadzoneMin;
+        if (denom <= 1e-6f) {
+            return 1.0f;
+        }
+
+        float norm = std::clamp((rawPressure - config.pressureDeadzoneMin) / denom, 0.0f, 1.0f);
+        float curved = (config.pressureGamma <= 0.0f || config.pressureGamma == 1.0f)
+                           ? norm
+                           : std::pow(norm, config.pressureGamma);
         return config.minRelativeThicknessFraction +
                (1.0f - config.minRelativeThicknessFraction) *
                    std::clamp(curved, 0.0f, 1.0f);

@@ -56,8 +56,55 @@ InkEngine::InkEngine() {
 
 InkEngine::~InkEngine() = default;
 
-InkEngine::InkEngine(InkEngine&&) noexcept = default;
-InkEngine& InkEngine::operator=(InkEngine&&) noexcept = default;
+InkEngine::InkEngine(InkEngine&& other) noexcept
+    : m_isStrokeActive(other.m_isStrokeActive),
+      m_activeStyle(other.m_activeStyle),
+      m_config(other.m_config),
+      m_evalConfig(other.m_evalConfig),
+      m_zoomScale(other.m_zoomScale),
+      m_smoothedWidth(other.m_smoothedWidth),
+      m_activeStrokePoints(std::move(other.m_activeStrokePoints)),
+      m_liveModeledPoints(std::move(other.m_liveModeledPoints)),
+      m_googleResultsBuffer(std::move(other.m_googleResultsBuffer)),
+      m_googlePredictionsBuffer(std::move(other.m_googlePredictionsBuffer)),
+      m_predictedPointsBuffer(std::move(other.m_predictedPointsBuffer)),
+      m_liveStrokeOutline(std::move(other.m_liveStrokeOutline)),
+      m_predictedStrokeOutline(std::move(other.m_predictedStrokeOutline)),
+      m_outlineDirty(other.m_outlineDirty),
+      m_predictionDirty(other.m_predictionDirty),
+      m_googleModeler(std::move(other.m_googleModeler)) {
+    other.m_isStrokeActive = false;
+    other.m_outlineDirty = false;
+    other.m_predictionDirty = false;
+    other.m_smoothedWidth = -1.0f;
+}
+
+InkEngine& InkEngine::operator=(InkEngine&& other) noexcept {
+    if (this != &other) {
+        m_isStrokeActive = other.m_isStrokeActive;
+        m_activeStyle = other.m_activeStyle;
+        m_config = other.m_config;
+        m_evalConfig = other.m_evalConfig;
+        m_zoomScale = other.m_zoomScale;
+        m_smoothedWidth = other.m_smoothedWidth;
+        m_activeStrokePoints = std::move(other.m_activeStrokePoints);
+        m_liveModeledPoints = std::move(other.m_liveModeledPoints);
+        m_googleResultsBuffer = std::move(other.m_googleResultsBuffer);
+        m_googlePredictionsBuffer = std::move(other.m_googlePredictionsBuffer);
+        m_predictedPointsBuffer = std::move(other.m_predictedPointsBuffer);
+        m_liveStrokeOutline = std::move(other.m_liveStrokeOutline);
+        m_predictedStrokeOutline = std::move(other.m_predictedStrokeOutline);
+        m_outlineDirty = other.m_outlineDirty;
+        m_predictionDirty = other.m_predictionDirty;
+        m_googleModeler = std::move(other.m_googleModeler);
+
+        other.m_isStrokeActive = false;
+        other.m_outlineDirty = false;
+        other.m_predictionDirty = false;
+        other.m_smoothedWidth = -1.0f;
+    }
+    return *this;
+}
 
 // -----------------------------------------------------------------------------
 // 1. INKING LIFECYCLE
@@ -67,6 +114,11 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
                             const StrokeStyle& style, float zoomScale, float tiltX, float tiltY) {
     // Reset transient stroke accumulation buffers
     CancelStroke();
+
+    if (!m_googleModeler) {
+        m_googleModeler = std::make_unique<sm::StrokeModeler>();
+        UpdatePhysicsParams();
+    }
 
     m_isStrokeActive = true;
     m_activeStyle = style;
@@ -113,7 +165,7 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
 void InkEngine::AppendPoint(double worldX, double worldY, float pressure, double timeSec,
                             float tiltX, float tiltY) {
     // small check if the stroke is still even active
-    if (!m_isStrokeActive) return;
+    if (!m_isStrokeActive || !m_googleModeler) return;
 
     // pen position tracker
     StylusInputPoint pt(worldX, worldY, pressure, timeSec, 0.0f, tiltX, tiltY);
@@ -134,6 +186,11 @@ FinishedStrokeData InkEngine::FinishStroke() {
     
     // safety check if stroke was active
     if (!m_isStrokeActive) return {};
+
+    if (!m_googleModeler) {
+        m_googleModeler = std::make_unique<sm::StrokeModeler>();
+        UpdatePhysicsParams();
+    }
 
     // safety check if there is data in the stroke
     if (!m_activeStrokePoints.empty()) {
@@ -160,12 +217,15 @@ FinishedStrokeData InkEngine::FinishStroke() {
             float tapPressure = (pt.pressure >= 0.0f) ? pt.pressure : 0.65f;
             float dynamicWidth = 0.0f;
             if (m_activeStyle.pattern == StrokePattern::TexturedPencil) {
-                float tipWidth = m_activeStyle.baseWidth * (0.90f + 0.12f * std::clamp(tapPressure, 0.0f, 1.0f));
+                float tipWidth = m_evalConfig.usePressure
+                                     ? (m_activeStyle.baseWidth * (0.90f + 0.12f * std::clamp(tapPressure, 0.0f, 1.0f)))
+                                     : m_activeStyle.baseWidth;
                 dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidth(
                     tipWidth, -1.0f, 0.0f, pt.tiltX, pt.tiltY, -1.0f, m_zoomScale, m_evalConfig);
             } else {
+                float pForEval = m_evalConfig.usePressure ? tapPressure : -1.0f;
                 dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidth(
-                    m_activeStyle.baseWidth, pt, -1.0f, m_zoomScale, m_evalConfig);
+                    m_activeStyle.baseWidth, pForEval, 0.0f, pt.tiltX, pt.tiltY, -1.0f, m_zoomScale, m_evalConfig);
             }
             m_liveModeledPoints.push_back(StrokePoint(pt.x, pt.y, dynamicWidth * 0.5f, tapPressure, pt.tiltX, pt.tiltY));
         } else if (strokeLen < 1e-4) {

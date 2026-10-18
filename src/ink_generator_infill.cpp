@@ -12,8 +12,14 @@ BLPath InkGenerator::BuildInfill(const std::vector<Point2D>& vertices) {
     BLPath path;
     if (vertices.size() < 3) return path;
 
+    size_t count = vertices.size();
+    if (count > 3 && std::hypot(vertices.back().x - vertices.front().x,
+                                vertices.back().y - vertices.front().y) < 1e-5) {
+        --count;
+    }
+
     path.move_to(vertices[0].x, vertices[0].y);
-    for (size_t i = 1; i < vertices.size(); ++i) {
+    for (size_t i = 1; i < count; ++i) {
         path.line_to(vertices[i].x, vertices[i].y);
     }
     path.close();
@@ -24,8 +30,14 @@ BLPath InkGenerator::BuildInfill(const std::vector<StrokePoint>& vertices) {
     BLPath path;
     if (vertices.size() < 3) return path;
 
+    size_t count = vertices.size();
+    if (count > 3 && std::hypot(vertices.back().x - vertices.front().x,
+                                vertices.back().y - vertices.front().y) < 1e-5) {
+        --count;
+    }
+
     path.move_to(vertices[0].x, vertices[0].y);
-    for (size_t i = 1; i < vertices.size(); ++i) {
+    for (size_t i = 1; i < count; ++i) {
         path.line_to(vertices[i].x, vertices[i].y);
     }
     path.close();
@@ -39,7 +51,10 @@ BLPath InkGenerator::BuildInfill(const std::vector<StrokePoint>& vertices) {
 void InkGenerator::FillInfill(BLContext& ctx, const BLPath& region, const InfillStyle& style) {
     if (style.type == InfillType::None || region.is_empty()) return;
 
-    const BLBox& b = style.bounds;
+    BLBox b = style.bounds;
+    if (b.x1 <= b.x0 || b.y1 <= b.y0) {
+        region.get_bounding_box(&b);
+    }
     const double w = b.x1 - b.x0;
     const double h = b.y1 - b.y0;
 

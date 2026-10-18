@@ -113,6 +113,7 @@ set(FOLIO_SKETCH_SOURCES
 )
 
 set(FOLIO_SKETCH_HEADERS
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/folio_sketch.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_engine.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_config.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_stroke_data.hpp"

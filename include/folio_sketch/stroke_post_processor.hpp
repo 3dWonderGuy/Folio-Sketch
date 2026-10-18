@@ -58,11 +58,21 @@ public:
     [[nodiscard]] static StrokeAnalysisResult Analyze(const FinishedStrokeData& stroke) noexcept {
         StrokeAnalysisResult result;
 
-        // Stub: to be implemented (distance metrics, loop detection, self-intersection testing)
         if (stroke.modeledPoints.size() >= 2) {
             const auto& first = stroke.modeledPoints.front();
             const auto& last  = stroke.modeledPoints.back();
             result.endpointDistanceMm = std::hypot(last.x - first.x, last.y - first.y);
+
+            for (size_t i = 1; i < stroke.modeledPoints.size(); ++i) {
+                result.totalArcLengthMm += std::hypot(
+                    stroke.modeledPoints[i].x - stroke.modeledPoints[i - 1].x,
+                    stroke.modeledPoints[i].y - stroke.modeledPoints[i - 1].y);
+            }
+
+            result.isClosed = DetectClosedLoop(stroke.modeledPoints);
+            if (result.isClosed) {
+                result.topology = StrokeTopology::ClosedLoop;
+            }
         }
 
         return result;
@@ -189,7 +199,13 @@ public:
         const auto& first = points.front();
         const auto& last  = points.back();
         double dist = std::hypot(last.x - first.x, last.y - first.y);
-        return dist <= maxClosureRadiusMm;
+        if (dist > maxClosureRadiusMm) return false;
+
+        double arcLen = 0.0;
+        for (size_t i = 1; i < points.size(); ++i) {
+            arcLen += std::hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+        }
+        return arcLen >= std::max(6.0, static_cast<double>(maxClosureRadiusMm) * 3.0);
     }
 
     /**
