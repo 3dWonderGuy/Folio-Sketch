@@ -32,6 +32,30 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         return TraceCap(cleanPts.empty() ? pts[0] : cleanPts[0], capType);
     }
 
+    // 1b. Regularize radius rate-of-change: |dr/ds| <= maxSlope
+    // Prevents self-intersecting retrograde polygon spikes when pressure changes rapidly over short distances
+    if (cleanPts.size() >= 2) {
+        constexpr double maxSlope = 0.85;
+        // Forward pass
+        for (size_t i = 1; i < cleanPts.size(); ++i) {
+            double d = std::hypot(cleanPts[i].x - cleanPts[i - 1].x,
+                                  cleanPts[i].y - cleanPts[i - 1].y);
+            double maxR = cleanPts[i - 1].r + d * maxSlope;
+            if (cleanPts[i].r > maxR) {
+                cleanPts[i].r = static_cast<float>(maxR);
+            }
+        }
+        // Backward pass
+        for (size_t i = cleanPts.size() - 1; i > 0; --i) {
+            double d = std::hypot(cleanPts[i - 1].x - cleanPts[i].x,
+                                  cleanPts[i - 1].y - cleanPts[i].y);
+            double maxR = cleanPts[i].r + d * maxSlope;
+            if (cleanPts[i - 1].r > maxR) {
+                cleanPts[i - 1].r = static_cast<float>(maxR);
+            }
+        }
+    }
+
     if (isClosedPolygon && cleanPts.size() >= 3) {
         if (std::hypot(cleanPts.back().x - cleanPts.front().x,
                        cleanPts.back().y - cleanPts.front().y) >= 1e-4) {

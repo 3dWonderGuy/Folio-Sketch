@@ -263,7 +263,23 @@ void TestStrokePressureTransitions() {
 
     // Diagnostic test for elbow corner turn under pressure
     {
-        // Test 1: Sharp 90-degree corner under heavy pressure
+        // Test 1: Violent rapid pressure jumps over short distances (rapid pressure spikes)
+        std::vector<StrokePoint> rapidSpikes;
+        double sx = 50.0, sy = 100.0;
+        for (int i = 0; i < 50; ++i) {
+            sx += 0.5; // very short 0.5mm steps
+            // Violent pressure oscillation between 1mm and 15mm radius
+            float r = (i % 6 < 3) ? 1.0f : 12.0f;
+            rapidSpikes.push_back(StrokePoint(sx, sy + std::sin(i * 0.2) * 5.0, r));
+        }
+
+        BLPath pSpikes = InkGenerator::GenerateStroke(rapidSpikes, CapType::Round, StrokePattern::Solid);
+        assert(!pSpikes.is_empty());
+        BLBox boxSpikes;
+        assert(pSpikes.get_bounding_box(&boxSpikes) == BL_SUCCESS);
+        assert(boxSpikes.x0 < 50.0 && boxSpikes.x1 > 70.0);
+
+        // Test 2: Sharp 90-degree corner under heavy pressure
         std::vector<StrokePoint> sharp90;
         for (double x = 50.0; x <= 150.0; x += 2.0) {
             sharp90.push_back(StrokePoint(x, 100.0, 3.0f));
