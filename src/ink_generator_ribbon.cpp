@@ -341,6 +341,83 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capTy
     InkGenerator::TraceCap(path, cleanPts.front(), leftPts[0], rightPts[0], capType, /*isTail=*/false);
 
     path.close();
+
+    // Visual Stroke Geometry Debugger: detect folds and self-intersections
+    if (InkGenerator::IsDebugCaptureEnabled()) {
+        auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
+        dbg.leftRail = leftPts;
+        dbg.rightRail = rightPts;
+
+        // 1. Check for retrograde folds against local segment tangents
+        if (cleanPts.size() >= 2) {
+            for (size_t i = 1; i < leftPts.size(); ++i) {
+                size_t segIdx = (i < cleanPts.size()) ? (i - 1) : (cleanPts.size() - 2);
+                double tx = cleanPts[segIdx + 1].x - cleanPts[segIdx].x;
+                double ty = cleanPts[segIdx + 1].y - cleanPts[segIdx].y;
+                double tLen = std::hypot(tx, ty);
+                if (tLen > 1e-6) {
+                    tx /= tLen;
+                    ty /= tLen;
+                    double dx = leftPts[i].x - leftPts[i - 1].x;
+                    double dy = leftPts[i].y - leftPts[i - 1].y;
+                    if (dx * tx + dy * ty < -1e-4) {
+                        dbg.retrogradeIndices.push_back(i);
+                    }
+                }
+            }
+            for (size_t i = 1; i < rightPts.size(); ++i) {
+                size_t segIdx = (i < cleanPts.size()) ? (i - 1) : (cleanPts.size() - 2);
+                double tx = cleanPts[segIdx + 1].x - cleanPts[segIdx].x;
+                double ty = cleanPts[segIdx + 1].y - cleanPts[segIdx].y;
+                double tLen = std::hypot(tx, ty);
+                if (tLen > 1e-6) {
+                    tx /= tLen;
+                    ty /= tLen;
+                    double dx = rightPts[i].x - rightPts[i - 1].x;
+                    double dy = rightPts[i].y - rightPts[i - 1].y;
+                    if (dx * tx + dy * ty < -1e-4) {
+                        dbg.retrogradeIndices.push_back(i);
+                    }
+                }
+            }
+        }
+
+        // 2. O(N^2) Segment-segment self-intersection test on polygon perimeter
+        std::vector<Point2D> poly;
+        poly.reserve(leftPts.size() + rightPts.size());
+        for (const auto& p : leftPts) poly.push_back(p);
+        for (size_t i = rightPts.size(); i > 0; --i) poly.push_back(rightPts[i - 1]);
+
+        const size_t polySize = poly.size();
+        if (polySize >= 4) {
+            for (size_t i = 0; i < polySize; ++i) {
+                const Point2D& p0 = poly[i];
+                const Point2D& p1 = poly[(i + 1) % polySize];
+                double rx = p1.x - p0.x, ry = p1.y - p0.y;
+
+                for (size_t j = i + 2; j < polySize; ++j) {
+                    if (i == 0 && j == polySize - 1) continue; // adjacent in ring
+                    const Point2D& q0 = poly[j];
+                    const Point2D& q1 = poly[(j + 1) % polySize];
+                    double sx = q1.x - q0.x, sy = q1.y - q0.y;
+
+                    double crossRS = rx * sy - ry * sx;
+                    if (std::abs(crossRS) < 1e-8) continue;
+
+                    double qpx = q0.x - p0.x;
+                    double qpy = q0.y - p0.y;
+
+                    double t = (qpx * sy - qpy * sx) / crossRS;
+                    double u = (qpx * ry - qpy * rx) / crossRS;
+
+                    if (t >= 0.001 && t <= 0.999 && u >= 0.001 && u <= 0.999) {
+                        dbg.selfIntersections.push_back({ p0.x + t * rx, p0.y + t * ry });
+                    }
+                }
+            }
+        }
+    }
+
     return path;
 }
 
@@ -351,9 +428,29 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capTy
 // =============================================================================
 
 BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapType capType, bool isClosedPolygon) {
+    bool isDbg = InkGenerator::IsDebugCaptureEnabled();
+    if (isDbg) {
+        auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
+        dbg.rawInputPts = pts;
+        dbg.cleanPts.clear();
+        dbg.leftRail.clear();
+        dbg.rightRail.clear();
+        dbg.selfIntersections.clear();
+        dbg.retrogradeIndices.clear();
+        dbg.generatedPath.clear();
+    }
+
     BLPath path;
     if (pts.empty()) return path;
-    if (pts.size() == 1) return TraceCap(pts[0], capType);
+    if (pts.size() == 1) {
+        BLPath single = TraceCap(pts[0], capType);
+        if (isDbg) {
+            auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
+            dbg.cleanPts = pts;
+            dbg.generatedPath = single;
+        }
+        return single;
+    }
 
     // 1. Disk-Containment & Radius-Proportional Pre-Filter
     std::vector<StrokePoint> cleanPts;
@@ -447,7 +544,17 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
                 cleanPts.push_back(cleanPts.front());
             }
         }
-        return BuildSingleRibbon(cleanPts, capType, true);
+        BLPath closedPath = BuildSingleRibbon(cleanPts, capType, true);
+        if (isDbg) {
+            auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
+            dbg.cleanPts = cleanPts;
+            dbg.generatedPath = closedPath;
+        }
+        return closedPath;
+    }
+
+    if (isDbg) {
+        Folio::InkInternal::GetMutableDebugInfo().cleanPts = cleanPts;
     }
 
     // -------------------------------------------------------------------------
@@ -475,7 +582,11 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
     }
 
     if (splitIndices.empty()) {
-        return BuildSingleRibbon(cleanPts, capType, false);
+        BLPath singlePath = BuildSingleRibbon(cleanPts, capType, false);
+        if (isDbg) {
+            Folio::InkInternal::GetMutableDebugInfo().generatedPath = singlePath;
+        }
+        return singlePath;
     }
 
     BLPath combinedPath;
@@ -497,6 +608,10 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         if (!subRibbon.is_empty()) {
             combinedPath.add_path(subRibbon);
         }
+    }
+
+    if (isDbg) {
+        Folio::InkInternal::GetMutableDebugInfo().generatedPath = combinedPath;
     }
 
     return combinedPath;

@@ -703,6 +703,59 @@ void TestPatternAndInfillEdgeCases() {
     std::cout << "  -> Pattern and infill edge case tests passed successfully." << std::endl;
 }
 
+void TestInkMeshBuilderAndDebugger() {
+    std::cout << "[Test 7/7] Running InkMeshBuilder & Visual Debugger Verification..." << std::endl;
+
+    std::vector<StrokePoint> testPts = {
+        { 10.0, 10.0, 1.0f, 0.5f, 0.0f, 0.0f },
+        { 20.0, 15.0, 2.5f, 0.8f, 0.0f, 0.0f },
+        { 30.0, 40.0, 1.5f, 0.6f, 0.0f, 0.0f },
+        { 50.0, 42.0, 3.0f, 1.0f, 0.0f, 0.0f }
+    };
+
+    // 1. InkMeshBuilder test
+    Folio::InkMesh mesh;
+    Folio::InkMeshBuilder::BuildSolidMesh(testPts, CapType::Round, 0xFFFF0000, mesh);
+    assert(!mesh.empty());
+    assert(!mesh.vertices.empty());
+    assert(!mesh.indices.empty());
+    assert(mesh.indices.size() % 3 == 0); // valid triangle indices
+
+    // Single point cap mesh test
+    Folio::InkMesh singleMesh;
+    Folio::InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint>(testPts.data(), 1), CapType::Round, 0xFF00FF00, singleMesh);
+    assert(!singleMesh.empty());
+
+    // 2. Debug capture test
+    InkGenerator::SetDebugCapture(true);
+    assert(InkGenerator::IsDebugCaptureEnabled());
+
+    BLPath dbgPath = InkGenerator::GenerateStroke(testPts, CapType::Round, StrokePattern::Solid);
+    assert(!dbgPath.is_empty());
+
+    const auto& dbgInfo = InkGenerator::GetLastDebugInfo();
+    assert(!dbgInfo.rawInputPts.empty());
+    assert(!dbgInfo.cleanPts.empty());
+    assert(!dbgInfo.leftRail.empty());
+    assert(!dbgInfo.rightRail.empty());
+
+    // 3. RenderDebugOverlay test
+    BLImage img(300, 200, BL_FORMAT_PRGB32);
+    BLContext ctx(img);
+    ctx.clear_all();
+    InkGenerator::RenderDebugOverlay(ctx, dbgInfo, 1.0, &dbgPath);
+    ctx.end();
+
+    // 4. Dump test
+    InkGenerator::DumpStrokeToFile("test_debug_dump.txt");
+    std::remove("test_debug_dump.txt");
+
+    InkGenerator::SetDebugCapture(false);
+    assert(!InkGenerator::IsDebugCaptureEnabled());
+
+    std::cout << "  -> InkMeshBuilder & Visual Debugger tests passed successfully." << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Starting Folio-Sketch Test Suite" << std::endl;
@@ -714,6 +767,7 @@ int main() {
     TestWidthEvaluatorAndPostProcessor();
     TestInkEngineLifecycle();
     TestPatternAndInfillEdgeCases();
+    TestInkMeshBuilderAndDebugger();
 
     std::cout << "========================================" << std::endl;
     std::cout << "All Folio-Sketch Tests Passed!" << std::endl;

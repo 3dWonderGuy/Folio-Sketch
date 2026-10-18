@@ -53,5 +53,10 @@ void TracePolygonCap(BLPath& path,
  */
 StrokePoint ResolveEnvelopePoint(const StrokePoint& pt, StrokePattern pattern) noexcept;
 
+/**
+ * @brief Accesses mutable debug info singleton for internal ribbon instrumentation.
+ */
+StrokeDebugInfo& GetMutableDebugInfo() noexcept;
+
 } // namespace InkInternal
 } // namespace Folio

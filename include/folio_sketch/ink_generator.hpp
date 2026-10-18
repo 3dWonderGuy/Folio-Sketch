@@ -28,10 +28,41 @@
 #include <vector>
 #include <blend2d/blend2d.h>
 
+#include <string>
 #include "folio_sketch/ink_stroke_data.hpp"
+
+/**
+ * @struct StrokeDebugInfo
+ * @brief Detailed geometric diagnostic data captured during stroke tessellation.
+ */
+struct StrokeDebugInfo {
+    std::vector<StrokePoint> rawInputPts;        ///< Points passed into BuildSolidRibbon
+    std::vector<StrokePoint> cleanPts;           ///< Points after pre-filtering and slope clamping
+    std::vector<Point2D>     leftRail;           ///< Left boundary vertices generated for the ribbon
+    std::vector<Point2D>     rightRail;          ///< Right boundary vertices generated for the ribbon
+    std::vector<Point2D>     selfIntersections;  ///< Exact world coordinates where non-adjacent edges intersect
+    std::vector<size_t>      retrogradeIndices;  ///< Indices where boundary stepped backward against tangent
+    BLPath                   generatedPath;      ///< Resulting BLPath outline
+};
 
 class InkGenerator {
 public:
+    // =========================================================================
+    // VISUAL STROKE GEOMETRY DEBUGGER & REPRODUCER DUMPER
+    // =========================================================================
+
+    static void SetDebugCapture(bool enabled) noexcept;
+    static bool IsDebugCaptureEnabled() noexcept;
+    static const StrokeDebugInfo& GetLastDebugInfo() noexcept;
+
+    static void RenderDebugOverlay(BLContext& ctx,
+                                   const StrokeDebugInfo& info,
+                                   double zoomScale,
+                                   const BLPath* outlinePath = nullptr);
+
+    static void DumpLastStrokeToConsole();
+    static void DumpStrokeToFile(const std::string& filepath = "debug_stroke_dump.txt");
+
     /**
      * @brief Builds a 2D closed ribbon polygon or patterned outline (solid, dashed, dotted) from an ordered list of points.
      *

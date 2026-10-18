@@ -110,6 +110,8 @@ set(FOLIO_SKETCH_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_caps.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_patterns.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_infill.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_debug.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_mesh_builder.cpp"
 )
 
 set(FOLIO_SKETCH_HEADERS
@@ -117,6 +119,7 @@ set(FOLIO_SKETCH_HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_engine.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_config.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_stroke_data.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_mesh.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_collision.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_width_evaluator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_post_processor.hpp"
