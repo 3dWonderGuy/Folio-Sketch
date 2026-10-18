@@ -416,6 +416,7 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capTy
                 }
             }
         }
+        dbg.hasDefects = !dbg.selfIntersections.empty() || !dbg.retrogradeIndices.empty();
     }
 
     return path;

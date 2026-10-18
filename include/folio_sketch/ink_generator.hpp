@@ -42,6 +42,7 @@ struct StrokeDebugInfo {
     std::vector<Point2D>     rightRail;          ///< Right boundary vertices generated for the ribbon
     std::vector<Point2D>     selfIntersections;  ///< Exact world coordinates where non-adjacent edges intersect
     std::vector<size_t>      retrogradeIndices;  ///< Indices where boundary stepped backward against tangent
+    bool                     hasDefects = false; ///< True if selfIntersections or retrogradeIndices is non-empty
     BLPath                   generatedPath;      ///< Resulting BLPath outline
 };
 
@@ -54,6 +55,7 @@ public:
     static void SetDebugCapture(bool enabled) noexcept;
     static bool IsDebugCaptureEnabled() noexcept;
     static const StrokeDebugInfo& GetLastDebugInfo() noexcept;
+    static void ClearDebugInfo() noexcept;
 
     static void RenderDebugOverlay(BLContext& ctx,
                                    const StrokeDebugInfo& info,
@@ -61,7 +63,8 @@ public:
                                    const BLPath* outlinePath = nullptr);
 
     static void DumpLastStrokeToConsole();
-    static void DumpStrokeToFile(const std::string& filepath = "debug_stroke_dump.txt");
+    static void DumpStrokeToFile(const std::string& filepath = "debug_stroke_dump.txt",
+                                 const StrokeDebugInfo* info = nullptr);
 
     /**
      * @brief Builds a 2D closed ribbon polygon or patterned outline (solid, dashed, dotted) from an ordered list of points.

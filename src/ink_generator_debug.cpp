@@ -160,13 +160,24 @@ static void FormatStrokeDump(std::ostream& os, const StrokeDebugInfo& info) {
     os << "};\n";
 }
 
+void InkGenerator::ClearDebugInfo() noexcept {
+    s_lastDebugInfo.rawInputPts.clear();
+    s_lastDebugInfo.cleanPts.clear();
+    s_lastDebugInfo.leftRail.clear();
+    s_lastDebugInfo.rightRail.clear();
+    s_lastDebugInfo.selfIntersections.clear();
+    s_lastDebugInfo.retrogradeIndices.clear();
+    s_lastDebugInfo.hasDefects = false;
+    s_lastDebugInfo.generatedPath.clear();
+}
+
 void InkGenerator::DumpLastStrokeToConsole() {
     FormatStrokeDump(std::cout, s_lastDebugInfo);
 }
 
-void InkGenerator::DumpStrokeToFile(const std::string& filepath) {
+void InkGenerator::DumpStrokeToFile(const std::string& filepath, const StrokeDebugInfo* info) {
     std::ofstream ofs(filepath, std::ios::app);
     if (ofs.is_open()) {
-        FormatStrokeDump(ofs, s_lastDebugInfo);
+        FormatStrokeDump(ofs, info ? *info : s_lastDebugInfo);
     }
 }
