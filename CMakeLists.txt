@@ -80,7 +80,9 @@ if(NOT TARGET InkStrokeModeler::stroke_modeler)
         endif()
     endif()
 else()
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ink-stroke-modeler")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../ink-stroke-modeler")
+        set(INK_STROKE_MODELER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ink-stroke-modeler")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ink-stroke-modeler")
         set(INK_STROKE_MODELER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ink-stroke-modeler")
     elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/ink-stroke-modeler")
         set(INK_STROKE_MODELER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/ink-stroke-modeler")
@@ -126,7 +128,6 @@ target_include_directories(FolioSketch
         $<BUILD_INTERFACE:${INK_STROKE_MODELER_DIR}>
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
-        "${INK_STROKE_MODELER_DIR}"
 )
 
 target_link_libraries(FolioSketch
