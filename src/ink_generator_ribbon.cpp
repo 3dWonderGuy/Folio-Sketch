@@ -5,63 +5,22 @@
 #include <cmath>
 #include <algorithm>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 using namespace Folio::InkInternal;
 
+namespace {
+
 // =============================================================================
-// CONTINUOUS SOLID RIBBON TESSELLATION
+// CORE SINGLE RIBBON BUILDER (Open ribbon or closed polygon loop)
 // =============================================================================
 
-BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapType capType, bool isClosedPolygon) {
+BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capType, bool isClosedPolygon) {
     BLPath path;
-    if (pts.empty()) return path;
-    if (pts.size() == 1) return TraceCap(pts[0], capType);
-
-    // 1. Pre-filter: collapse consecutive duplicate/stationary points (< 1e-4 mm)
-    std::vector<StrokePoint> cleanPts;
-    cleanPts.reserve(pts.size());
-    for (const auto& p : pts) {
-        if (cleanPts.empty() || std::hypot(p.x - cleanPts.back().x, p.y - cleanPts.back().y) >= 1e-4) {
-            cleanPts.push_back(p);
-        } else {
-            cleanPts.back().r = std::max(cleanPts.back().r, p.r);
-            cleanPts.back().pressure = std::max(cleanPts.back().pressure, p.pressure);
-        }
-    }
-
-    if (cleanPts.size() <= 1) {
-        return TraceCap(cleanPts.empty() ? pts[0] : cleanPts[0], capType);
-    }
-
-    // 1b. Regularize radius rate-of-change: |dr/ds| <= maxSlope
-    // Prevents self-intersecting retrograde polygon spikes when pressure changes rapidly over short distances
-    if (cleanPts.size() >= 2) {
-        constexpr double maxSlope = 0.85;
-        // Forward pass
-        for (size_t i = 1; i < cleanPts.size(); ++i) {
-            double d = std::hypot(cleanPts[i].x - cleanPts[i - 1].x,
-                                  cleanPts[i].y - cleanPts[i - 1].y);
-            double maxR = cleanPts[i - 1].r + d * maxSlope;
-            if (cleanPts[i].r > maxR) {
-                cleanPts[i].r = static_cast<float>(maxR);
-            }
-        }
-        // Backward pass
-        for (size_t i = cleanPts.size() - 1; i > 0; --i) {
-            double d = std::hypot(cleanPts[i - 1].x - cleanPts[i].x,
-                                  cleanPts[i - 1].y - cleanPts[i].y);
-            double maxR = cleanPts[i].r + d * maxSlope;
-            if (cleanPts[i - 1].r > maxR) {
-                cleanPts[i - 1].r = static_cast<float>(maxR);
-            }
-        }
-    }
-
-    if (isClosedPolygon && cleanPts.size() >= 3) {
-        if (std::hypot(cleanPts.back().x - cleanPts.front().x,
-                       cleanPts.back().y - cleanPts.front().y) >= 1e-4) {
-            cleanPts.push_back(cleanPts.front());
-        }
-    }
+    if (cleanPts.empty()) return path;
+    if (cleanPts.size() == 1) return InkGenerator::TraceCap(cleanPts[0], capType);
 
     const size_t N = cleanPts.size();
     bool isClosed = isClosedPolygon && (N >= 4) &&
@@ -69,7 +28,7 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
                                 cleanPts.back().y - cleanPts.front().y) < 1e-4);
     const size_t M = isClosed ? (N - 1) : N;
 
-    // 2. Precompute segment unit tangents and normals
+    // Precompute segment unit tangents and normals
     struct SegmentInfo {
         double len = 0.0;
         double ux = 1.0;
@@ -106,10 +65,40 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
     leftPts.reserve(N * 2);
     rightPts.reserve(N * 2);
 
+    // Monotonic guard: rejects or clamps backward steps against the local stroke tangent
+    auto pushMonotonic = [](std::vector<Point2D>& sidePts, Point2D pt, double tX, double tY) {
+        if (sidePts.empty()) {
+            sidePts.push_back(pt);
+            return;
+        }
+        double dx = pt.x - sidePts.back().x;
+        double dy = pt.y - sidePts.back().y;
+        double forward = dx * tX + dy * tY;
+        if (forward < 0.0) {
+            pt.x -= forward * tX;
+            pt.y -= forward * tY;
+        }
+        if (std::hypot(pt.x - sidePts.back().x, pt.y - sidePts.back().y) >= 1e-5) {
+            sidePts.push_back(pt);
+        }
+    };
+
     // Lambda to process an interior or closed-loop corner vertex
     auto processCorner = [&](size_t i, const SegmentInfo& sIn, const SegmentInfo& sOut) {
         const auto& Pi = cleanPts[i];
         double r = std::max(0.0f, Pi.r);
+
+        // Compute local average stroke tangent for monotonic verification
+        double avgTanX = sIn.ux + sOut.ux;
+        double avgTanY = sIn.uy + sOut.uy;
+        double tanLen = std::hypot(avgTanX, avgTanY);
+        if (tanLen > 1e-6) {
+            avgTanX /= tanLen;
+            avgTanY /= tanLen;
+        } else {
+            avgTanX = sOut.ux;
+            avgTanY = sOut.uy;
+        }
 
         Point2D offL_in, offR_in, offL_out, offR_out;
         GetRibbonOffsets(capType, r, sIn.nx, sIn.ny, offL_in, offR_in);
@@ -133,8 +122,8 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
             }
             Point2D offL, offR;
             GetRibbonOffsets(capType, r, avgNx, avgNy, offL, offR);
-            leftPts.push_back({ Pi.x + offL.x, Pi.y + offL.y });
-            rightPts.push_back({ Pi.x + offR.x, Pi.y + offR.y });
+            pushMonotonic(leftPts,  { Pi.x + offL.x, Pi.y + offL.y }, avgTanX, avgTanY);
+            pushMonotonic(rightPts, { Pi.x + offR.x, Pi.y + offR.y }, avgTanX, avgTanY);
             return;
         }
 
@@ -173,13 +162,13 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
                 int idxOut = findIdx(outOff);
 
                 if (idxIn == idxOut) {
-                    outPts.push_back({ Pi.x + inOff.x, Pi.y + inOff.y });
+                    pushMonotonic(outPts, { Pi.x + inOff.x, Pi.y + inOff.y }, avgTanX, avgTanY);
                     return;
                 }
 
                 if (isInner) {
                     // Inner corner: single midpoint prevents retrograde crossing
-                    outPts.push_back({ Pi.x + (inOff.x + outOff.x) * 0.5, Pi.y + (inOff.y + outOff.y) * 0.5 });
+                    pushMonotonic(outPts, { Pi.x + (inOff.x + outOff.x) * 0.5, Pi.y + (inOff.y + outOff.y) * 0.5 }, avgTanX, avgTanY);
                     return;
                 }
 
@@ -195,12 +184,12 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
 
                     int chosenMid = (dotCW >= dotCCW) ? midCW : midCCW;
 
-                    outPts.push_back({ Pi.x + inOff.x, Pi.y + inOff.y });
-                    outPts.push_back({ Pi.x + verts[chosenMid].x, Pi.y + verts[chosenMid].y });
-                    outPts.push_back({ Pi.x + outOff.x, Pi.y + outOff.y });
+                    pushMonotonic(outPts, { Pi.x + inOff.x, Pi.y + inOff.y }, avgTanX, avgTanY);
+                    pushMonotonic(outPts, { Pi.x + verts[chosenMid].x, Pi.y + verts[chosenMid].y }, avgTanX, avgTanY);
+                    pushMonotonic(outPts, { Pi.x + outOff.x, Pi.y + outOff.y }, avgTanX, avgTanY);
                 } else {
-                    outPts.push_back({ Pi.x + inOff.x, Pi.y + inOff.y });
-                    outPts.push_back({ Pi.x + outOff.x, Pi.y + outOff.y });
+                    pushMonotonic(outPts, { Pi.x + inOff.x, Pi.y + inOff.y }, avgTanX, avgTanY);
+                    pushMonotonic(outPts, { Pi.x + outOff.x, Pi.y + outOff.y }, avgTanX, avgTanY);
                 }
             };
 
@@ -214,15 +203,15 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         const Point2D& offIn_outer  = leftIsInner ? offR_in  : offL_in;
 
         // 1. INNER CORNER:
-        // Precise monotonic bisector miter join without retrograde folding or self-intersecting loops
+        // Precise segment-clamped bisector miter join with midpoint bevel fallback
         auto emitInner = [&](std::vector<Point2D>& inPts) {
             double sumInX = offIn_inner.x + offOut_inner.x;
             double sumInY = offIn_inner.y + offOut_inner.y;
             double bInLen = std::hypot(sumInX, sumInY);
 
             if (bInLen < 1e-6) {
-                // Hairpin 180 turnaround: inner corner is the pivot point at Pi
-                inPts.push_back({ Pi.x, Pi.y });
+                // Hairpin turnaround: inner corner is the pivot point at Pi
+                pushMonotonic(inPts, { Pi.x, Pi.y }, avgTanX, avgTanY);
                 return;
             }
 
@@ -230,13 +219,24 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
             double bInY = sumInY / bInLen;
 
             double cosHalf = std::sqrt(std::max(0.0, (1.0 + dot) * 0.5));
+            double sinHalf = std::sqrt(std::max(0.0, (1.0 - dot) * 0.5));
+
+            double safeLimit = (std::min(sIn.len, sOut.len) * 0.5) / std::max(1e-4, sinHalf);
 
             double innerDist = r;
             if (cosHalf > 1e-4) {
                 innerDist = std::min(r / cosHalf, 1.4 * r);
             }
 
-            inPts.push_back({ Pi.x + bInX * innerDist, Pi.y + bInY * innerDist });
+            if (innerDist > safeLimit) {
+                // Miter overshoots segment length: fall back to midpoint bevel
+                Point2D bevelPt = { Pi.x + (offIn_inner.x + offOut_inner.x) * 0.5,
+                                    Pi.y + (offIn_inner.y + offOut_inner.y) * 0.5 };
+                pushMonotonic(inPts, bevelPt, avgTanX, avgTanY);
+            } else {
+                Point2D miterPt = { Pi.x + bInX * innerDist, Pi.y + bInY * innerDist };
+                pushMonotonic(inPts, miterPt, avgTanX, avgTanY);
+            }
         };
 
         // 2. OUTER CORNER: Smooth circular arc for sharp turns
@@ -250,7 +250,8 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
             for (int s = 0; s <= steps; ++s) {
                 double t = static_cast<double>(s) / steps;
                 double a = aStart + t * sweep;
-                outPts.push_back({ Pi.x + std::cos(a) * r, Pi.y + std::sin(a) * r });
+                Point2D arcPt = { Pi.x + std::cos(a) * r, Pi.y + std::sin(a) * r };
+                pushMonotonic(outPts, arcPt, avgTanX, avgTanY);
             }
         };
 
@@ -314,9 +315,11 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         const auto& lastSeg = segs.back();
         Point2D offL_end, offR_end;
         GetRibbonOffsets(capType, std::max(0.0f, cleanPts.back().r), lastSeg.nx, lastSeg.ny, offL_end, offR_end);
-        leftPts.push_back({ cleanPts.back().x + offL_end.x, cleanPts.back().y + offL_end.y });
-        rightPts.push_back({ cleanPts.back().x + offR_end.x, cleanPts.back().y + offR_end.y });
+        pushMonotonic(leftPts,  { cleanPts.back().x + offL_end.x, cleanPts.back().y + offL_end.y }, lastSeg.ux, lastSeg.uy);
+        pushMonotonic(rightPts, { cleanPts.back().x + offR_end.x, cleanPts.back().y + offR_end.y }, lastSeg.ux, lastSeg.uy);
     }
+
+    if (leftPts.empty() || rightPts.empty()) return path;
 
     // Extrude single continuous closed contour with head/tail endcaps
     path.move_to(leftPts[0].x, leftPts[0].y);
@@ -326,7 +329,7 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
     }
 
     // Tail Cap: leftPts.back() -> rightPts.back() around cleanPts.back()
-    TraceCap(path, cleanPts.back(), leftPts.back(), rightPts.back(), capType, /*isTail=*/true);
+    InkGenerator::TraceCap(path, cleanPts.back(), leftPts.back(), rightPts.back(), capType, /*isTail=*/true);
 
     if (rightPts.size() > 1) {
         for (size_t i = rightPts.size() - 1; i > 0; --i) {
@@ -335,8 +338,166 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
     }
 
     // Head Cap: rightPts[0] -> leftPts[0] around cleanPts.front()
-    TraceCap(path, cleanPts.front(), leftPts[0], rightPts[0], capType, /*isTail=*/false);
+    InkGenerator::TraceCap(path, cleanPts.front(), leftPts[0], rightPts[0], capType, /*isTail=*/false);
 
     path.close();
     return path;
+}
+
+} // namespace
+
+// =============================================================================
+// CONTINUOUS SOLID RIBBON TESSELLATION (Public Entry Point)
+// =============================================================================
+
+BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapType capType, bool isClosedPolygon) {
+    BLPath path;
+    if (pts.empty()) return path;
+    if (pts.size() == 1) return TraceCap(pts[0], capType);
+
+    // 1. Disk-Containment & Radius-Proportional Pre-Filter
+    std::vector<StrokePoint> cleanPts;
+    cleanPts.reserve(pts.size());
+
+    for (size_t idx = 0; idx < pts.size(); ++idx) {
+        const auto& p = pts[idx];
+        if (cleanPts.empty()) {
+            cleanPts.push_back(p);
+            continue;
+        }
+
+        auto& prev = cleanPts.back();
+        double d = std::hypot(p.x - prev.x, p.y - prev.y);
+        double maxR = std::max(static_cast<double>(p.r), static_cast<double>(prev.r));
+
+        // 1a. Disk containment: new point engulfed by previous kept point
+        if (d + p.r <= prev.r + maxR * 0.05) {
+            prev.pressure = std::max(prev.pressure, p.pressure);
+            prev.r = std::max(prev.r, p.r);
+            continue;
+        }
+
+        // 1b. Disk containment: previous kept point engulfed by new point's larger disk
+        if (d + prev.r <= p.r + maxR * 0.05) {
+            if (cleanPts.size() == 1) {
+                prev = p;
+            } else {
+                cleanPts.back() = p;
+            }
+            continue;
+        }
+
+        // 1c. Radius-proportional minimum step for interior points
+        bool isLast = (idx + 1 == pts.size());
+        double minStep = std::max(1e-3, maxR * 0.10);
+        if (!isLast && d < minStep) {
+            bool isTurn = false;
+            if (idx + 1 < pts.size() && d > 1e-6) {
+                double dxIn = p.x - prev.x, dyIn = p.y - prev.y;
+                double dxOut = pts[idx + 1].x - p.x, dyOut = pts[idx + 1].y - p.y;
+                double lenOut = std::hypot(dxOut, dyOut);
+                if (lenOut > 1e-6) {
+                    double cosTurn = (dxIn * dxOut + dyIn * dyOut) / (d * lenOut);
+                    if (cosTurn < 0.96) {
+                        isTurn = true;
+                    }
+                }
+            }
+            if (!isTurn) {
+                prev.pressure = std::max(prev.pressure, p.pressure);
+                prev.r = std::max(prev.r, p.r);
+                continue;
+            }
+        }
+
+        cleanPts.push_back(p);
+    }
+
+    if (cleanPts.size() <= 1) {
+        return TraceCap(cleanPts.empty() ? pts[0] : cleanPts[0], capType);
+    }
+
+    // 1b. Regularize radius rate-of-change: |dr/ds| <= maxSlope
+    if (cleanPts.size() >= 2) {
+        constexpr double maxSlope = 0.85;
+        // Forward pass
+        for (size_t i = 1; i < cleanPts.size(); ++i) {
+            double d = std::hypot(cleanPts[i].x - cleanPts[i - 1].x,
+                                  cleanPts[i].y - cleanPts[i - 1].y);
+            double maxAllowedR = cleanPts[i - 1].r + d * maxSlope;
+            if (cleanPts[i].r > maxAllowedR) {
+                cleanPts[i].r = static_cast<float>(maxAllowedR);
+            }
+        }
+        // Backward pass
+        for (size_t i = cleanPts.size() - 1; i > 0; --i) {
+            double d = std::hypot(cleanPts[i - 1].x - cleanPts[i].x,
+                                  cleanPts[i - 1].y - cleanPts[i].y);
+            double maxAllowedR = cleanPts[i].r + d * maxSlope;
+            if (cleanPts[i - 1].r > maxAllowedR) {
+                cleanPts[i - 1].r = static_cast<float>(maxAllowedR);
+            }
+        }
+    }
+
+    if (isClosedPolygon) {
+        if (cleanPts.size() >= 3) {
+            if (std::hypot(cleanPts.back().x - cleanPts.front().x,
+                           cleanPts.back().y - cleanPts.front().y) >= 1e-4) {
+                cleanPts.push_back(cleanPts.front());
+            }
+        }
+        return BuildSingleRibbon(cleanPts, capType, true);
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. HAIRPIN TURN SPLITTING (Open Strokes Only)
+    // Detect sharp reversals (cosTheta < -0.70, i.e. turn > ~135°)
+    // -------------------------------------------------------------------------
+    std::vector<size_t> splitIndices;
+    if (cleanPts.size() >= 3) {
+        for (size_t i = 1; i < cleanPts.size() - 1; ++i) {
+            double dxIn  = cleanPts[i].x - cleanPts[i - 1].x;
+            double dyIn  = cleanPts[i].y - cleanPts[i - 1].y;
+            double lenIn = std::hypot(dxIn, dyIn);
+
+            double dxOut  = cleanPts[i + 1].x - cleanPts[i].x;
+            double dyOut  = cleanPts[i + 1].y - cleanPts[i].y;
+            double lenOut = std::hypot(dxOut, dyOut);
+
+            if (lenIn > 1e-7 && lenOut > 1e-7) {
+                double cosTheta = (dxIn * dxOut + dyIn * dyOut) / (lenIn * lenOut);
+                if (cosTheta < -0.70) {
+                    splitIndices.push_back(i);
+                }
+            }
+        }
+    }
+
+    if (splitIndices.empty()) {
+        return BuildSingleRibbon(cleanPts, capType, false);
+    }
+
+    BLPath combinedPath;
+    size_t subStart = 0;
+    for (size_t splitIdx : splitIndices) {
+        if (splitIdx > subStart) {
+            std::vector<StrokePoint> subPts(cleanPts.begin() + subStart, cleanPts.begin() + splitIdx + 1);
+            BLPath subRibbon = BuildSingleRibbon(subPts, capType, false);
+            if (!subRibbon.is_empty()) {
+                combinedPath.add_path(subRibbon);
+            }
+            subStart = splitIdx;
+        }
+    }
+
+    if (subStart < cleanPts.size() - 1) {
+        std::vector<StrokePoint> subPts(cleanPts.begin() + subStart, cleanPts.end());
+        BLPath subRibbon = BuildSingleRibbon(subPts, capType, false);
+        if (!subRibbon.is_empty()) {
+            combinedPath.add_path(subRibbon);
+        }
+    }
+
+    return combinedPath;
 }
