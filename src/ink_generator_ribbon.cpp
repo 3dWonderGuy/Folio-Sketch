@@ -32,39 +32,6 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         return TraceCap(cleanPts.empty() ? pts[0] : cleanPts[0], capType);
     }
 
-    // 1b. Cull geometrically submerged disks where d <= |r1 - r0|
-    // (A disk completely contained inside an adjacent disk cannot form external tangents)
-    if (!isClosedPolygon && cleanPts.size() > 1) {
-        std::vector<StrokePoint> unSubmerged;
-        unSubmerged.reserve(cleanPts.size());
-        for (const auto& p : cleanPts) {
-            while (!unSubmerged.empty()) {
-                double d = std::hypot(p.x - unSubmerged.back().x, p.y - unSubmerged.back().y);
-                if (d + unSubmerged.back().r <= p.r) {
-                    if (unSubmerged.size() == 1) {
-                        unSubmerged.back() = p;
-                        break;
-                    } else {
-                        unSubmerged.pop_back();
-                    }
-                } else {
-                    break;
-                }
-            }
-            if (unSubmerged.empty()) {
-                unSubmerged.push_back(p);
-            } else {
-                double d = std::hypot(p.x - unSubmerged.back().x, p.y - unSubmerged.back().y);
-                if (d + p.r > unSubmerged.back().r) {
-                    unSubmerged.push_back(p);
-                }
-            }
-        }
-        if (unSubmerged.size() >= 2) {
-            cleanPts = std::move(unSubmerged);
-        }
-    }
-
     if (isClosedPolygon && cleanPts.size() >= 3) {
         if (std::hypot(cleanPts.back().x - cleanPts.front().x,
                        cleanPts.back().y - cleanPts.front().y) >= 1e-4) {
@@ -128,10 +95,22 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         double dot   = sIn.ux * sOut.ux + sIn.uy * sOut.uy;
         double turnAngle = std::atan2(std::abs(cross), dot);
 
-        if (std::abs(cross) < 1e-4 && dot > 0.0) {
-            // Collinear: smooth continuous offset
-            leftPts.push_back({ Pi.x + offL_in.x, Pi.y + offL_in.y });
-            rightPts.push_back({ Pi.x + offR_in.x, Pi.y + offR_in.y });
+        if (turnAngle < 0.40) {
+            // Continuous smooth curve: single point on each side along unit average normal
+            double avgNx = sIn.nx + sOut.nx;
+            double avgNy = sIn.ny + sOut.ny;
+            double avgLen = std::hypot(avgNx, avgNy);
+            if (avgLen > 1e-6) {
+                avgNx /= avgLen;
+                avgNy /= avgLen;
+            } else {
+                avgNx = sIn.nx;
+                avgNy = sIn.ny;
+            }
+            Point2D offL, offR;
+            GetRibbonOffsets(capType, r, avgNx, avgNy, offL, offR);
+            leftPts.push_back({ Pi.x + offL.x, Pi.y + offL.y });
+            rightPts.push_back({ Pi.x + offR.x, Pi.y + offR.y });
             return;
         }
 
@@ -230,20 +209,15 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
 
             double innerDist = r;
             if (cosHalf > 1e-4) {
-                innerDist = std::min(r / cosHalf, 2.0 * r);
+                innerDist = std::min(r / cosHalf, 1.4 * r);
             }
 
             inPts.push_back({ Pi.x + bInX * innerDist, Pi.y + bInY * innerDist });
         };
 
-        // 2. OUTER CORNER: Extra smooth circular arc
+        // 2. OUTER CORNER: Smooth circular arc for sharp turns
         auto emitOuter = [&](std::vector<Point2D>& outPts) {
-            if (turnAngle < 0.03) {
-                outPts.push_back({ Pi.x + offIn_outer.x, Pi.y + offIn_outer.y });
-                return;
-            }
-
-            int steps = std::clamp(static_cast<int>(std::ceil(turnAngle / (M_PI / 24.0))), 4, 32);
+            int steps = std::clamp(static_cast<int>(std::ceil(turnAngle / (M_PI / 16.0))), 2, 24);
             double aStart = std::atan2(offIn_outer.y, offIn_outer.x);
             // Left turn (leftIsInner): right is outer, sweeps CCW (-turnAngle)
             // Right turn (!leftIsInner): left is outer, sweeps CW (+turnAngle)
