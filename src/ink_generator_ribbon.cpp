@@ -13,11 +13,74 @@ using namespace Folio::InkInternal;
 
 namespace {
 
+// Intersection test including segment endpoints for local envelope pruning
+bool SegSegIntersectionInclusive(const Point2D& p1, const Point2D& p2,
+                                 const Point2D& p3, const Point2D& p4,
+                                 Point2D& outHit) {
+    double min1X = std::min(p1.x, p2.x), max1X = std::max(p1.x, p2.x);
+    double min1Y = std::min(p1.y, p2.y), max1Y = std::max(p1.y, p2.y);
+    double min2X = std::min(p3.x, p4.x), max2X = std::max(p3.x, p4.x);
+    double min2Y = std::min(p3.y, p4.y), max2Y = std::max(p3.y, p4.y);
+
+    if (max1X < min2X - 1e-6 || min1X > max2X + 1e-6 ||
+        max1Y < min2Y - 1e-6 || min1Y > max2Y + 1e-6) {
+        return false;
+    }
+
+    double d1x = p2.x - p1.x;
+    double d1y = p2.y - p1.y;
+    double d2x = p4.x - p3.x;
+    double d2y = p4.y - p3.y;
+
+    double denom = d1x * d2y - d1y * d2x;
+    if (std::abs(denom) < 1e-9) return false;
+
+    double invDenom = 1.0 / denom;
+    double u = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) * invDenom;
+    double v = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) * invDenom;
+
+    if (u >= -1e-5 && u <= 1.0 + 1e-5 && v >= -1e-5 && v <= 1.0 + 1e-5) {
+        outHit.x = p1.x + u * d1x;
+        outHit.y = p1.y + u * d1y;
+        return true;
+    }
+    return false;
+}
+
+// Prunes local swallowtail self-intersection loops caused by turn radius R < r
+void PruneSwallowtailLoops(std::vector<Point2D>& rail, size_t maxLoopSpan = 40) {
+    if (rail.size() < 4) return;
+
+    size_t i = 0;
+    while (i + 2 < rail.size()) {
+        bool found = false;
+        size_t maxJ = std::min(rail.size() - 2, i + maxLoopSpan);
+        for (size_t j = maxJ; j >= i + 2; --j) {
+            Point2D hit;
+            if (SegSegIntersectionInclusive(rail[i], rail[i + 1], rail[j], rail[j + 1], hit)) {
+                // Loop detected: vertices (i + 1) through j are inside the swallowtail.
+                // Replace rail[i+1] with hit, and erase rail[i+2 .. j].
+                rail[i + 1] = hit;
+                rail.erase(rail.begin() + (i + 2), rail.begin() + (j + 1));
+                found = true;
+                break;
+            }
+            if (j == i + 2) break;
+        }
+        if (!found) {
+            ++i;
+        }
+    }
+}
+
 // =============================================================================
 // CORE SINGLE RIBBON BUILDER (Open ribbon or closed polygon loop)
 // =============================================================================
 
-BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capType, bool isClosedPolygon) {
+BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capType, bool isClosedPolygon,
+                         std::vector<Point2D>* outLeftPts = nullptr,
+                         std::vector<Point2D>* outRightPts = nullptr,
+                         std::vector<size_t>* outRetrogradeIndices = nullptr) {
     BLPath path;
     if (cleanPts.empty()) return path;
     if (cleanPts.size() == 1) return InkGenerator::TraceCap(cleanPts[0], capType);
@@ -65,18 +128,11 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capTy
     leftPts.reserve(N * 2);
     rightPts.reserve(N * 2);
 
-    // Monotonic guard: rejects or clamps backward steps against the local stroke tangent
-    auto pushMonotonic = [](std::vector<Point2D>& sidePts, Point2D pt, double tX, double tY) {
+    // Rail push: ensures minimal step separation without skipping turn points
+    auto pushMonotonic = [&](std::vector<Point2D>& sidePts, Point2D pt, double /*tX*/, double /*tY*/) {
         if (sidePts.empty()) {
             sidePts.push_back(pt);
             return;
-        }
-        double dx = pt.x - sidePts.back().x;
-        double dy = pt.y - sidePts.back().y;
-        double forward = dx * tX + dy * tY;
-        if (forward < 0.0) {
-            pt.x -= forward * tX;
-            pt.y -= forward * tY;
         }
         if (std::hypot(pt.x - sidePts.back().x, pt.y - sidePts.back().y) >= 1e-5) {
             sidePts.push_back(pt);
@@ -203,7 +259,7 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capTy
         const Point2D& offIn_outer  = leftIsInner ? offR_in  : offL_in;
 
         // 1. INNER CORNER:
-        // Precise segment-clamped bisector miter join with midpoint bevel fallback
+        // Precise segment-clamped bisector miter join with disk circumference fallback
         auto emitInner = [&](std::vector<Point2D>& inPts) {
             double sumInX = offIn_inner.x + offOut_inner.x;
             double sumInY = offIn_inner.y + offOut_inner.y;
@@ -229,10 +285,9 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capTy
             }
 
             if (innerDist > safeLimit) {
-                // Miter overshoots segment length: fall back to midpoint bevel
-                Point2D bevelPt = { Pi.x + (offIn_inner.x + offOut_inner.x) * 0.5,
-                                    Pi.y + (offIn_inner.y + offOut_inner.y) * 0.5 };
-                pushMonotonic(inPts, bevelPt, avgTanX, avgTanY);
+                // Clamped miter on disk circumference: never enters circle interior (< r)
+                Point2D miterPt = { Pi.x + bInX * r, Pi.y + bInY * r };
+                pushMonotonic(inPts, miterPt, avgTanX, avgTanY);
             } else {
                 Point2D miterPt = { Pi.x + bInX * innerDist, Pi.y + bInY * innerDist };
                 pushMonotonic(inPts, miterPt, avgTanX, avgTanY);
@@ -274,6 +329,9 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capTy
             processCorner(i, sIn, sOut);
         }
 
+        PruneSwallowtailLoops(leftPts);
+        PruneSwallowtailLoops(rightPts);
+
         if (leftPts.empty() || rightPts.empty()) return path;
 
         // Outer contour (CW)
@@ -290,6 +348,12 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capTy
         }
         path.close();
 
+        if (outRetrogradeIndices) {
+            outRetrogradeIndices->clear();
+        }
+
+        if (outLeftPts) *outLeftPts = leftPts;
+        if (outRightPts) *outRightPts = rightPts;
         return path;
     }
 
@@ -315,11 +379,58 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capTy
         const auto& lastSeg = segs.back();
         Point2D offL_end, offR_end;
         GetRibbonOffsets(capType, std::max(0.0f, cleanPts.back().r), lastSeg.nx, lastSeg.ny, offL_end, offR_end);
-        pushMonotonic(leftPts,  { cleanPts.back().x + offL_end.x, cleanPts.back().y + offL_end.y }, lastSeg.ux, lastSeg.uy);
-        pushMonotonic(rightPts, { cleanPts.back().x + offR_end.x, cleanPts.back().y + offR_end.y }, lastSeg.ux, lastSeg.uy);
+        Point2D endL = { cleanPts.back().x + offL_end.x, cleanPts.back().y + offL_end.y };
+        Point2D endR = { cleanPts.back().x + offR_end.x, cleanPts.back().y + offR_end.y };
+
+        auto pushTerminalCap = [](std::vector<Point2D>& sidePts, Point2D pt, double tX, double tY) {
+            while (sidePts.size() > 1) {
+                double dx = pt.x - sidePts.back().x;
+                double dy = pt.y - sidePts.back().y;
+                double forward = dx * tX + dy * tY;
+                if (forward < -1e-5) {
+                    sidePts.pop_back(); // Pop the overshooting interior corner
+                } else {
+                    break;
+                }
+            }
+            sidePts.push_back(pt);
+        };
+
+        pushTerminalCap(leftPts, endL, lastSeg.ux, lastSeg.uy);
+        pushTerminalCap(rightPts, endR, lastSeg.ux, lastSeg.uy);
     }
 
-    if (leftPts.empty() || rightPts.empty()) return path;
+    // Prune local swallowtail self-intersection loops caused by turn radius R < r
+    PruneSwallowtailLoops(leftPts);
+    PruneSwallowtailLoops(rightPts);
+
+    if (outRetrogradeIndices) {
+        outRetrogradeIndices->clear();
+        auto checkRetro = [&](const std::vector<Point2D>& sidePts, bool isRight) {
+            if (sidePts.size() < 2 || segs.empty()) return;
+            for (size_t k = 1; k < sidePts.size(); ++k) {
+                double dx = sidePts[k].x - sidePts[k - 1].x;
+                double dy = sidePts[k].y - sidePts[k - 1].y;
+                double bestDot = -1e9;
+                for (const auto& s : segs) {
+                    double dot = dx * s.ux + dy * s.uy;
+                    if (dot > bestDot) bestDot = dot;
+                }
+                if (bestDot < -1e-5) {
+                    size_t encodedIdx = k | (isRight ? (size_t(1) << 60) : 0);
+                    outRetrogradeIndices->push_back(encodedIdx);
+                }
+            }
+        };
+        checkRetro(leftPts, false);
+        checkRetro(rightPts, true);
+    }
+
+    if (leftPts.empty() || rightPts.empty()) {
+        if (outLeftPts) *outLeftPts = leftPts;
+        if (outRightPts) *outRightPts = rightPts;
+        return path;
+    }
 
     // Extrude single continuous closed contour with head/tail endcaps
     path.move_to(leftPts[0].x, leftPts[0].y);
@@ -342,84 +453,156 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capTy
 
     path.close();
 
-    // Visual Stroke Geometry Debugger: detect folds and self-intersections
-    if (InkGenerator::IsDebugCaptureEnabled()) {
-        auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
-        dbg.leftRail = leftPts;
-        dbg.rightRail = rightPts;
+    if (outLeftPts) *outLeftPts = leftPts;
+    if (outRightPts) *outRightPts = rightPts;
+    return path;
+}
 
-        // 1. Check for retrograde folds against local segment tangents
-        if (cleanPts.size() >= 2) {
-            for (size_t i = 1; i < leftPts.size(); ++i) {
-                size_t segIdx = (i < cleanPts.size()) ? (i - 1) : (cleanPts.size() - 2);
-                double tx = cleanPts[segIdx + 1].x - cleanPts[segIdx].x;
-                double ty = cleanPts[segIdx + 1].y - cleanPts[segIdx].y;
-                double tLen = std::hypot(tx, ty);
-                if (tLen > 1e-6) {
-                    tx /= tLen;
-                    ty /= tLen;
-                    double dx = leftPts[i].x - leftPts[i - 1].x;
-                    double dy = leftPts[i].y - leftPts[i - 1].y;
-                    if (dx * tx + dy * ty < -1e-4) {
-                        dbg.retrogradeIndices.push_back(i);
-                    }
-                }
-            }
-            for (size_t i = 1; i < rightPts.size(); ++i) {
-                size_t segIdx = (i < cleanPts.size()) ? (i - 1) : (cleanPts.size() - 2);
-                double tx = cleanPts[segIdx + 1].x - cleanPts[segIdx].x;
-                double ty = cleanPts[segIdx + 1].y - cleanPts[segIdx].y;
-                double tLen = std::hypot(tx, ty);
-                if (tLen > 1e-6) {
-                    tx /= tLen;
-                    ty /= tLen;
-                    double dx = rightPts[i].x - rightPts[i - 1].x;
-                    double dy = rightPts[i].y - rightPts[i - 1].y;
-                    if (dx * tx + dy * ty < -1e-4) {
-                        dbg.retrogradeIndices.push_back(i);
-                    }
-                }
-            }
-        }
+// -----------------------------------------------------------------------------
+// Geometric Defect Detection: Segment-Segment Intersection & Self-Intersection
+// -----------------------------------------------------------------------------
 
-        // 2. O(N^2) Segment-segment self-intersection test on polygon perimeter
-        std::vector<Point2D> poly;
-        poly.reserve(leftPts.size() + rightPts.size());
-        for (const auto& p : leftPts) poly.push_back(p);
-        for (size_t i = rightPts.size(); i > 0; --i) poly.push_back(rightPts[i - 1]);
+bool SegmentSegmentIntersection(const Point2D& p1, const Point2D& p2,
+                                const Point2D& p3, const Point2D& p4,
+                                Point2D& outIntersection) {
+    // 1. Fast AABB bounding box rejection
+    double min1X = std::min(p1.x, p2.x), max1X = std::max(p1.x, p2.x);
+    double min1Y = std::min(p1.y, p2.y), max1Y = std::max(p1.y, p2.y);
+    double min2X = std::min(p3.x, p4.x), max2X = std::max(p3.x, p4.x);
+    double min2Y = std::min(p3.y, p4.y), max2Y = std::max(p3.y, p4.y);
 
-        const size_t polySize = poly.size();
-        if (polySize >= 4) {
-            for (size_t i = 0; i < polySize; ++i) {
-                const Point2D& p0 = poly[i];
-                const Point2D& p1 = poly[(i + 1) % polySize];
-                double rx = p1.x - p0.x, ry = p1.y - p0.y;
-
-                for (size_t j = i + 2; j < polySize; ++j) {
-                    if (i == 0 && j == polySize - 1) continue; // adjacent in ring
-                    const Point2D& q0 = poly[j];
-                    const Point2D& q1 = poly[(j + 1) % polySize];
-                    double sx = q1.x - q0.x, sy = q1.y - q0.y;
-
-                    double crossRS = rx * sy - ry * sx;
-                    if (std::abs(crossRS) < 1e-8) continue;
-
-                    double qpx = q0.x - p0.x;
-                    double qpy = q0.y - p0.y;
-
-                    double t = (qpx * sy - qpy * sx) / crossRS;
-                    double u = (qpx * ry - qpy * rx) / crossRS;
-
-                    if (t >= 0.001 && t <= 0.999 && u >= 0.001 && u <= 0.999) {
-                        dbg.selfIntersections.push_back({ p0.x + t * rx, p0.y + t * ry });
-                    }
-                }
-            }
-        }
-        dbg.hasDefects = !dbg.selfIntersections.empty() || !dbg.retrogradeIndices.empty();
+    if (max1X < min2X - 1e-6 || min1X > max2X + 1e-6 ||
+        max1Y < min2Y - 1e-6 || min1Y > max2Y + 1e-6) {
+        return false;
     }
 
-    return path;
+    double d1x = p2.x - p1.x;
+    double d1y = p2.y - p1.y;
+    double d2x = p4.x - p3.x;
+    double d2y = p4.y - p3.y;
+
+    double denom = d1x * d2y - d1y * d2x;
+    if (std::abs(denom) < 1e-9) {
+        return false; // Parallel or collinear
+    }
+
+    double invDenom = 1.0 / denom;
+    double u = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) * invDenom;
+    double v = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) * invDenom;
+
+    // Interior intersection threshold (excluding common endpoints of adjacent segments)
+    if (u > 1e-4 && u < (1.0 - 1e-4) && v > 1e-4 && v < (1.0 - 1e-4)) {
+        outIntersection.x = p1.x + u * d1x;
+        outIntersection.y = p1.y + u * d1y;
+        return true;
+    }
+
+    return false;
+}
+
+void DetectSelfIntersections(const std::vector<Point2D>& leftRail,
+                             const std::vector<Point2D>& rightRail,
+                             bool isClosedPolygon,
+                             std::vector<Point2D>& outIntersections) {
+    outIntersections.clear();
+    if (leftRail.empty() || rightRail.empty()) return;
+
+    if (!isClosedPolygon) {
+        // Build closed boundary polygon ring: leftRail forward, then rightRail backward
+        std::vector<Point2D> poly;
+        poly.reserve(leftRail.size() + rightRail.size());
+        for (const auto& p : leftRail) {
+            poly.push_back(p);
+        }
+        for (size_t i = rightRail.size(); i > 0; --i) {
+            poly.push_back(rightRail[i - 1]);
+        }
+
+        const size_t M = poly.size();
+        if (M < 4) return;
+
+        for (size_t i = 0; i < M; ++i) {
+            const Point2D& p1 = poly[i];
+            const Point2D& p2 = poly[(i + 1) % M];
+
+            for (size_t j = i + 1; j < M; ++j) {
+                // Skip adjacent segments in the polygon ring
+                if (j == i || j == (i + 1) % M || i == (j + 1) % M) {
+                    continue;
+                }
+
+                const Point2D& p3 = poly[j];
+                const Point2D& p4 = poly[(j + 1) % M];
+
+                Point2D hit;
+                if (SegmentSegmentIntersection(p1, p2, p3, p4, hit)) {
+                    // Deduplicate hits within 0.001 mm / units
+                    bool isDup = false;
+                    for (const auto& existing : outIntersections) {
+                        if (std::hypot(existing.x - hit.x, existing.y - hit.y) < 1e-3) {
+                            isDup = true;
+                            break;
+                        }
+                    }
+                    if (!isDup) {
+                        outIntersections.push_back(hit);
+                    }
+                }
+            }
+        }
+    } else {
+        // Closed polygon: outer loop (leftRail) and inner loop (rightRail)
+        auto testRing = [&](const std::vector<Point2D>& ring) {
+            const size_t R = ring.size();
+            if (R < 4) return;
+            for (size_t i = 0; i < R; ++i) {
+                const Point2D& p1 = ring[i];
+                const Point2D& p2 = ring[(i + 1) % R];
+                for (size_t j = i + 1; j < R; ++j) {
+                    if (j == i || j == (i + 1) % R || i == (j + 1) % R) continue;
+                    const Point2D& p3 = ring[j];
+                    const Point2D& p4 = ring[(j + 1) % R];
+                    Point2D hit;
+                    if (SegmentSegmentIntersection(p1, p2, p3, p4, hit)) {
+                        bool isDup = false;
+                        for (const auto& existing : outIntersections) {
+                            if (std::hypot(existing.x - hit.x, existing.y - hit.y) < 1e-3) {
+                                isDup = true;
+                                break;
+                            }
+                        }
+                        if (!isDup) outIntersections.push_back(hit);
+                    }
+                }
+            }
+        };
+
+        testRing(leftRail);
+        testRing(rightRail);
+
+        // Also test outer edges against inner edges
+        const size_t L = leftRail.size();
+        const size_t R = rightRail.size();
+        for (size_t i = 0; i < L; ++i) {
+            const Point2D& p1 = leftRail[i];
+            const Point2D& p2 = leftRail[(i + 1) % L];
+            for (size_t j = 0; j < R; ++j) {
+                const Point2D& p3 = rightRail[j];
+                const Point2D& p4 = rightRail[(j + 1) % R];
+                Point2D hit;
+                if (SegmentSegmentIntersection(p1, p2, p3, p4, hit)) {
+                    bool isDup = false;
+                    for (const auto& existing : outIntersections) {
+                        if (std::hypot(existing.x - hit.x, existing.y - hit.y) < 1e-3) {
+                            isDup = true;
+                            break;
+                        }
+                    }
+                    if (!isDup) outIntersections.push_back(hit);
+                }
+            }
+        }
+    }
 }
 
 } // namespace
@@ -430,30 +613,29 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capTy
 
 BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapType capType, bool isClosedPolygon) {
     bool isDbg = InkGenerator::IsDebugCaptureEnabled();
-    if (isDbg) {
-        auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
-        dbg.rawInputPts = pts;
-        dbg.cleanPts.clear();
-        dbg.leftRail.clear();
-        dbg.rightRail.clear();
-        dbg.selfIntersections.clear();
-        dbg.retrogradeIndices.clear();
-        dbg.hasDefects = false;
-        dbg.capType = capType;
-        dbg.isClosedPolygon = isClosedPolygon;
-        dbg.builtPath.clear();
-        dbg.generatedPath.clear();
-    }
 
     BLPath path;
-    if (pts.empty()) return path;
+    if (pts.empty()) {
+        if (isDbg) {
+            auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
+            dbg = StrokeDebugInfo{};
+            dbg.capType = capType;
+            dbg.isClosedPolygon = isClosedPolygon;
+        }
+        return path;
+    }
+
     if (pts.size() == 1) {
         BLPath single = TraceCap(pts[0], capType);
         if (isDbg) {
             auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
+            dbg = StrokeDebugInfo{};
+            dbg.rawInputPts = pts;
             dbg.cleanPts = pts;
             dbg.builtPath = single;
             dbg.generatedPath = single;
+            dbg.capType = capType;
+            dbg.isClosedPolygon = isClosedPolygon;
         }
         return single;
     }
@@ -492,23 +674,32 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
 
         // 1c. Radius-proportional minimum step for interior points
         bool isLast = (idx + 1 == pts.size());
-        double minStep = std::max(1e-3, maxR * 0.10);
-        if (!isLast && d < minStep) {
-            bool isTurn = false;
-            if (idx + 1 < pts.size() && d > 1e-6) {
+        double minStep = std::max(0.05, maxR * 0.20);
+        if (d < minStep) {
+            bool isSharpTurn = false;
+            if (!isLast && idx + 1 < pts.size() && d > 1e-5) {
                 double dxIn = p.x - prev.x, dyIn = p.y - prev.y;
                 double dxOut = pts[idx + 1].x - p.x, dyOut = pts[idx + 1].y - p.y;
                 double lenOut = std::hypot(dxOut, dyOut);
-                if (lenOut > 1e-6) {
+                if (lenOut > 1e-5) {
                     double cosTurn = (dxIn * dxOut + dyIn * dyOut) / (d * lenOut);
-                    if (cosTurn < 0.96) {
-                        isTurn = true;
+                    if (cosTurn < 0.70 && d >= maxR * 0.08) {
+                        isSharpTurn = true;
                     }
                 }
             }
-            if (!isTurn) {
-                prev.pressure = std::max(prev.pressure, p.pressure);
-                prev.r = std::max(prev.r, p.r);
+            if (!isSharpTurn) {
+                if (isLast) {
+                    if (cleanPts.size() == 1) {
+                        prev = p;
+                    } else {
+                        prev.pressure = std::max(prev.pressure, p.pressure);
+                        prev.r = std::max(prev.r, p.r);
+                    }
+                } else {
+                    prev.pressure = std::max(prev.pressure, p.pressure);
+                    prev.r = std::max(prev.r, p.r);
+                }
                 continue;
             }
         }
@@ -516,8 +707,30 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         cleanPts.push_back(p);
     }
 
+    // Remove terminal micro-jitter stub if last segment is smaller than 20% of radius
+    while (cleanPts.size() >= 3) {
+        double dLast = std::hypot(cleanPts.back().x - cleanPts[cleanPts.size() - 2].x,
+                                  cleanPts.back().y - cleanPts[cleanPts.size() - 2].y);
+        if (dLast < cleanPts.back().r * 0.20) {
+            cleanPts.pop_back();
+        } else {
+            break;
+        }
+    }
+
     if (cleanPts.size() <= 1) {
-        return TraceCap(cleanPts.empty() ? pts[0] : cleanPts[0], capType);
+        BLPath single = TraceCap(cleanPts.empty() ? pts[0] : cleanPts[0], capType);
+        if (isDbg) {
+            auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
+            dbg = StrokeDebugInfo{};
+            dbg.rawInputPts = pts;
+            dbg.cleanPts = cleanPts;
+            dbg.builtPath = single;
+            dbg.generatedPath = single;
+            dbg.capType = capType;
+            dbg.isClosedPolygon = isClosedPolygon;
+        }
+        return single;
     }
 
     // 1b. Regularize radius rate-of-change: |dr/ds| <= maxSlope
@@ -550,18 +763,29 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
                 cleanPts.push_back(cleanPts.front());
             }
         }
-        BLPath closedPath = BuildSingleRibbon(cleanPts, capType, true);
+        std::vector<Point2D> leftRail, rightRail;
+        std::vector<size_t> retroIndices;
+        BLPath resPath = BuildSingleRibbon(cleanPts, capType, true,
+                                           isDbg ? &leftRail : nullptr,
+                                           isDbg ? &rightRail : nullptr,
+                                           isDbg ? &retroIndices : nullptr);
+
         if (isDbg) {
             auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
+            dbg = StrokeDebugInfo{};
+            dbg.rawInputPts = pts;
             dbg.cleanPts = cleanPts;
-            dbg.builtPath = closedPath;
-            dbg.generatedPath = closedPath;
+            dbg.leftRail = leftRail;
+            dbg.rightRail = rightRail;
+            dbg.retrogradeIndices = retroIndices;
+            dbg.builtPath = resPath;
+            dbg.generatedPath = resPath;
+            dbg.capType = capType;
+            dbg.isClosedPolygon = true;
+            DetectSelfIntersections(leftRail, rightRail, true, dbg.selfIntersections);
+            dbg.hasDefects = (!dbg.selfIntersections.empty() || !dbg.retrogradeIndices.empty());
         }
-        return closedPath;
-    }
-
-    if (isDbg) {
-        Folio::InkInternal::GetMutableDebugInfo().cleanPts = cleanPts;
+        return resPath;
     }
 
     // -------------------------------------------------------------------------
@@ -589,23 +813,51 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
     }
 
     if (splitIndices.empty()) {
-        BLPath singlePath = BuildSingleRibbon(cleanPts, capType, false);
+        std::vector<Point2D> leftRail, rightRail;
+        std::vector<size_t> retroIndices;
+        BLPath resPath = BuildSingleRibbon(cleanPts, capType, false,
+                                           isDbg ? &leftRail : nullptr,
+                                           isDbg ? &rightRail : nullptr,
+                                           isDbg ? &retroIndices : nullptr);
+
         if (isDbg) {
             auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
-            dbg.builtPath = singlePath;
-            dbg.generatedPath = singlePath;
+            dbg = StrokeDebugInfo{};
+            dbg.rawInputPts = pts;
+            dbg.cleanPts = cleanPts;
+            dbg.leftRail = leftRail;
+            dbg.rightRail = rightRail;
+            dbg.retrogradeIndices = retroIndices;
+            dbg.builtPath = resPath;
+            dbg.generatedPath = resPath;
+            dbg.capType = capType;
+            dbg.isClosedPolygon = false;
+            DetectSelfIntersections(leftRail, rightRail, false, dbg.selfIntersections);
+            dbg.hasDefects = (!dbg.selfIntersections.empty() || !dbg.retrogradeIndices.empty());
         }
-        return singlePath;
+        return resPath;
     }
 
     BLPath combinedPath;
+    std::vector<Point2D> combinedLeft, combinedRight;
+    std::vector<size_t> combinedRetro;
     size_t subStart = 0;
     for (size_t splitIdx : splitIndices) {
         if (splitIdx > subStart) {
             std::vector<StrokePoint> subPts(cleanPts.begin() + subStart, cleanPts.begin() + splitIdx + 1);
-            BLPath subRibbon = BuildSingleRibbon(subPts, capType, false);
+            std::vector<Point2D> subLeft, subRight;
+            std::vector<size_t> subRetro;
+            BLPath subRibbon = BuildSingleRibbon(subPts, capType, false,
+                                                 isDbg ? &subLeft : nullptr,
+                                                 isDbg ? &subRight : nullptr,
+                                                 isDbg ? &subRetro : nullptr);
             if (!subRibbon.is_empty()) {
                 combinedPath.add_path(subRibbon);
+            }
+            if (isDbg) {
+                combinedLeft.insert(combinedLeft.end(), subLeft.begin(), subLeft.end());
+                combinedRight.insert(combinedRight.end(), subRight.begin(), subRight.end());
+                combinedRetro.insert(combinedRetro.end(), subRetro.begin(), subRetro.end());
             }
             subStart = splitIdx;
         }
@@ -613,16 +865,36 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
 
     if (subStart < cleanPts.size() - 1) {
         std::vector<StrokePoint> subPts(cleanPts.begin() + subStart, cleanPts.end());
-        BLPath subRibbon = BuildSingleRibbon(subPts, capType, false);
+        std::vector<Point2D> subLeft, subRight;
+        std::vector<size_t> subRetro;
+        BLPath subRibbon = BuildSingleRibbon(subPts, capType, false,
+                                             isDbg ? &subLeft : nullptr,
+                                             isDbg ? &subRight : nullptr,
+                                             isDbg ? &subRetro : nullptr);
         if (!subRibbon.is_empty()) {
             combinedPath.add_path(subRibbon);
+        }
+        if (isDbg) {
+            combinedLeft.insert(combinedLeft.end(), subLeft.begin(), subLeft.end());
+            combinedRight.insert(combinedRight.end(), subRight.begin(), subRight.end());
+            combinedRetro.insert(combinedRetro.end(), subRetro.begin(), subRetro.end());
         }
     }
 
     if (isDbg) {
         auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
+        dbg = StrokeDebugInfo{};
+        dbg.rawInputPts = pts;
+        dbg.cleanPts = cleanPts;
+        dbg.leftRail = combinedLeft;
+        dbg.rightRail = combinedRight;
+        dbg.retrogradeIndices = combinedRetro;
         dbg.builtPath = combinedPath;
         dbg.generatedPath = combinedPath;
+        dbg.capType = capType;
+        dbg.isClosedPolygon = false;
+        DetectSelfIntersections(combinedLeft, combinedRight, false, dbg.selfIntersections);
+        dbg.hasDefects = (!dbg.selfIntersections.empty() || !dbg.retrogradeIndices.empty());
     }
 
     return combinedPath;

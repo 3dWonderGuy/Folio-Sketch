@@ -756,6 +756,33 @@ void TestInkMeshBuilderAndDebugger() {
     std::cout << "  -> InkMeshBuilder & Visual Debugger tests passed successfully." << std::endl;
 }
 
+void TestCrescentTurnGeometry() {
+    std::cout << "[Test 8/8] Running Crescent Turn Geometry (Tight Radius Curvature) test..." << std::endl;
+
+    InkGenerator::SetDebugCapture(true);
+    std::vector<StrokePoint> crescentPts = {
+#include "repro114.inc"
+    };
+
+    BLPath path = InkGenerator::BuildSolidRibbon(crescentPts);
+    assert(!path.is_empty());
+
+    const auto& info = InkGenerator::GetLastDebugInfo();
+    std::cout << "  Crescent stroke clean points: " << info.cleanPts.size() << std::endl;
+    std::cout << "  Left rail points: " << info.leftRail.size() << ", Right rail points: " << info.rightRail.size() << std::endl;
+    std::cout << "  Self intersections: " << info.selfIntersections.size() << std::endl;
+    std::cout << "  Retrograde folds: " << info.retrogradeIndices.size() << std::endl;
+
+    // Verify 100% elimination of self-intersections and retrograde folds
+    assert(info.selfIntersections.empty());
+    assert(info.retrogradeIndices.empty());
+    assert(!info.hasDefects);
+
+    InkGenerator::ClearDebugInfo();
+    InkGenerator::SetDebugCapture(false);
+    std::cout << "  -> Crescent Turn Geometry test passed (0 defects, 100% OK)!" << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Starting Folio-Sketch Test Suite" << std::endl;
@@ -768,6 +795,7 @@ int main() {
     TestInkEngineLifecycle();
     TestPatternAndInfillEdgeCases();
     TestInkMeshBuilderAndDebugger();
+    TestCrescentTurnGeometry();
 
     std::cout << "========================================" << std::endl;
     std::cout << "All Folio-Sketch Tests Passed!" << std::endl;
