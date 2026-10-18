@@ -30,11 +30,13 @@ public:
      * @param capType Terminal cap style (Round, Square, Chisel).
      * @param color Packed RGBA32 color for vertices.
      * @param outMesh Output mesh buffer (reused across calls to minimize allocations).
+     * @param scalePxPerMm Effective screen pixels per millimeter scale factor for 1-pixel exterior anti-aliasing skirt.
      */
     static void BuildSolidMesh(std::span<const StrokePoint> points,
                                CapType capType,
                                uint32_t color,
-                               InkMesh& outMesh);
+                               InkMesh& outMesh,
+                               float scalePxPerMm = 3.7795f);
 };
 
 } // namespace Folio

@@ -158,7 +158,8 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
         std::span<const StrokePoint>(&dotPt, 1),
         m_activeStyle.capType,
         PackGpuColor(m_activeStyle.color),
-        m_liveStrokeMesh);
+        m_liveStrokeMesh,
+        m_zoomScale);
     m_outlineDirty = false;
     m_meshDirty = false;
 
@@ -288,7 +289,7 @@ FinishedStrokeData InkEngine::FinishStroke() {
     data.outlinePath = InkGenerator::GenerateStroke(
         m_liveModeledPoints, m_activeStyle.capType, m_activeStyle.pattern);        // builds closed polygon ribbon (CPU path / export)
     InkMeshBuilder::BuildSolidMesh(
-        m_liveModeledPoints, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), data.mesh);
+        m_liveModeledPoints, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), data.mesh, m_zoomScale);
 
     // Auto-dump stroke reproducer if geometry defects (self-intersections or retrograde folds) were detected
     if (InkGenerator::IsDebugCaptureEnabled() && InkGenerator::GetLastDebugInfo().hasDefects) {
@@ -373,7 +374,7 @@ void InkEngine::EnsureLiveMesh() const {
         return;
     }
     InkMeshBuilder::BuildSolidMesh(
-        m_liveModeledPoints, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), m_liveStrokeMesh);
+        m_liveModeledPoints, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), m_liveStrokeMesh, m_zoomScale);
 }
 
 void InkEngine::EnsurePrediction() const {
@@ -406,7 +407,7 @@ void InkEngine::EnsurePrediction() const {
         m_predictedStrokeOutline = InkGenerator::GenerateStroke(
             m_predictedPointsBuffer, m_activeStyle.capType, m_activeStyle.pattern);
         InkMeshBuilder::BuildSolidMesh(
-            m_predictedPointsBuffer, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), m_predictedStrokeMesh);
+            m_predictedPointsBuffer, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), m_predictedStrokeMesh, m_zoomScale);
     }
 }
 

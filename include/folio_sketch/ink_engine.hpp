@@ -169,8 +169,9 @@ public:
     static void BuildStrokeMesh(std::span<const StrokePoint> points,
                                 CapType capType,
                                 uint32_t packedColor,
-                                InkMesh& outMesh) {
-        InkMeshBuilder::BuildSolidMesh(points, capType, packedColor, outMesh);
+                                InkMesh& outMesh,
+                                float scalePxPerMm = 3.7795f) {
+        InkMeshBuilder::BuildSolidMesh(points, capType, packedColor, outMesh, scalePxPerMm);
     }
 
 private:
