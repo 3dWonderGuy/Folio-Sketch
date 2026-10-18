@@ -137,12 +137,66 @@ struct Segment1D {
     float width = 0.5f;       ///< Segment line thickness in world millimeters (mm)
 };
 
+namespace Folio {
+
+/**
+ * @struct InkVertex
+ * @brief Direct GPU vertex format for SDL_GPU / OpenGL indexed triangle mesh stroke rendering.
+ */
+struct InkVertex {
+    float x = 0.0f;              ///< World X coordinate (mm)
+    float y = 0.0f;              ///< World Y coordinate (mm)
+    float edgeDist = 0.0f;       ///< -1.0 (Left rail) to +1.0 (Right rail), 0.0 (Centerline) for fragment AA
+    float radius = 0.0f;         ///< Stroke radius at vertex (mm)
+    uint32_t color = 0xFF000000; ///< Packed RGBA8 (R in byte 0, G in byte 1, B in byte 2, A in byte 3)
+};
+
+/**
+ * @struct InkMesh
+ * @brief Batch of GPU-ready vertices and triangle indices.
+ */
+struct InkMesh {
+    std::vector<InkVertex> vertices;
+    std::vector<uint32_t>  indices;
+
+    void clear() noexcept {
+        vertices.clear();
+        indices.clear();
+    }
+
+    [[nodiscard]] bool empty() const noexcept {
+        return vertices.empty() || indices.empty();
+    }
+
+    void reserve(size_t vCount, size_t iCount) {
+        vertices.reserve(vCount);
+        indices.reserve(iCount);
+    }
+};
+
+/**
+ * @brief Packs a Blend2D BLRgba32 color into R8G8B8A8 (ABGR32 little-endian) for SDL_GPU UBYTE4_NORM.
+ */
+[[nodiscard]] constexpr uint32_t PackGpuColor(BLRgba32 c, float opacity = 1.0f) noexcept {
+    uint32_t r = c.r();
+    uint32_t g = c.g();
+    uint32_t b = c.b();
+    uint32_t a = static_cast<uint32_t>(static_cast<float>(c.a()) * (opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity)) + 0.5f);
+    return (a << 24) | (b << 16) | (g << 8) | r;
+}
+
+} // namespace Folio
+
+using InkVertex = Folio::InkVertex;
+using InkMesh   = Folio::InkMesh;
+
 /**
  * @struct FinishedStrokeData
- * @brief Completed inking stroke container encapsulating collision segments, modeled centerline, and outline polygon.
+ * @brief Completed inking stroke container encapsulating collision segments, modeled centerline, outline polygon, and GPU mesh.
  */
 struct FinishedStrokeData {
     std::vector<Segment1D> liveSegments;
     std::vector<StrokePoint> modeledPoints;
     BLPath outlinePath;
+    Folio::InkMesh mesh;
 };

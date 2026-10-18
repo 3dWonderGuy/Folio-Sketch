@@ -12,4 +12,5 @@
 #include "folio_sketch/stroke_width_evaluator.hpp"
 #include "folio_sketch/stroke_post_processor.hpp"
 #include "folio_sketch/ink_generator.hpp"
+#include "folio_sketch/ink_mesh.hpp"
 #include "folio_sketch/ink_engine.hpp"

@@ -703,6 +703,86 @@ void TestPatternAndInfillEdgeCases() {
     std::cout << "  -> Pattern and infill edge case tests passed successfully." << std::endl;
 }
 
+void TestInkMeshBuilderAndDebugger() {
+    std::cout << "[Test 7/7] Running InkMeshBuilder & Visual Debugger Verification..." << std::endl;
+
+    std::vector<StrokePoint> testPts = {
+        { 10.0, 10.0, 1.0f, 0.5f, 0.0f, 0.0f },
+        { 20.0, 15.0, 2.5f, 0.8f, 0.0f, 0.0f },
+        { 30.0, 40.0, 1.5f, 0.6f, 0.0f, 0.0f },
+        { 50.0, 42.0, 3.0f, 1.0f, 0.0f, 0.0f }
+    };
+
+    // 1. InkMeshBuilder test
+    Folio::InkMesh mesh;
+    Folio::InkMeshBuilder::BuildSolidMesh(testPts, CapType::Round, 0xFFFF0000, mesh);
+    assert(!mesh.empty());
+    assert(!mesh.vertices.empty());
+    assert(!mesh.indices.empty());
+    assert(mesh.indices.size() % 3 == 0); // valid triangle indices
+
+    // Single point cap mesh test
+    Folio::InkMesh singleMesh;
+    Folio::InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint>(testPts.data(), 1), CapType::Round, 0xFF00FF00, singleMesh);
+    assert(!singleMesh.empty());
+
+    // 2. Debug capture test
+    InkGenerator::SetDebugCapture(true);
+    assert(InkGenerator::IsDebugCaptureEnabled());
+
+    BLPath dbgPath = InkGenerator::GenerateStroke(testPts, CapType::Round, StrokePattern::Solid);
+    assert(!dbgPath.is_empty());
+
+    const auto& dbgInfo = InkGenerator::GetLastDebugInfo();
+    assert(!dbgInfo.rawInputPts.empty());
+    assert(!dbgInfo.cleanPts.empty());
+    assert(!dbgInfo.leftRail.empty());
+    assert(!dbgInfo.rightRail.empty());
+
+    // 3. RenderDebugOverlay test
+    BLImage img(300, 200, BL_FORMAT_PRGB32);
+    BLContext ctx(img);
+    ctx.clear_all();
+    InkGenerator::RenderDebugOverlay(ctx, dbgInfo, 1.0, &dbgPath);
+    ctx.end();
+
+    // 4. Dump test
+    InkGenerator::DumpStrokeToFile("test_debug_dump.txt");
+    std::remove("test_debug_dump.txt");
+
+    InkGenerator::SetDebugCapture(false);
+    assert(!InkGenerator::IsDebugCaptureEnabled());
+
+    std::cout << "  -> InkMeshBuilder & Visual Debugger tests passed successfully." << std::endl;
+}
+
+void TestCrescentTurnGeometry() {
+    std::cout << "[Test 8/8] Running Crescent Turn Geometry (Tight Radius Curvature) test..." << std::endl;
+
+    InkGenerator::SetDebugCapture(true);
+    std::vector<StrokePoint> crescentPts = {
+#include "repro114.inc"
+    };
+
+    BLPath path = InkGenerator::BuildSolidRibbon(crescentPts);
+    assert(!path.is_empty());
+
+    const auto& info = InkGenerator::GetLastDebugInfo();
+    std::cout << "  Crescent stroke clean points: " << info.cleanPts.size() << std::endl;
+    std::cout << "  Left rail points: " << info.leftRail.size() << ", Right rail points: " << info.rightRail.size() << std::endl;
+    std::cout << "  Self intersections: " << info.selfIntersections.size() << std::endl;
+    std::cout << "  Retrograde folds: " << info.retrogradeIndices.size() << std::endl;
+
+    // Verify 100% elimination of self-intersections and retrograde folds
+    assert(info.selfIntersections.empty());
+    assert(info.retrogradeIndices.empty());
+    assert(!info.hasDefects);
+
+    InkGenerator::ClearDebugInfo();
+    InkGenerator::SetDebugCapture(false);
+    std::cout << "  -> Crescent Turn Geometry test passed (0 defects, 100% OK)!" << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Starting Folio-Sketch Test Suite" << std::endl;
@@ -714,6 +794,8 @@ int main() {
     TestWidthEvaluatorAndPostProcessor();
     TestInkEngineLifecycle();
     TestPatternAndInfillEdgeCases();
+    TestInkMeshBuilderAndDebugger();
+    TestCrescentTurnGeometry();
 
     std::cout << "========================================" << std::endl;
     std::cout << "All Folio-Sketch Tests Passed!" << std::endl;
