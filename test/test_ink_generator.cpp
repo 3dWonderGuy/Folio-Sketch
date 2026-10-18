@@ -262,7 +262,55 @@ void TestStrokePressureTransitions() {
         }
     }
 
-    std::cout << "  -> Pressure step transition, 180 deg turnaround, and J-turn inner corner tests passed successfully." << std::endl;
+    // 6. Closed Polygon with Extreme Variable Width (Triangle & Quad with varying vertex radii)
+    {
+        std::vector<StrokePoint> varPoly = {
+            StrokePoint(50.0, 50.0, 0.4f),
+            StrokePoint(150.0, 50.0, 3.5f),   // Width jump to 7mm
+            StrokePoint(100.0, 150.0, 1.2f),  // Taper to 2.4mm
+            StrokePoint(50.0, 50.0, 0.4f)     // Closed back to start
+        };
+
+        BLPath polyPath = InkGenerator::GenerateStroke(varPoly, CapType::Round, StrokePattern::Solid, /*isStandardShape=*/true);
+        assert(!polyPath.is_empty());
+        ctx.clear_all();
+        assert(ctx.fill_path(polyPath) == BL_SUCCESS);
+
+        BLBox polyBox;
+        polyPath.get_bounding_box(&polyBox);
+        assert(polyBox.x0 < 50.0 && polyBox.x1 > 150.0);
+        assert(polyBox.y0 < 50.0 && polyBox.y1 > 150.0);
+
+        // Test GenerateStroke directly on unclosed triangle (size 3) with isStandardShape=true
+        std::vector<StrokePoint> unclosedTri = {
+            StrokePoint(10.0, 10.0, 1.0f),
+            StrokePoint(40.0, 10.0, 2.0f),
+            StrokePoint(25.0, 40.0, 1.5f)
+        };
+        BLPath triRibbon = InkGenerator::GenerateStroke(unclosedTri, CapType::Round, StrokePattern::Solid, /*isStandardShape=*/true);
+        assert(!triRibbon.is_empty());
+        ctx.clear_all();
+        assert(ctx.fill_path(triRibbon) == BL_SUCCESS);
+    }
+
+    // 7. Open Stroke with Extreme Variable Width and Short Segment Sampling
+    {
+        std::vector<StrokePoint> varShortStroke = {
+            StrokePoint(200.0, 200.0, 0.2f),
+            StrokePoint(200.1, 200.0, 3.8f),   // Huge width jump on 0.1mm segment!
+            StrokePoint(200.2, 205.0, 0.3f),   // Taper down on 90 deg turn
+            StrokePoint(210.0, 205.0, 2.5f)
+        };
+
+        for (auto cap : { CapType::Round, CapType::Square, CapType::Chisel }) {
+            BLPath vPath = InkGenerator::GenerateStroke(varShortStroke, cap, StrokePattern::Solid);
+            assert(!vPath.is_empty());
+            ctx.clear_all();
+            assert(ctx.fill_path(vPath) == BL_SUCCESS);
+        }
+    }
+
+    std::cout << "  -> Pressure step transition, 180 deg turnaround, J-turn, and variable width closed polygon tests passed successfully." << std::endl;
 }
 
 void TestCollisionAndSlicer() {

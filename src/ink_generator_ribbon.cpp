@@ -11,7 +11,7 @@ using namespace Folio::InkInternal;
 // CONTINUOUS SOLID RIBBON TESSELLATION
 // =============================================================================
 
-BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapType capType) {
+BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapType capType, bool isClosedPolygon) {
     BLPath path;
     if (pts.empty()) return path;
     if (pts.size() == 1) return TraceCap(pts[0], capType);
@@ -32,7 +32,18 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         return TraceCap(cleanPts.empty() ? pts[0] : cleanPts[0], capType);
     }
 
+    if (isClosedPolygon && cleanPts.size() >= 3) {
+        if (std::hypot(cleanPts.back().x - cleanPts.front().x,
+                       cleanPts.back().y - cleanPts.front().y) >= 1e-4) {
+            cleanPts.push_back(cleanPts.front());
+        }
+    }
+
     const size_t N = cleanPts.size();
+    bool isClosed = isClosedPolygon && (N >= 4) &&
+                    (std::hypot(cleanPts.back().x - cleanPts.front().x,
+                                cleanPts.back().y - cleanPts.front().y) < 1e-4);
+    const size_t M = isClosed ? (N - 1) : N;
 
     // 2. Precompute segment unit tangents and normals
     struct SegmentInfo {
@@ -71,18 +82,8 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
     leftPts.reserve(N * 2);
     rightPts.reserve(N * 2);
 
-    // 3. Start point P0
-    {
-        Point2D offL0, offR0;
-        GetRibbonOffsets(capType, std::max(0.0f, cleanPts[0].r), segs[0].nx, segs[0].ny, offL0, offR0);
-        leftPts.push_back({ cleanPts[0].x + offL0.x, cleanPts[0].y + offL0.y });
-        rightPts.push_back({ cleanPts[0].x + offR0.x, cleanPts[0].y + offR0.y });
-    }
-
-    // 4. Interior vertices Pi (i = 1 .. N - 2):
-    for (size_t i = 1; i < N - 1; ++i) {
-        const auto& sIn = segs[i - 1];
-        const auto& sOut = segs[i];
+    // Lambda to process an interior or closed-loop corner vertex
+    auto processCorner = [&](size_t i, const SegmentInfo& sIn, const SegmentInfo& sOut) {
         const auto& Pi = cleanPts[i];
         double r = std::max(0.0f, Pi.r);
 
@@ -98,7 +99,7 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
             // Collinear: smooth continuous offset
             leftPts.push_back({ Pi.x + offL_in.x, Pi.y + offL_in.y });
             rightPts.push_back({ Pi.x + offR_in.x, Pi.y + offR_in.y });
-            continue;
+            return;
         }
 
         bool leftIsInner = (cross > 0.0) || (cross == 0.0 && dot < 0.0);
@@ -138,8 +139,8 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
                     return;
                 }
 
-                if (isInner && dot >= -0.85) {
-                    // Moderate inner corner: bevel midpoint between facets
+                if (isInner) {
+                    // Inner corner: single midpoint prevents retrograde crossing
                     outPts.push_back({ Pi.x + (inOff.x + outOff.x) * 0.5, Pi.y + (inOff.y + outOff.y) * 0.5 });
                     return;
                 }
@@ -147,21 +148,19 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
                 // Check difference around perimeter (K=4)
                 int diff = (idxOut - idxIn + K) % K;
                 if (diff == 2) {
-                    // Opposite diagonal corners: MUST traverse perimeter through the outward intermediate corner
-                    // to prevent diagonal interior cuts, double-fang artifacts, and inverted V-notches!
+                    // Opposite diagonal corners: traverse through outward intermediate corner
                     int midCW  = (idxIn + 1) % K;
                     int midCCW = (idxIn + K - 1) % K;
 
                     double dotCW  = verts[midCW].x * uElbowX + verts[midCW].y * uElbowY;
                     double dotCCW = verts[midCCW].x * uElbowX + verts[midCCW].y * uElbowY;
 
-                    int chosenMid = (isInner ? (dotCW < dotCCW) : (dotCW >= dotCCW)) ? midCW : midCCW;
+                    int chosenMid = (dotCW >= dotCCW) ? midCW : midCCW;
 
                     outPts.push_back({ Pi.x + inOff.x, Pi.y + inOff.y });
                     outPts.push_back({ Pi.x + verts[chosenMid].x, Pi.y + verts[chosenMid].y });
                     outPts.push_back({ Pi.x + outOff.x, Pi.y + outOff.y });
                 } else {
-                    // Adjacent corners along the perimeter: connect along the facet edge
                     outPts.push_back({ Pi.x + inOff.x, Pi.y + inOff.y });
                     outPts.push_back({ Pi.x + outOff.x, Pi.y + outOff.y });
                 }
@@ -169,7 +168,7 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
 
             emitNibSide(leftIsInner, offL_in, offL_out, leftPts);
             emitNibSide(!leftIsInner, offR_in, offR_out, rightPts);
-            continue;
+            return;
         }
 
         const Point2D& offIn_inner  = leftIsInner ? offL_in  : offR_in;
@@ -177,58 +176,45 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         const Point2D& offIn_outer  = leftIsInner ? offR_in  : offL_in;
 
         // 1. INNER CORNER:
-        // Smooth bisector miter for gentle turns, 3-point circular fillet for 90-deg corners (extra roundness),
-        // and direct bevel fallback for short segments / hairpin reversals (no spikes).
+        // Precise monotonic bisector miter join without retrograde folding or self-intersecting loops
         auto emitInner = [&](std::vector<Point2D>& inPts) {
             double sumInX = offIn_inner.x + offOut_inner.x;
             double sumInY = offIn_inner.y + offOut_inner.y;
             double bInLen = std::hypot(sumInX, sumInY);
 
+            if (bInLen < 1e-6) {
+                // Hairpin 180 turnaround: inner corner is the pivot point at Pi
+                inPts.push_back({ Pi.x, Pi.y });
+                return;
+            }
+
+            double bInX = sumInX / bInLen;
+            double bInY = sumInY / bInLen;
+
             double cosHalf = std::sqrt(std::max(0.0, (1.0 + dot) * 0.5));
             double sinHalf = std::sqrt(std::max(0.0, (1.0 - dot) * 0.5));
 
-            // Projection along incoming/outgoing segment for bisector miter:
-            // proj = r * tan(theta / 2) = r * (sinHalf / cosHalf)
-            double proj = (cosHalf > 1e-4) ? (r * (sinHalf / cosHalf)) : 1e9;
-            double maxAllowedProj = 0.85 * std::min(sIn.len, sOut.len);
-
-            if (dot >= 0.5 && proj <= maxAllowedProj && bInLen > 1e-6) {
-                // Gentle turns (<= 60 deg): smooth bisector miter (miter ratio <= 1.155)
-                double bInX = sumInX / bInLen;
-                double bInY = sumInY / bInLen;
-                double innerDist = r / cosHalf;
-                inPts.push_back({ Pi.x + bInX * innerDist, Pi.y + bInY * innerDist });
-            } else if (dot >= -0.85 && proj <= maxAllowedProj && bInLen > 1e-6) {
-                // Moderate to sharp turns (60 deg to 150 deg, including 90 deg corners):
-                // Smooth 3-point circular fillet of radius r eliminating miter spikes and adding extra roundness!
-                double bInX = sumInX / bInLen;
-                double bInY = sumInY / bInLen;
-                inPts.push_back({ Pi.x + offIn_inner.x, Pi.y + offIn_inner.y });
-                inPts.push_back({ Pi.x + bInX * r, Pi.y + bInY * r });
-                inPts.push_back({ Pi.x + offOut_inner.x, Pi.y + offOut_inner.y });
-            } else {
-                // Short segments (dense samples) or extreme hairpin turnaround (> 150 deg):
-                // Direct bevel join between inner offsets (projection along segment is exactly 0, prevents spikes).
-                inPts.push_back({ Pi.x + offIn_inner.x, Pi.y + offIn_inner.y });
-                double dInner = std::hypot(offIn_inner.x - offOut_inner.x, offIn_inner.y - offOut_inner.y);
-                if (dInner >= 1e-4) {
-                    inPts.push_back({ Pi.x + offOut_inner.x, Pi.y + offOut_inner.y });
-                }
+            double innerDist = r;
+            if (cosHalf > 1e-4) {
+                innerDist = r / cosHalf;
             }
+            // Clamp miter to avoid extreme spikes on sharp turns, and avoid overshooting segments
+            double maxAllowedDist = std::max(r, 1.5 * std::min(sIn.len, sOut.len) / std::max(1e-4, sinHalf));
+            maxAllowedDist = std::min(maxAllowedDist, 2.0 * r);
+            innerDist = std::min(innerDist, maxAllowedDist);
+
+            inPts.push_back({ Pi.x + bInX * innerDist, Pi.y + bInY * innerDist });
         };
 
         // 2. OUTER CORNER: Extra smooth circular arc
         auto emitOuter = [&](std::vector<Point2D>& outPts) {
             if (turnAngle < 0.03) {
-                // Subpixel turn / nearly straight: single collinear offset
                 outPts.push_back({ Pi.x + offIn_outer.x, Pi.y + offIn_outer.y });
                 return;
             }
 
-            // High-fidelity smooth arc (4 to 32 steps based on angle) for continuous silky roundness
             int steps = std::clamp(static_cast<int>(std::ceil(turnAngle / (M_PI / 24.0))), 4, 32);
             double aStart = std::atan2(offIn_outer.y, offIn_outer.x);
-            // Bulletproof sweep: left turn sweeps +turnAngle CCW, right turn sweeps -turnAngle CW
             double sweep = leftIsInner ? turnAngle : -turnAngle;
 
             for (int s = 0; s <= steps; ++s) {
@@ -245,9 +231,55 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
             emitOuter(leftPts);
             emitInner(rightPts);
         }
+    };
+
+    if (isClosed) {
+        // ---------------------------------------------------------------------
+        // CLOSED POLYGON LOOP (Seamless ring without terminal endcaps)
+        // ---------------------------------------------------------------------
+        for (size_t i = 0; i < M; ++i) {
+            const auto& sIn  = (i == 0) ? segs[M - 1] : segs[i - 1];
+            const auto& sOut = segs[i];
+            processCorner(i, sIn, sOut);
+        }
+
+        if (leftPts.empty() || rightPts.empty()) return path;
+
+        // Outer contour (CW)
+        path.move_to(leftPts[0].x, leftPts[0].y);
+        for (size_t i = 1; i < leftPts.size(); ++i) {
+            path.line_to(leftPts[i].x, leftPts[i].y);
+        }
+        path.close();
+
+        // Inner contour in reverse winding direction (CCW)
+        path.move_to(rightPts.back().x, rightPts.back().y);
+        for (size_t i = rightPts.size() - 1; i > 0; --i) {
+            path.line_to(rightPts[i - 1].x, rightPts[i - 1].y);
+        }
+        path.close();
+
+        return path;
     }
 
-    // 5. End point P_{N-1}
+    // -------------------------------------------------------------------------
+    // OPEN STROKE RIBBON (Honors endcaps at P0 and P_{N-1})
+    // -------------------------------------------------------------------------
+
+    // Start point P0
+    {
+        Point2D offL0, offR0;
+        GetRibbonOffsets(capType, std::max(0.0f, cleanPts[0].r), segs[0].nx, segs[0].ny, offL0, offR0);
+        leftPts.push_back({ cleanPts[0].x + offL0.x, cleanPts[0].y + offL0.y });
+        rightPts.push_back({ cleanPts[0].x + offR0.x, cleanPts[0].y + offR0.y });
+    }
+
+    // Interior vertices Pi (i = 1 .. N - 2)
+    for (size_t i = 1; i < N - 1; ++i) {
+        processCorner(i, segs[i - 1], segs[i]);
+    }
+
+    // End point P_{N-1}
     {
         const auto& lastSeg = segs.back();
         Point2D offL_end, offR_end;
@@ -256,7 +288,7 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         rightPts.push_back({ cleanPts.back().x + offR_end.x, cleanPts.back().y + offR_end.y });
     }
 
-    // 6. Extrude single continuous closed contour with head/tail endcaps
+    // Extrude single continuous closed contour with head/tail endcaps
     path.move_to(leftPts[0].x, leftPts[0].y);
 
     for (size_t i = 1; i < leftPts.size(); ++i) {

@@ -44,7 +44,7 @@ BLPath InkGenerator::BuildPolygon(const std::vector<StrokePoint>& centerline,
 
     // Continuous line: fast-path directly to ribbon (polygons always Round joins/caps)
     if (pattern == StrokePattern::Solid) {
-        return BuildSolidRibbon(pts, CapType::Round);
+        return BuildSolidRibbon(pts, CapType::Round, /*isClosedPolygon=*/true);
     }
 
     // Discontinuous patterns: only executed when pattern is non-solid

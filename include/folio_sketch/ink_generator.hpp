@@ -148,7 +148,8 @@ private:
 
     // Builds a continuous 2D closed ribbon polygon from an ordered list of points
     static BLPath BuildSolidRibbon(const std::vector<StrokePoint>& pts,
-                                   CapType capType = CapType::Round);
+                                   CapType capType = CapType::Round,
+                                   bool isClosedPolygon = false);
 
     // Dispatches non-solid discontinuous patterns (Dotted, Dashed, DashDot)
     static BLPath ApplyDiscontinuousPattern(const std::vector<StrokePoint>& pts,
