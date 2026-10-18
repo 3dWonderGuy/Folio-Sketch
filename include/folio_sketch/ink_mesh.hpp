@@ -14,41 +14,6 @@
 namespace Folio {
 
 /**
- * @struct InkVertex
- * @brief Direct GPU vertex format for OpenGL triangle-strip / indexed quad mesh stroke rendering.
- */
-struct InkVertex {
-    float x = 0.0f;        // World coordinates
-    float y = 0.0f;
-    float edgeDist = 0.0f; // -1.0 (Left rail) to +1.0 (Right rail), 0.0 (Centerline) for fragment AA
-    float radius = 0.0f;   // Stroke radius at vertex
-    uint32_t color = 0xFF000000; // Packed RGBA8
-};
-
-/**
- * @struct InkMesh
- * @brief Batch of GPU-ready vertices and triangle indices.
- */
-struct InkMesh {
-    std::vector<InkVertex> vertices;
-    std::vector<uint32_t>  indices;
-
-    void clear() noexcept {
-        vertices.clear();
-        indices.clear();
-    }
-
-    [[nodiscard]] bool empty() const noexcept {
-        return vertices.empty() || indices.empty();
-    }
-
-    void reserve(size_t vCount, size_t iCount) {
-        vertices.reserve(vCount);
-        indices.reserve(iCount);
-    }
-};
-
-/**
  * @class InkMeshBuilder
  * @brief High-performance GPU mesh builder for variable-width strokes.
  *

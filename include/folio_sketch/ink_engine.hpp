@@ -25,6 +25,7 @@
 #include "folio_sketch/ink_stroke_data.hpp"
 #include "folio_sketch/ink_config.hpp"
 #include "folio_sketch/ink_generator.hpp"
+#include "folio_sketch/ink_mesh.hpp"
 
 // Forward declarations for Google Ink Stroke Modeler
 namespace ink::stroke_model {
@@ -124,6 +125,8 @@ public:
     [[nodiscard]] bool IsStrokeActive() const noexcept { return m_isStrokeActive; }
     [[nodiscard]] const BLPath& GetLiveOutlinePath() const noexcept;
     [[nodiscard]] const BLPath& GetPredictedOutlinePath() const noexcept;
+    [[nodiscard]] const InkMesh& GetLiveMesh() const noexcept;
+    [[nodiscard]] const InkMesh& GetPredictedMesh() const noexcept;
     [[nodiscard]] const std::vector<StrokePoint>& GetLiveModeledPoints() const noexcept { return m_liveModeledPoints; }
     [[nodiscard]] const std::vector<StrokePoint>& GetPredictedPoints() const noexcept;
     [[nodiscard]] const StrokeStyle& GetActiveStyle() const noexcept { return m_activeStyle; }
@@ -153,14 +156,21 @@ public:
     /**
      * @brief Centralized stroke outline computing authority.
      */
-    /**
-     * @brief Centralized stroke outline computing authority.
-     */
     static BLPath BuildStrokeOutline(const std::vector<StrokePoint>& points,
                                      CapType capType = CapType::Round,
                                      StrokePattern pattern = StrokePattern::Solid,
                                      bool isStandardShape = false) {
         return InkGenerator::GenerateStroke(points, capType, pattern, isStandardShape);
+    }
+
+    /**
+     * @brief Centralized GPU indexed triangle mesh computing authority.
+     */
+    static void BuildStrokeMesh(std::span<const StrokePoint> points,
+                                CapType capType,
+                                uint32_t packedColor,
+                                InkMesh& outMesh) {
+        InkMeshBuilder::BuildSolidMesh(points, capType, packedColor, outMesh);
     }
 
 private:
@@ -180,6 +190,7 @@ private:
 
     // Builds temporary forward-predicted tip outline to reduce perceived latency
     void EnsureLiveOutline() const;
+    void EnsureLiveMesh() const;
     void EnsurePrediction() const;
 
     // Recomputes cached evaluation config flags from active style & config
@@ -202,7 +213,10 @@ private:
 
     mutable BLPath m_liveStrokeOutline;
     mutable BLPath m_predictedStrokeOutline;
+    mutable InkMesh m_liveStrokeMesh;
+    mutable InkMesh m_predictedStrokeMesh;
     mutable bool m_outlineDirty = false;
+    mutable bool m_meshDirty = false;
     mutable bool m_predictionDirty = false;
 
     // Google Ink Modeler Bridge
