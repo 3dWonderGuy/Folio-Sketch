@@ -10,6 +10,16 @@
 
 namespace Folio {
 
+namespace {
+
+struct SegmentInfo {
+    double len = 0.0;
+    double ux = 1.0, uy = 0.0;
+    double nx = 0.0, ny = 1.0;
+};
+
+} // namespace
+
 void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
                                     CapType capType,
                                     uint32_t color,
@@ -90,13 +100,7 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
         return;
     }
 
-    // 3. Polyline Continuous Ribbon (N >= 2)
     const size_t N = cleanPts.size();
-    struct SegmentInfo {
-        double len = 0.0;
-        double ux = 1.0, uy = 0.0;
-        double nx = 0.0, ny = 1.0;
-    };
     std::vector<SegmentInfo> segs(N - 1);
     for (size_t i = 0; i < N - 1; ++i) {
         double dx = cleanPts[i + 1].x - cleanPts[i].x;
@@ -118,22 +122,39 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
         }
     }
 
-    outMesh.reserve(N * 6, (N - 1) * 12 + 64);
+    // -------------------------------------------------------------------------
+    // HAIRPIN SPLIT DETECTION:
+    // When turn angle > 130° (dot < -0.65), normal vectors cancel out and ribbons
+    // invert into bowtie knots. We split at sharp turnarounds into clean sub-ribbons
+    // sharing the pivot vertex.
+    // -------------------------------------------------------------------------
+    std::vector<size_t> splitIndices;
+    for (size_t i = 1; i < N - 1; ++i) {
+        double dot = segs[i - 1].ux * segs[i].ux + segs[i - 1].uy * segs[i].uy;
+        if (dot < -0.65) {
+            splitIndices.push_back(i);
+        }
+    }
 
-    // Initial cross-section at P0
-    float r0 = std::max(0.0f, cleanPts[0].r);
-    Point2D offL0, offR0;
-    Folio::InkInternal::GetRibbonOffsets(capType, r0, segs[0].nx, segs[0].ny, offL0, offR0);
+    // Helper to build a round sub-ribbon from cleanPts[startIdx ... endIdx]
+    auto buildRoundSubRibbon = [&](size_t startIdx, size_t endIdx) {
+        if (endIdx <= startIdx) return;
+        const size_t subN = endIdx - startIdx + 1;
+        if (subN < 2) return;
 
-    uint32_t curLeftIdx   = addVertex(cleanPts[0].x + offL0.x, cleanPts[0].y + offL0.y, -1.0f, r0);
-    uint32_t curCenterIdx = addVertex(cleanPts[0].x, cleanPts[0].y, 0.0f, r0);
-    uint32_t curRightIdx  = addVertex(cleanPts[0].x + offR0.x, cleanPts[0].y + offR0.y, 1.0f, r0);
+        float rStart = std::max(0.0f, cleanPts[startIdx].r);
+        const auto& s0 = segs[startIdx];
 
-    // Head Endcap at P0: smooth round semicircle facing backward (-u0) from curRightIdx to curLeftIdx
-    if (capType == CapType::Round) {
+        uint32_t curLeftIdx   = addVertex(cleanPts[startIdx].x + s0.nx * rStart,
+                                          cleanPts[startIdx].y + s0.ny * rStart, -1.0f, rStart);
+        uint32_t curCenterIdx = addVertex(cleanPts[startIdx].x, cleanPts[startIdx].y, 0.0f, rStart);
+        uint32_t curRightIdx  = addVertex(cleanPts[startIdx].x - s0.nx * rStart,
+                                          cleanPts[startIdx].y - s0.ny * rStart, 1.0f, rStart);
+
+        // Head Endcap at startIdx: smooth round semicircle facing backward (-s0.u)
         constexpr int headSteps = 16;
-        double aStart = std::atan2(offR0.y, offR0.x);
-        double aEnd   = std::atan2(offL0.y, offL0.x);
+        double aStart = std::atan2(-s0.ny, -s0.nx);
+        double aEnd   = std::atan2( s0.ny,  s0.nx);
         double sweep  = aEnd - aStart;
         while (sweep < 0.0) sweep += 2.0 * M_PI;
         if (sweep > 2.0 * M_PI) sweep -= 2.0 * M_PI;
@@ -141,200 +162,359 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
         uint32_t prevFan = curRightIdx;
         for (int s = 1; s < headSteps; ++s) {
             double a = aStart + (static_cast<double>(s) / headSteps) * sweep;
-            uint32_t arcIdx = addVertex(cleanPts[0].x + std::cos(a) * r0,
-                                        cleanPts[0].y + std::sin(a) * r0,
-                                        1.0f, r0);
+            uint32_t arcIdx = addVertex(cleanPts[startIdx].x + std::cos(a) * rStart,
+                                        cleanPts[startIdx].y + std::sin(a) * rStart,
+                                        1.0f, rStart);
             addTriangle(curCenterIdx, prevFan, arcIdx);
             prevFan = arcIdx;
         }
         addTriangle(curCenterIdx, prevFan, curLeftIdx);
-    }
 
-    // Traverse segments and emit continuous quad strips and smooth corner joints
-    for (size_t i = 0; i < N - 1; ++i) {
-        const size_t nextPtIdx = i + 1;
-        float rNext = std::max(0.0f, cleanPts[nextPtIdx].r);
+        // Traverse interior segments
+        for (size_t i = startIdx; i < endIdx; ++i) {
+            const size_t nextPtIdx = i + 1;
+            float rNext = std::max(0.0f, cleanPts[nextPtIdx].r);
 
-        // Terminal segment ending at P_{N-1}
-        if (nextPtIdx == N - 1) {
-            Point2D offL_end, offR_end;
-            Folio::InkInternal::GetRibbonOffsets(capType, rNext, segs[i].nx, segs[i].ny, offL_end, offR_end);
+            if (nextPtIdx == endIdx) {
+                // Terminal segment ending at endIdx
+                const auto& lastSeg = segs[i];
+                uint32_t nextLeftIdx   = addVertex(cleanPts[nextPtIdx].x + lastSeg.nx * rNext,
+                                                   cleanPts[nextPtIdx].y + lastSeg.ny * rNext, -1.0f, rNext);
+                uint32_t nextCenterIdx = addVertex(cleanPts[nextPtIdx].x, cleanPts[nextPtIdx].y, 0.0f, rNext);
+                uint32_t nextRightIdx  = addVertex(cleanPts[nextPtIdx].x - lastSeg.nx * rNext,
+                                                   cleanPts[nextPtIdx].y - lastSeg.ny * rNext, 1.0f, rNext);
 
-            uint32_t nextLeftIdx   = addVertex(cleanPts[nextPtIdx].x + offL_end.x, cleanPts[nextPtIdx].y + offL_end.y, -1.0f, rNext);
-            uint32_t nextCenterIdx = addVertex(cleanPts[nextPtIdx].x, cleanPts[nextPtIdx].y, 0.0f, rNext);
-            uint32_t nextRightIdx  = addVertex(cleanPts[nextPtIdx].x + offR_end.x, cleanPts[nextPtIdx].y + offR_end.y, 1.0f, rNext);
+                addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
+                addTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
 
-            // Left quad: (curLeft, curCenter, nextCenter) & (curLeft, nextCenter, nextLeft)
-            addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-            addTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
+                addTriangle(curCenterIdx, curRightIdx, nextRightIdx);
+                addTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
 
-            // Right quad: (curCenter, curRight, nextRight) & (curCenter, nextRight, nextCenter)
-            addTriangle(curCenterIdx, curRightIdx, nextRightIdx);
-            addTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
-
-            // Tail Endcap at P_{N-1}: smooth round semicircle facing forward (+u_{N-2}) from nextLeft to nextRight
-            if (capType == CapType::Round) {
+                // Tail Endcap at endIdx: smooth round semicircle facing forward (+lastSeg.u)
                 constexpr int tailSteps = 16;
-                double aStart = std::atan2(offL_end.y, offL_end.x);
-                double aEnd   = std::atan2(offR_end.y, offR_end.x);
-                double sweep  = aEnd - aStart;
-                while (sweep < 0.0) sweep += 2.0 * M_PI;
-                if (sweep > 2.0 * M_PI) sweep -= 2.0 * M_PI;
+                double aStartTail = std::atan2( lastSeg.ny,  lastSeg.nx);
+                double aEndTail   = std::atan2(-lastSeg.ny, -lastSeg.nx);
+                double sweepTail  = aEndTail - aStartTail;
+                while (sweepTail < 0.0) sweepTail += 2.0 * M_PI;
+                if (sweepTail > 2.0 * M_PI) sweepTail -= 2.0 * M_PI;
 
-                uint32_t prevFan = nextLeftIdx;
+                uint32_t prevFanTail = nextLeftIdx;
                 for (int s = 1; s < tailSteps; ++s) {
-                    double a = aStart + (static_cast<double>(s) / tailSteps) * sweep;
+                    double a = aStartTail + (static_cast<double>(s) / tailSteps) * sweepTail;
                     uint32_t arcIdx = addVertex(cleanPts[nextPtIdx].x + std::cos(a) * rNext,
                                                 cleanPts[nextPtIdx].y + std::sin(a) * rNext,
                                                 1.0f, rNext);
-                    addTriangle(nextCenterIdx, prevFan, arcIdx);
-                    prevFan = arcIdx;
+                    addTriangle(nextCenterIdx, prevFanTail, arcIdx);
+                    prevFanTail = arcIdx;
                 }
-                addTriangle(nextCenterIdx, prevFan, nextRightIdx);
+                addTriangle(nextCenterIdx, prevFanTail, nextRightIdx);
+                break;
             }
-            break;
-        }
 
-        // Interior vertex P_{i+1}
-        const auto& sIn  = segs[i];
-        const auto& sOut = segs[i + 1];
+            // Interior vertex P_{i+1}
+            const auto& sIn  = segs[i];
+            const auto& sOut = segs[i + 1];
 
-        double cross = sIn.ux * sOut.uy - sIn.uy * sOut.ux;
-        double dot   = sIn.ux * sOut.ux + sIn.uy * sOut.uy;
-        double turnAngle = std::atan2(std::abs(cross), dot);
+            double cross = sIn.ux * sOut.uy - sIn.uy * sOut.ux;
+            double dot   = sIn.ux * sOut.ux + sIn.uy * sOut.uy;
+            double turnAngle = std::atan2(std::abs(cross), dot);
 
-        // Gentle turn (< 0.35 rad ~ 20 deg) or polygonal nib: Single continuous bisector vertex on both sides
-        if (turnAngle < 0.35 || capType != CapType::Round) {
+            if (turnAngle < 0.35) {
+                // Gentle turn: continuous bisector miter
+                double avgNx = sIn.nx + sOut.nx;
+                double avgNy = sIn.ny + sOut.ny;
+                double avgLen = std::hypot(avgNx, avgNy);
+                if (avgLen > 1e-6) { avgNx /= avgLen; avgNy /= avgLen; }
+                else { avgNx = sIn.nx; avgNy = sIn.ny; }
+
+                double miterScale = 1.0 / std::max(0.5, std::cos(turnAngle * 0.5));
+                miterScale = std::min(miterScale, 1.25);
+
+                uint32_t nextLeftIdx   = addVertex(cleanPts[nextPtIdx].x + avgNx * rNext * miterScale,
+                                                   cleanPts[nextPtIdx].y + avgNy * rNext * miterScale, -1.0f, rNext);
+                uint32_t nextCenterIdx = addVertex(cleanPts[nextPtIdx].x, cleanPts[nextPtIdx].y, 0.0f, rNext);
+                uint32_t nextRightIdx  = addVertex(cleanPts[nextPtIdx].x - avgNx * rNext * miterScale,
+                                                   cleanPts[nextPtIdx].y - avgNy * rNext * miterScale, 1.0f, rNext);
+
+                addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
+                addTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
+
+                addTriangle(curCenterIdx, curRightIdx, nextRightIdx);
+                addTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
+
+                curLeftIdx   = nextLeftIdx;
+                curCenterIdx = nextCenterIdx;
+                curRightIdx  = nextRightIdx;
+                continue;
+            }
+
+            // Sharp turn (turnAngle >= 0.35 rad, dot >= -0.65):
+            bool leftIsInner = (cross < 0.0) || (cross == 0.0 && dot < 0.0);
+            uint32_t nextCenterIdx = addVertex(cleanPts[nextPtIdx].x, cleanPts[nextPtIdx].y, 0.0f, rNext);
+
             double avgNx = sIn.nx + sOut.nx;
             double avgNy = sIn.ny + sOut.ny;
             double avgLen = std::hypot(avgNx, avgNy);
-            if (avgLen > 1e-6) {
-                avgNx /= avgLen;
-                avgNy /= avgLen;
+            if (avgLen > 1e-6) { avgNx /= avgLen; avgNy /= avgLen; }
+            else { avgNx = sIn.nx; avgNy = sIn.ny; }
+
+            double sinHalf = std::sqrt(std::max(0.0, (1.0 - dot) * 0.5));
+            double safeLimit = (std::min(sIn.len, sOut.len) * 0.5) / std::max(1e-4, sinHalf);
+            double cosHalf = std::sqrt(std::max(0.0, (1.0 + dot) * 0.5));
+            double innerMiterDist = rNext;
+            if (cosHalf > 1e-4) {
+                innerMiterDist = std::min(rNext / cosHalf, 1.25 * rNext);
+            }
+            innerMiterDist = std::min(innerMiterDist, std::max(0.0, safeLimit));
+
+            double innerSign = leftIsInner ? 1.0 : -1.0;
+            uint32_t innerIdx = addVertex(cleanPts[nextPtIdx].x + innerSign * avgNx * innerMiterDist,
+                                          cleanPts[nextPtIdx].y + innerSign * avgNy * innerMiterDist,
+                                          leftIsInner ? -1.0f : 1.0f, rNext);
+
+            double outerSign = leftIsInner ? -1.0 : 1.0;
+            uint32_t outerInIdx = addVertex(cleanPts[nextPtIdx].x + outerSign * sIn.nx * rNext,
+                                            cleanPts[nextPtIdx].y + outerSign * sIn.ny * rNext,
+                                            leftIsInner ? 1.0f : -1.0f, rNext);
+
+            if (leftIsInner) {
+                addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
+                addTriangle(curLeftIdx, nextCenterIdx, innerIdx);
+
+                addTriangle(curCenterIdx, curRightIdx, outerInIdx);
+                addTriangle(curCenterIdx, outerInIdx, nextCenterIdx);
             } else {
-                avgNx = sIn.nx;
-                avgNy = sIn.ny;
+                addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
+                addTriangle(curLeftIdx, nextCenterIdx, outerInIdx);
+
+                addTriangle(curCenterIdx, curRightIdx, innerIdx);
+                addTriangle(curCenterIdx, innerIdx, nextCenterIdx);
             }
 
-            double miterScale = 1.0 / std::max(0.5, std::cos(turnAngle * 0.5));
-            miterScale = std::min(miterScale, 1.25);
+            int fanSteps = std::clamp(static_cast<int>(std::ceil(turnAngle / (M_PI / 16.0))), 2, 16);
+            double aStartFan = std::atan2(outerSign * sIn.ny,  outerSign * sIn.nx);
+            double aEndFan   = std::atan2(outerSign * sOut.ny, outerSign * sOut.nx);
+            double sweepFan  = aEndFan - aStartFan;
 
-            Point2D offL, offR;
-            Folio::InkInternal::GetRibbonOffsets(capType, rNext * miterScale, avgNx, avgNy, offL, offR);
+            if (leftIsInner) {
+                while (sweepFan > 0.0) sweepFan -= 2.0 * M_PI;
+            } else {
+                while (sweepFan < 0.0) sweepFan += 2.0 * M_PI;
+            }
 
-            uint32_t nextLeftIdx   = addVertex(cleanPts[nextPtIdx].x + offL.x, cleanPts[nextPtIdx].y + offL.y, -1.0f, rNext);
+            uint32_t prevFan = outerInIdx;
+            float outerEdgeDist = leftIsInner ? 1.0f : -1.0f;
+            for (int s = 1; s <= fanSteps; ++s) {
+                double a = aStartFan + (static_cast<double>(s) / fanSteps) * sweepFan;
+                uint32_t arcIdx = addVertex(cleanPts[nextPtIdx].x + std::cos(a) * rNext,
+                                            cleanPts[nextPtIdx].y + std::sin(a) * rNext,
+                                            outerEdgeDist, rNext);
+                if (leftIsInner) {
+                    addTriangle(nextCenterIdx, arcIdx, prevFan);
+                } else {
+                    addTriangle(nextCenterIdx, prevFan, arcIdx);
+                }
+                prevFan = arcIdx;
+            }
+
+            curCenterIdx = nextCenterIdx;
+            if (leftIsInner) {
+                curLeftIdx  = innerIdx;
+                curRightIdx = prevFan;
+            } else {
+                curLeftIdx  = prevFan;
+                curRightIdx = innerIdx;
+            }
+        }
+    };
+
+    // Helper to build a polygonal nib sub-ribbon (Square/Highlighter, Chisel/Calligraphy)
+    auto buildPolygonalSubRibbon = [&](size_t startIdx, size_t endIdx) {
+        if (endIdx <= startIdx) return;
+        const size_t subN = endIdx - startIdx + 1;
+        if (subN < 2) return;
+
+        struct SegmentCorners {
+            int idxLeftStart  = 0;
+            int idxLeftEnd    = 0;
+            int idxRightStart = 0;
+            int idxRightEnd   = 0;
+        };
+
+        const size_t numSubSegs = endIdx - startIdx;
+        std::vector<SegmentCorners> segCorners(numSubSegs);
+
+        for (size_t si = 0; si < numSubSegs; ++si) {
+            size_t segIdx = startIdx + si;
+            const auto& s = segs[segIdx];
+            float rAvg = std::max(0.0f, (cleanPts[segIdx].r + cleanPts[segIdx + 1].r) * 0.5f);
+            auto verts = Folio::InkInternal::GetNibVertices(capType, rAvg);
+            const int K = static_cast<int>(verts.size());
+
+            double maxProj = -1e9, minProj = 1e9;
+            for (int k = 0; k < K; ++k) {
+                double proj = verts[k].x * s.nx + verts[k].y * s.ny;
+                if (proj > maxProj) maxProj = proj;
+                if (proj < minProj) minProj = proj;
+            }
+
+            int lStart = 0, lEnd = 0, rStart = 0, rEnd = 0;
+            double lStartTan = 1e9, lEndTan = -1e9;
+            double rStartTan = 1e9, rEndTan = -1e9;
+
+            for (int k = 0; k < K; ++k) {
+                double proj = verts[k].x * s.nx + verts[k].y * s.ny;
+                double tan  = verts[k].x * s.ux + verts[k].y * s.uy;
+
+                if (std::abs(proj - maxProj) <= 1e-4) {
+                    if (tan < lStartTan) { lStartTan = tan; lStart = k; }
+                    if (tan > lEndTan)   { lEndTan   = tan; lEnd   = k; }
+                }
+                if (std::abs(proj - minProj) <= 1e-4) {
+                    if (tan < rStartTan) { rStartTan = tan; rStart = k; }
+                    if (tan > rEndTan)   { rEndTan   = tan; rEnd   = k; }
+                }
+            }
+
+            segCorners[si] = { lStart, lEnd, rStart, rEnd };
+        }
+
+        // Helper to emit a polygon fan between two corner indices at point P
+        auto emitPolygonFan = [&](uint32_t cIdx, const StrokePoint& pt, float r,
+                                  int startCorner, int endCorner,
+                                  uint32_t startVtxIdx, uint32_t endVtxIdx,
+                                  double outwardX, double outwardY, float edgeDist) {
+            if (startCorner == endCorner) return;
+            auto verts = Folio::InkInternal::GetNibVertices(capType, r);
+            const int K = static_cast<int>(verts.size());
+
+            std::vector<int> pathCW;
+            for (int k = (startCorner + 1) % K; k != endCorner; k = (k + 1) % K) {
+                pathCW.push_back(k);
+            }
+            std::vector<int> pathCCW;
+            for (int k = (startCorner - 1 + K) % K; k != endCorner; k = (k - 1 + K) % K) {
+                pathCCW.push_back(k);
+            }
+
+            auto evalPath = [&](const std::vector<int>& p) -> double {
+                if (p.empty()) return 0.0;
+                double s = 0.0;
+                for (int idx : p) {
+                    s += verts[idx].x * outwardX + verts[idx].y * outwardY;
+                }
+                return s / static_cast<double>(p.size());
+            };
+
+            const auto& chosen = (evalPath(pathCW) >= evalPath(pathCCW)) ? pathCW : pathCCW;
+
+            uint32_t prev = startVtxIdx;
+            for (int idx : chosen) {
+                uint32_t cur = addVertex(pt.x + verts[idx].x, pt.y + verts[idx].y, edgeDist, r);
+                addTriangle(cIdx, prev, cur);
+                prev = cur;
+            }
+            addTriangle(cIdx, prev, endVtxIdx);
+        };
+
+        // Head Cap at startIdx: covers rear-facing corners of the fixed nib
+        float rStart = std::max(0.0f, cleanPts[startIdx].r);
+        auto vertsStart = Folio::InkInternal::GetNibVertices(capType, rStart);
+        const auto& sc0 = segCorners[0];
+        const auto& s0  = segs[startIdx];
+
+        uint32_t curLeftIdx   = addVertex(cleanPts[startIdx].x + vertsStart[sc0.idxLeftStart].x,
+                                          cleanPts[startIdx].y + vertsStart[sc0.idxLeftStart].y, -1.0f, rStart);
+        uint32_t curCenterIdx = addVertex(cleanPts[startIdx].x, cleanPts[startIdx].y, 0.0f, rStart);
+        uint32_t curRightIdx  = addVertex(cleanPts[startIdx].x + vertsStart[sc0.idxRightStart].x,
+                                          cleanPts[startIdx].y + vertsStart[sc0.idxRightStart].y, 1.0f, rStart);
+
+        emitPolygonFan(curCenterIdx, cleanPts[startIdx], rStart,
+                       sc0.idxRightStart, sc0.idxLeftStart,
+                       curRightIdx, curLeftIdx,
+                       -s0.ux, -s0.uy, 1.0f);
+
+        // Traverse segments and emit quads + corner fans
+        for (size_t si = 0; si < numSubSegs; ++si) {
+            size_t segIdx = startIdx + si;
+            size_t nextPtIdx = segIdx + 1;
+            float rNext = std::max(0.0f, cleanPts[nextPtIdx].r);
+            auto vertsNext = Folio::InkInternal::GetNibVertices(capType, rNext);
+            const auto& curSc = segCorners[si];
+
+            uint32_t nextLeftIdx   = addVertex(cleanPts[nextPtIdx].x + vertsNext[curSc.idxLeftEnd].x,
+                                               cleanPts[nextPtIdx].y + vertsNext[curSc.idxLeftEnd].y, -1.0f, rNext);
             uint32_t nextCenterIdx = addVertex(cleanPts[nextPtIdx].x, cleanPts[nextPtIdx].y, 0.0f, rNext);
-            uint32_t nextRightIdx  = addVertex(cleanPts[nextPtIdx].x + offR.x, cleanPts[nextPtIdx].y + offR.y, 1.0f, rNext);
+            uint32_t nextRightIdx  = addVertex(cleanPts[nextPtIdx].x + vertsNext[curSc.idxRightEnd].x,
+                                               cleanPts[nextPtIdx].y + vertsNext[curSc.idxRightEnd].y, 1.0f, rNext);
 
-            // Connect quad
+            // Connect quad along segment
             addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
             addTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
 
             addTriangle(curCenterIdx, curRightIdx, nextRightIdx);
             addTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
 
-            curLeftIdx   = nextLeftIdx;
-            curCenterIdx = nextCenterIdx;
-            curRightIdx  = nextRightIdx;
-            continue;
-        }
-
-        // Sharp turn (turnAngle >= 0.35 rad) with Round cap:
-        // In screen coords (+Y down), cross < 0 is CCW (Left is Inner).
-        bool leftIsInner = (cross < 0.0) || (cross == 0.0 && dot < 0.0);
-
-        uint32_t nextCenterIdx = addVertex(cleanPts[nextPtIdx].x, cleanPts[nextPtIdx].y, 0.0f, rNext);
-
-        // Inner side: miter-clamped single vertex
-        double avgNx = sIn.nx + sOut.nx;
-        double avgNy = sIn.ny + sOut.ny;
-        double avgLen = std::hypot(avgNx, avgNy);
-        if (avgLen > 1e-6) { avgNx /= avgLen; avgNy /= avgLen; }
-        else { avgNx = sIn.nx; avgNy = sIn.ny; }
-
-        double sinHalf = std::sqrt(std::max(0.0, (1.0 - dot) * 0.5));
-        double safeLimit = (std::min(sIn.len, sOut.len) * 0.5) / std::max(1e-4, sinHalf);
-        double cosHalf = std::sqrt(std::max(0.0, (1.0 + dot) * 0.5));
-        double innerMiterDist = rNext;
-        if (cosHalf > 1e-4) {
-            innerMiterDist = std::min(rNext / cosHalf, 1.25 * rNext);
-        }
-        if (innerMiterDist > safeLimit) {
-            innerMiterDist = rNext; // Clamp safely to disk circumference
-        }
-
-        double innerSign = leftIsInner ? 1.0 : -1.0;
-        Point2D vInner = {
-            cleanPts[nextPtIdx].x + innerSign * avgNx * innerMiterDist,
-            cleanPts[nextPtIdx].y + innerSign * avgNy * innerMiterDist
-        };
-        uint32_t innerIdx = addVertex(vInner.x, vInner.y, leftIsInner ? -1.0f : 1.0f, rNext);
-
-        // Outer side: incoming vertex
-        double outerSign = leftIsInner ? -1.0 : 1.0;
-        Point2D vOuterIn = {
-            cleanPts[nextPtIdx].x + outerSign * sIn.nx * rNext,
-            cleanPts[nextPtIdx].y + outerSign * sIn.ny * rNext
-        };
-        uint32_t outerInIdx = addVertex(vOuterIn.x, vOuterIn.y, leftIsInner ? 1.0f : -1.0f, rNext);
-
-        // Connect incoming quad from cur cross-section
-        if (leftIsInner) {
-            // Left is Inner
-            addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-            addTriangle(curLeftIdx, nextCenterIdx, innerIdx);
-
-            // Right is Outer
-            addTriangle(curCenterIdx, curRightIdx, outerInIdx);
-            addTriangle(curCenterIdx, outerInIdx, nextCenterIdx);
-        } else {
-            // Left is Outer
-            addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-            addTriangle(curLeftIdx, nextCenterIdx, outerInIdx);
-
-            // Right is Inner
-            addTriangle(curCenterIdx, curRightIdx, innerIdx);
-            addTriangle(curCenterIdx, innerIdx, nextCenterIdx);
-        }
-
-        // Smooth Round Outer Fan between incoming and outgoing outer normals
-        int fanSteps = std::clamp(static_cast<int>(std::ceil(turnAngle / (M_PI / 16.0))), 2, 16);
-        double aStart = std::atan2(outerSign * sIn.ny,  outerSign * sIn.nx);
-        double aEnd   = std::atan2(outerSign * sOut.ny, outerSign * sOut.nx);
-        double sweep  = aEnd - aStart;
-
-        // Normal sweep direction along outer boundary
-        if (leftIsInner) {
-            // Right is outer, sweeps CCW in screen coords (-sweep)
-            while (sweep > 0.0) sweep -= 2.0 * M_PI;
-        } else {
-            // Left is outer, sweeps CW in screen coords (+sweep)
-            while (sweep < 0.0) sweep += 2.0 * M_PI;
-        }
-
-        uint32_t prevFan = outerInIdx;
-        float outerEdgeDist = leftIsInner ? 1.0f : -1.0f;
-        for (int s = 1; s <= fanSteps; ++s) {
-            double a = aStart + (static_cast<double>(s) / fanSteps) * sweep;
-            uint32_t arcIdx = addVertex(cleanPts[nextPtIdx].x + std::cos(a) * rNext,
-                                        cleanPts[nextPtIdx].y + std::sin(a) * rNext,
-                                        outerEdgeDist, rNext);
-            if (leftIsInner) {
-                addTriangle(nextCenterIdx, arcIdx, prevFan);
-            } else {
-                addTriangle(nextCenterIdx, prevFan, arcIdx);
+            if (si + 1 == numSubSegs) {
+                // Tail Cap at endIdx: covers front-facing corners of the fixed nib
+                const auto& lastSeg = segs[segIdx];
+                emitPolygonFan(nextCenterIdx, cleanPts[nextPtIdx], rNext,
+                               curSc.idxLeftEnd, curSc.idxRightEnd,
+                               nextLeftIdx, nextRightIdx,
+                               lastSeg.ux, lastSeg.uy, 1.0f);
+                break;
             }
-            prevFan = arcIdx;
-        }
 
-        // Setup cross-section for outgoing segment
-        curCenterIdx = nextCenterIdx;
-        if (leftIsInner) {
-            curLeftIdx  = innerIdx;
-            curRightIdx = prevFan; // Last outer fan vertex connects to outgoing right quad
+            // Interior joint P_{nextPtIdx}: transition between segment si and segment si+1
+            const auto& nextSc = segCorners[si + 1];
+            const auto& sIn    = segs[segIdx];
+            const auto& sOut   = segs[segIdx + 1];
+
+            uint32_t outLeftStartIdx = nextLeftIdx;
+            if (curSc.idxLeftEnd != nextSc.idxLeftStart) {
+                outLeftStartIdx = addVertex(cleanPts[nextPtIdx].x + vertsNext[nextSc.idxLeftStart].x,
+                                            cleanPts[nextPtIdx].y + vertsNext[nextSc.idxLeftStart].y, -1.0f, rNext);
+                emitPolygonFan(nextCenterIdx, cleanPts[nextPtIdx], rNext,
+                               curSc.idxLeftEnd, nextSc.idxLeftStart,
+                               nextLeftIdx, outLeftStartIdx,
+                               sIn.nx + sOut.nx, sIn.ny + sOut.ny, -1.0f);
+            }
+
+            uint32_t outRightStartIdx = nextRightIdx;
+            if (curSc.idxRightEnd != nextSc.idxRightStart) {
+                outRightStartIdx = addVertex(cleanPts[nextPtIdx].x + vertsNext[nextSc.idxRightStart].x,
+                                             cleanPts[nextPtIdx].y + vertsNext[nextSc.idxRightStart].y, 1.0f, rNext);
+                emitPolygonFan(nextCenterIdx, cleanPts[nextPtIdx], rNext,
+                               curSc.idxRightEnd, nextSc.idxRightStart,
+                               nextRightIdx, outRightStartIdx,
+                               -(sIn.nx + sOut.nx), -(sIn.ny + sOut.ny), 1.0f);
+            }
+
+            curLeftIdx   = outLeftStartIdx;
+            curCenterIdx = nextCenterIdx;
+            curRightIdx  = outRightStartIdx;
+        }
+    };
+
+    // Execute sub-ribbon generation across hairpin split points
+    outMesh.reserve(N * 6, (N - 1) * 12 + 64);
+
+    size_t subStart = 0;
+    for (size_t splitIdx : splitIndices) {
+        if (splitIdx > subStart) {
+            if (capType == CapType::Round) {
+                buildRoundSubRibbon(subStart, splitIdx);
+            } else {
+                buildPolygonalSubRibbon(subStart, splitIdx);
+            }
+            subStart = splitIdx;
+        }
+    }
+    if (subStart < N - 1) {
+        if (capType == CapType::Round) {
+            buildRoundSubRibbon(subStart, N - 1);
         } else {
-            curLeftIdx  = prevFan; // Last outer fan vertex connects to outgoing left quad
-            curRightIdx = innerIdx;
+            buildPolygonalSubRibbon(subStart, N - 1);
         }
     }
 }

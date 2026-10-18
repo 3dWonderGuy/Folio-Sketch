@@ -164,7 +164,7 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts, CapType capTy
         double dot   = sIn.ux * sOut.ux + sIn.uy * sOut.uy;
         double turnAngle = std::atan2(std::abs(cross), dot);
 
-        if (turnAngle < 0.40) {
+        if (turnAngle < 0.40 && capType == CapType::Round) {
             // Continuous smooth curve: single point on each side along unit average normal
             double avgNx = sIn.nx + sOut.nx;
             double avgNy = sIn.ny + sOut.ny;
