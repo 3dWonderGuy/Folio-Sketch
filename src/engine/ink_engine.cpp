@@ -286,7 +286,7 @@ FinishedStrokeData InkEngine::FinishStroke() {
 
     data.modeledPoints = m_liveModeledPoints;
     data.outlinePath = InkGenerator::GenerateStroke(
-        m_liveModeledPoints, m_activeStyle.capType, m_activeStyle.pattern);        // builds closed polygon ribbon for blend2d
+        m_liveModeledPoints, m_activeStyle.capType, m_activeStyle.pattern);        // builds closed polygon ribbon (CPU path / export)
     InkMeshBuilder::BuildSolidMesh(
         m_liveModeledPoints, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), data.mesh);
 

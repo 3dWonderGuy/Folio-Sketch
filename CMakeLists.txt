@@ -103,18 +103,29 @@ endif()
 # FolioSketch Library Target
 # ==============================================================================
 set(FOLIO_SKETCH_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_engine.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_polygon.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_stroke.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_ribbon.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_caps.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_patterns.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_infill.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_debug.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_mesh_builder.cpp"
+    # Core Engine
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/ink_engine.cpp"
+
+    # Geometry & Filtering
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/ink_stroke_filter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/ink_geometry_utils.cpp"
+
+    # Vector Geometry & Ribbon Generators
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_polygon.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_stroke.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_ribbon.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_caps.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_patterns.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_infill.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_debug.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_ribbon_corner.cpp"
+
+    # GPU Mesh Builder
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_builder.cpp"
 )
 
 set(FOLIO_SKETCH_HEADERS
+    # Public API Headers
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/folio_sketch.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_engine.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_config.hpp"
@@ -124,7 +135,13 @@ set(FOLIO_SKETCH_HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_width_evaluator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_post_processor.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_generator.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ink_generator_internal.hpp"
+
+    # Internal Headers
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/ink_geometry_utils.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/ink_nib_geometry.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/ink_stroke_filter.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_internal.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_ribbon_corner.hpp"
 )
 
 add_library(FolioSketch STATIC
@@ -142,6 +159,10 @@ target_include_directories(FolioSketch
         $<BUILD_INTERFACE:${INK_STROKE_MODELER_DIR}>
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engine"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/generator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh"
 )
 
 target_link_libraries(FolioSketch

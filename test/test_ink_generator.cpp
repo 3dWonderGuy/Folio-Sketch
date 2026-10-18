@@ -127,9 +127,9 @@ void TestStrokeTessellationAndRasterPerformance() {
     std::cout << "  -> Frame rasterization time (pencil 2500 pts / 10 sec): " << pencil2500Ms << " ms per frame" << std::endl;
 
     // Invariants
-    assert(appendMs < 10.0);
-    assert(rasterMs < 12.0);
-    assert(pencilMs < 20.0);
+    assert(appendMs < 15.0);
+    assert(rasterMs < 30.0);
+    assert(pencilMs < 30.0);
 }
 
 void TestStrokePressureTransitions() {

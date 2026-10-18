@@ -19,9 +19,6 @@
 #include <vector>
 #include <cstdint>
 #include <cmath>
-#include <algorithm>
-#include <blend2d/blend2d.h>
-
 #include "folio_sketch/ink_stroke_data.hpp"
 
 namespace Folio {

@@ -71,13 +71,43 @@ void GetRibbonOffsets(CapType capType, double r, double nx, double ny,
     auto verts = GetNibVertices(capType, r);
     Point2D bestLeft = verts[0];
     Point2D bestRight = verts[0];
+
+    // Tangent vector corresponding to normal (nx, ny): u = (-ny, nx)
+    double ux = -ny;
+    double uy = nx;
+
     double maxDot = -1e9;
     double minDot = 1e9;
+    double maxDotTan = 1e9;
+    double minDotTan = 1e9;
 
     for (const auto& v : verts) {
         double dot = v.x * nx + v.y * ny;
-        if (dot > maxDot) { maxDot = dot; bestLeft  = v; }
-        if (dot < minDot) { minDot = dot; bestRight = v; }
+        double tan = v.x * ux + v.y * uy;
+
+        if (dot > maxDot + 1e-5) {
+            maxDot = dot;
+            bestLeft = v;
+            maxDotTan = tan;
+        } else if (std::abs(dot - maxDot) <= 1e-5) {
+            // Break tie consistently by picking the rear corner (smallest tan projection)
+            if (tan < maxDotTan) {
+                bestLeft = v;
+                maxDotTan = tan;
+            }
+        }
+
+        if (dot < minDot - 1e-5) {
+            minDot = dot;
+            bestRight = v;
+            minDotTan = tan;
+        } else if (std::abs(dot - minDot) <= 1e-5) {
+            // Break tie consistently by picking the rear corner (smallest tan projection)
+            if (tan < minDotTan) {
+                bestRight = v;
+                minDotTan = tan;
+            }
+        }
     }
 
     outLeft  = bestLeft;
