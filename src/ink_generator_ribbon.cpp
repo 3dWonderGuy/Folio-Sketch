@@ -32,6 +32,39 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         return TraceCap(cleanPts.empty() ? pts[0] : cleanPts[0], capType);
     }
 
+    // 1b. Cull geometrically submerged disks where d <= |r1 - r0|
+    // (A disk completely contained inside an adjacent disk cannot form external tangents)
+    if (!isClosedPolygon && cleanPts.size() > 1) {
+        std::vector<StrokePoint> unSubmerged;
+        unSubmerged.reserve(cleanPts.size());
+        for (const auto& p : cleanPts) {
+            while (!unSubmerged.empty()) {
+                double d = std::hypot(p.x - unSubmerged.back().x, p.y - unSubmerged.back().y);
+                if (d + unSubmerged.back().r <= p.r) {
+                    if (unSubmerged.size() == 1) {
+                        unSubmerged.back() = p;
+                        break;
+                    } else {
+                        unSubmerged.pop_back();
+                    }
+                } else {
+                    break;
+                }
+            }
+            if (unSubmerged.empty()) {
+                unSubmerged.push_back(p);
+            } else {
+                double d = std::hypot(p.x - unSubmerged.back().x, p.y - unSubmerged.back().y);
+                if (d + p.r > unSubmerged.back().r) {
+                    unSubmerged.push_back(p);
+                }
+            }
+        }
+        if (unSubmerged.size() >= 2) {
+            cleanPts = std::move(unSubmerged);
+        }
+    }
+
     if (isClosedPolygon && cleanPts.size() >= 3) {
         if (std::hypot(cleanPts.back().x - cleanPts.front().x,
                        cleanPts.back().y - cleanPts.front().y) >= 1e-4) {
@@ -201,9 +234,8 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
                 innerDist = r / cosHalf;
             }
             // Clamp miter to avoid extreme spikes on sharp turns, and avoid overshooting segments
-            double maxAllowedDist = std::max(r, 1.5 * std::min(sIn.len, sOut.len) / std::max(1e-4, sinHalf));
-            maxAllowedDist = std::min(maxAllowedDist, 2.0 * r);
-            innerDist = std::min(innerDist, maxAllowedDist);
+            double maxAllowedDist = (0.85 * std::min(sIn.len, sOut.len)) / std::max(1e-4, sinHalf);
+            innerDist = std::min({ innerDist, maxAllowedDist, 2.0 * r });
 
             inPts.push_back({ Pi.x + bInX * innerDist, Pi.y + bInY * innerDist });
         };

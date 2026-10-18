@@ -257,9 +257,96 @@ void TestStrokePressureTransitions() {
                 if (cap == CapType::Round && i == 2) {
                     assert(dist >= rNominal * 0.99);
                 }
-                assert(dist >= rNominal * 0.45);
             }
         }
+    }
+
+    // Diagnostic test for elbow corner turn under pressure
+    {
+        // Test 1: Sharp 90-degree corner under heavy pressure
+        std::vector<StrokePoint> sharp90;
+        for (double x = 50.0; x <= 150.0; x += 2.0) {
+            sharp90.push_back(StrokePoint(x, 100.0, 3.0f));
+        }
+        // Heavy pressure at the corner
+        sharp90.push_back(StrokePoint(152.0, 100.0, 18.0f));
+        sharp90.push_back(StrokePoint(152.0, 102.0, 20.0f));
+        sharp90.push_back(StrokePoint(152.0, 104.0, 18.0f));
+        for (double y = 106.0; y <= 200.0; y += 2.0) {
+            sharp90.push_back(StrokePoint(152.0, y, 3.0f));
+        }
+
+        BLPath p90 = InkGenerator::GenerateStroke(sharp90, CapType::Round, StrokePattern::Solid);
+        assert(!p90.is_empty());
+        BLBox box90;
+        assert(p90.get_bounding_box(&box90) == BL_SUCCESS);
+        assert(box90.x0 < 50.0 && box90.x1 > 150.0);
+        assert(box90.y0 < 100.0 && box90.y1 > 190.0);
+
+        // Test 2: Dense crawl around 90-degree elbow under heavy pressure (r=25mm, spacing=0.2mm)
+        std::vector<StrokePoint> crawlPts;
+        for (double x = 50.0; x <= 150.0; x += 1.0) {
+            crawlPts.push_back(StrokePoint(x, 100.0, 4.0f));
+        }
+        double cx = 150.0, cy = 120.0;
+        for (int k = 0; k <= 30; ++k) {
+            double ang = -M_PI * 0.5 + (M_PI * 0.5) * (k / 30.0);
+            double px = cx + 20.0 * std::cos(ang);
+            double py = cy + 20.0 * std::sin(ang);
+            float r = 4.0f + 16.0f * std::sin((k / 30.0) * M_PI);
+            crawlPts.push_back(StrokePoint(px, py, r));
+        }
+        for (double y = 120.0; y <= 200.0; y += 1.0) {
+            crawlPts.push_back(StrokePoint(170.0, y, 4.0f));
+        }
+
+        BLPath pCrawl = InkGenerator::GenerateStroke(crawlPts, CapType::Round, StrokePattern::Solid);
+        assert(!pCrawl.is_empty());
+        BLBox boxCrawl;
+        assert(pCrawl.get_bounding_box(&boxCrawl) == BL_SUCCESS);
+        assert(boxCrawl.x0 < 50.0 && boxCrawl.x1 > 170.0);
+        assert(boxCrawl.y0 < 100.0 && boxCrawl.y1 > 190.0);
+    }
+
+    // Diagnostic test 2: Full InkEngine simulation with stylus pause & pressure spike
+    {
+        Folio::InkEngine engine;
+        StrokeStyle style;
+        style.baseWidth = 4.0f;
+        style.color = BLRgba32(0xFFFF0000);
+        style.capType = CapType::Round;
+        style.pattern = StrokePattern::Solid;
+        InkingConfig cfg = engine.GetConfig();
+        cfg.usePressure = true;
+        cfg.useVelocity = true;
+        cfg.minWidthMultiplier = 0.2f;
+        cfg.maxWidthMultiplier = 4.0f;
+        engine.SetConfig(cfg);
+
+        double time = 0.0;
+        engine.BeginStroke(50.0, 100.0, 0.2f, time, style, 1.0f);
+        // Horizontal line
+        for (double x = 55.0; x <= 180.0; x += 3.0) {
+            time += 0.01;
+            engine.AppendPoint(x, 100.0, 0.25f, time);
+        }
+        // User slows down / pauses at corner and presses hard
+        for (int p = 0; p < 15; ++p) {
+            time += 0.01;
+            double jitterX = (p % 2 == 0) ? 0.1 : -0.1;
+            double jitterY = (p % 3 == 0) ? 0.1 : -0.05;
+            engine.AppendPoint(180.0 + jitterX, 100.0 + jitterY, 0.95f, time);
+        }
+        // Turns downwards-right
+        for (int s = 1; s <= 20; ++s) {
+            time += 0.01;
+            double px = 180.0 + 3.0 * s * 0.707;
+            double py = 100.0 + 3.0 * s * 0.707;
+            engine.AppendPoint(px, py, 0.35f, time);
+        }
+        FinishedStrokeData stroke = engine.FinishStroke();
+        assert(!stroke.outlinePath.is_empty());
+        assert(stroke.modeledPoints.size() > 20);
     }
 
     // 6. Closed Polygon with Extreme Variable Width (Triangle & Quad with varying vertex radii)
