@@ -21,24 +21,40 @@ Folio-Sketch/
 ├── README.md                      # Documentation
 ├── include/
 │   └── folio_sketch/
+│       ├── folio_sketch.hpp       # Master umbrella include
 │       ├── ink_engine.hpp         # Central inking facade, Google Ink Modeler & predictive pipeline
 │       ├── ink_config.hpp         # Spring physics parameters, noise filtering & pressure calibration
-│       ├── ink_stroke_data.hpp    # Geometric primitives (StrokePoint, CapType, InfillStyle)
+│       ├── ink_stroke_data.hpp    # Geometric primitives (StrokePoint, CapType, InfillStyle, InkVertex, InkMesh)
+│       ├── ink_mesh.hpp           # High-performance GPU triangle-strip mesh builder
 │       ├── stroke_collision.hpp   # Two-tier capsule broadphase/narrowphase & stroke slicer
 │       ├── stroke_width_evaluator.hpp # Dynamic width, velocity thinning, and EMA smoothing
 │       ├── stroke_post_processor.hpp  # Topological analysis, loop detection & curve simplification
 │       └── ink_generator.hpp      # Primary vector stroke & infill generator API
 ├── src/
-│   ├── ink_engine.cpp             # Inking lifecycle, predictive continuation & modeler bridge
-│   ├── ink_generator_internal.hpp # Shared internal math, nib geometries, and cap tracers
-│   ├── ink_generator_caps.cpp     # Oriented nib profiles (Round, Square, Chisel) & endcaps
-│   ├── ink_generator_ribbon.cpp   # Miter-clipped single contour ribbon tessellator
-│   ├── ink_generator_stroke.cpp   # Open stroke builder & O(1) live inking incremental append
-│   ├── ink_generator_polygon.cpp  # Closed shape loops & polygon outlines
-│   ├── ink_generator_patterns.cpp # Arc-length line patterns (Dashed, Dotted) & Graphite pencil
-│   └── ink_generator_infill.cpp   # Interior polygon infill & architectural drafting hatches
+│   ├── engine/
+│   │   └── ink_engine.cpp         # Inking lifecycle, predictive continuation & modeler bridge
+│   ├── generator/
+│   │   ├── ink_generator_internal.hpp # Internal cap tracers and debug state
+│   │   ├── ink_generator_caps.cpp     # Oriented nib profiles & cap tracing
+│   │   ├── ink_generator_ribbon.cpp   # Clean ribbon orchestrator & sub-ribbon assembler
+│   │   ├── ink_generator_stroke.cpp   # Open stroke builder & live inking incremental append
+│   │   ├── ink_generator_polygon.cpp  # Closed shape loops & polygon outlines
+│   │   ├── ink_generator_patterns.cpp # Arc-length patterns (Dashed, Dotted) & Graphite pencil
+│   │   ├── ink_generator_infill.cpp   # Interior polygon infill & drafting hatches
+│   │   ├── ink_generator_debug.cpp    # Visual stroke debugger overlay & diagnostic dumper
+│   │   ├── ink_ribbon_corner.hpp      # Corner join solver (miter clamp, arc fans, nib beveling)
+│   │   └── ink_ribbon_corner.cpp
+│   ├── geometry/
+│   │   ├── ink_nib_geometry.hpp       # Nib profiles (Round, Square, Chisel) & ribbon support offsets
+│   │   ├── ink_stroke_filter.hpp      # Point decimation, Lipschitz slope limiter & hairpin detection
+│   │   ├── ink_stroke_filter.cpp
+│   │   ├── ink_geometry_utils.hpp     # Segment computation, intersection math & swallowtail pruning
+│   │   └── ink_geometry_utils.cpp
+│   └── mesh/
+│       └── ink_mesh_builder.cpp       # GPU quad ribbon and smooth corner fan tessellator
 └── test/
     ├── CMakeLists.txt
+    ├── repro114.inc               # Tight curvature crescent regression reproducer dataset
     └── test_ink_generator.cpp     # Invariant validation suite & performance benchmarks
 ```
 

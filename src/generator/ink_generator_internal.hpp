@@ -7,6 +7,7 @@
  */
 
 #include "folio_sketch/ink_generator.hpp"
+#include "geometry/ink_nib_geometry.hpp"
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -17,17 +18,6 @@
 
 namespace Folio {
 namespace InkInternal {
-
-/**
- * @brief Returns the oriented polygon vertices for a given cap type centered at origin (0, 0).
- */
-std::vector<Point2D> GetNibVertices(CapType capType, double r);
-
-/**
- * @brief Computes extreme boundary offsets (outLeft, outRight) for a given nib and normal.
- */
-void GetRibbonOffsets(CapType capType, double r, double nx, double ny,
-                      Point2D& outLeft, Point2D& outRight);
 
 /**
  * @brief Traces a smooth rounded endcap arc between startPt and endPt bowing in direction (ux, uy).
