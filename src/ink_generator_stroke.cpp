@@ -92,8 +92,8 @@ void InkGenerator::AppendRibbonSegments(BLPath& path,
         double len = std::hypot(dx, dy);
         if (len < 1e-6) continue;
 
-        double nx = -dy / len;
-        double ny =  dx / len;
+        double nx =  dy / len;
+        double ny = -dx / len;
 
         Point2D offL0, offR0, offL1, offR1;
         Folio::InkInternal::GetRibbonOffsets(effectiveCap, std::max(0.0f, p0.r), nx, ny, offL0, offR0);

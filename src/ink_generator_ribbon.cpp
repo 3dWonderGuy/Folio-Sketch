@@ -63,8 +63,8 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         if (len > 1e-7) {
             segs[i].ux = dx / len;
             segs[i].uy = dy / len;
-            segs[i].nx = -segs[i].uy;
-            segs[i].ny =  segs[i].ux;
+            segs[i].nx =  segs[i].uy;
+            segs[i].ny = -segs[i].ux;
         } else {
             if (i > 0) {
                 segs[i] = segs[i - 1];
@@ -72,7 +72,7 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
                 segs[i].ux = 1.0;
                 segs[i].uy = 0.0;
                 segs[i].nx = 0.0;
-                segs[i].ny = 1.0;
+                segs[i].ny = -1.0;
             }
         }
     }
@@ -102,7 +102,9 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
             return;
         }
 
-        bool leftIsInner = (cross > 0.0) || (cross == 0.0 && dot < 0.0);
+        // In screen coordinates (+Y down), cross > 0 is clockwise (RIGHT turn).
+        // Therefore, cross < 0 is counter-clockwise (LEFT turn, left is inner).
+        bool leftIsInner = (cross < 0.0) || (cross == 0.0 && dot < 0.0);
 
         // Polygonal nibs (Square/Highlighter, Chisel/Calligraphy):
         if (capType == CapType::Square || capType == CapType::Chisel) {
@@ -215,7 +217,9 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
 
             int steps = std::clamp(static_cast<int>(std::ceil(turnAngle / (M_PI / 24.0))), 4, 32);
             double aStart = std::atan2(offIn_outer.y, offIn_outer.x);
-            double sweep = leftIsInner ? turnAngle : -turnAngle;
+            // Left turn (leftIsInner): right is outer, sweeps CCW (-turnAngle)
+            // Right turn (!leftIsInner): left is outer, sweeps CW (+turnAngle)
+            double sweep = leftIsInner ? -turnAngle : turnAngle;
 
             for (int s = 0; s <= steps; ++s) {
                 double t = static_cast<double>(s) / steps;

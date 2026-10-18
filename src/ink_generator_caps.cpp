@@ -103,16 +103,18 @@ void TraceRoundCap(BLPath& path,
     double aStart = std::atan2(startPt.y - center.y, startPt.x - center.x);
     double aEnd   = std::atan2(endPt.y - center.y, endPt.x - center.x);
 
-    // Compute clockwise angular distance from aStart to aEnd in (0, 2*PI]
-    double sweepCW = aStart - aEnd;
-    while (sweepCW <= 0.0) sweepCW += 2.0 * M_PI;
-    while (sweepCW > 2.0 * M_PI) sweepCW -= 2.0 * M_PI;
+    // Two possible arcs between aStart and aEnd
+    double sweep1 = aEnd - aStart;
+    while (sweep1 < 0.0) sweep1 += 2.0 * M_PI;
+    while (sweep1 >= 2.0 * M_PI) sweep1 -= 2.0 * M_PI;
 
-    // Check if clockwise arc midpoint bows in outward direction (ux, uy)
-    double midCW = aStart - 0.5 * sweepCW;
-    double dotCW = std::cos(midCW) * ux + std::sin(midCW) * uy;
+    double sweep2 = sweep1 - 2.0 * M_PI;
 
-    double sweep = (dotCW >= 0.0) ? -sweepCW : (2.0 * M_PI - sweepCW);
+    // Check which arc midpoint points in the outward direction (ux, uy)
+    double mid1 = aStart + sweep1 * 0.5;
+    double dot1 = std::cos(mid1) * ux + std::sin(mid1) * uy;
+
+    double sweep = (dot1 >= 0.0) ? sweep1 : sweep2;
     double absSweep = std::abs(sweep);
 
     if (absSweep < 1e-4) {
@@ -120,7 +122,7 @@ void TraceRoundCap(BLPath& path,
         return;
     }
 
-    const int arcSteps = std::clamp(static_cast<int>(std::ceil(12.0 * (absSweep / M_PI))), 2, 12);
+    const int arcSteps = std::clamp(static_cast<int>(std::ceil(12.0 * (absSweep / M_PI))), 2, 16);
     for (int i = 1; i < arcSteps; ++i) {
         double t = static_cast<double>(i) / arcSteps;
         double a = aStart + t * sweep;
@@ -229,8 +231,9 @@ void InkGenerator::TraceCap(BLPath& path,
         return;
     }
 
-    double ux = -vy / vLen;
-    double uy =  vx / vLen;
+    // Direction pointing outward from startPt -> endPt chord
+    double ux =  vy / vLen;
+    double uy = -vx / vLen;
 
     if (capType == CapType::Square || capType == CapType::Chisel) {
         Folio::InkInternal::TracePolygonCap(path, center, startPt, endPt, ux, uy, capType);
