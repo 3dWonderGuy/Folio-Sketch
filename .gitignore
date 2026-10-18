@@ -1,0 +1,23 @@
+# Build directories
+build/
+build-*/
+bin/
+lib/
+out/
+.cache/
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*~
+*.user
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+CTestTestfile.cmake
+Testing/
