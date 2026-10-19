@@ -133,7 +133,8 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts,
     }
 
     // Tail Cap: leftPts.back() -> rightPts.back() around cleanPts.back()
-    InkGenerator::TraceCap(path, cleanPts.back(), leftPts.back(), rightPts.back(), capType, /*isTail=*/true);
+    const auto& lastSeg = segs.back();
+    InkGenerator::TraceCap(path, cleanPts.back(), leftPts.back(), rightPts.back(), capType, /*isTail=*/true, lastSeg.ux, lastSeg.uy);
 
     if (rightPts.size() > 1) {
         for (size_t i = rightPts.size() - 1; i > 0; --i) {
@@ -142,7 +143,7 @@ BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts,
     }
 
     // Head Cap: rightPts[0] -> leftPts[0] around cleanPts.front()
-    InkGenerator::TraceCap(path, cleanPts.front(), leftPts[0], rightPts[0], capType, /*isTail=*/false);
+    InkGenerator::TraceCap(path, cleanPts.front(), leftPts[0], rightPts[0], capType, /*isTail=*/false, -segs[0].ux, -segs[0].uy);
 
     path.close();
 

@@ -57,12 +57,10 @@ std::vector<StrokePoint> StrokeFilter::PreFilterPoints(std::span<const StrokePoi
             }
             if (!isSharpTurn) {
                 if (isLast) {
-                    if (cleanPts.size() == 1) {
-                        prev = p;
-                    } else {
-                        prev.pressure = std::max(prev.pressure, p.pressure);
-                        prev.r = std::max(prev.r, p.r);
-                    }
+                    prev.x = p.x;
+                    prev.y = p.y;
+                    prev.pressure = std::max(prev.pressure, p.pressure);
+                    prev.r = std::max(prev.r, p.r);
                 } else {
                     prev.pressure = std::max(prev.pressure, p.pressure);
                     prev.r = std::max(prev.r, p.r);
@@ -74,14 +72,17 @@ std::vector<StrokePoint> StrokeFilter::PreFilterPoints(std::span<const StrokePoi
         cleanPts.push_back(p);
     }
 
-    // Remove terminal micro-jitter stub if last segment is smaller than 20% of radius
-    while (cleanPts.size() >= 3) {
+    // When last segment is smaller than 20% of radius, merge previous vertex with final point
+    if (cleanPts.size() >= 2) {
         double dLast = std::hypot(cleanPts.back().x - cleanPts[cleanPts.size() - 2].x,
                                   cleanPts.back().y - cleanPts[cleanPts.size() - 2].y);
         if (dLast < cleanPts.back().r * 0.20) {
+            const auto finalPt = cleanPts.back();
             cleanPts.pop_back();
-        } else {
-            break;
+            cleanPts.back().x = finalPt.x;
+            cleanPts.back().y = finalPt.y;
+            cleanPts.back().r = std::max(cleanPts.back().r, finalPt.r);
+            cleanPts.back().pressure = std::max(cleanPts.back().pressure, finalPt.pressure);
         }
     }
 

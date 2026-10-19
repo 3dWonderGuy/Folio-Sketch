@@ -248,7 +248,9 @@ void InkGenerator::TraceCap(BLPath& path,
                             const Point2D& leftPt,
                             const Point2D& rightPt,
                             CapType capType,
-                            bool isTail) {
+                            bool isTail,
+                            double dirX,
+                            double dirY) {
     const Point2D& startPt = isTail ? leftPt : rightPt;
     const Point2D& endPt   = isTail ? rightPt : leftPt;
 
@@ -264,6 +266,11 @@ void InkGenerator::TraceCap(BLPath& path,
     // Direction pointing outward from startPt -> endPt chord
     double ux =  vy / vLen;
     double uy = -vx / vLen;
+
+    if ((dirX != 0.0 || dirY != 0.0) && (ux * dirX + uy * dirY < 0.0)) {
+        ux = -ux;
+        uy = -uy;
+    }
 
     if (capType == CapType::Square || capType == CapType::Chisel) {
         Folio::InkInternal::TracePolygonCap(path, center, startPt, endPt, ux, uy, capType);

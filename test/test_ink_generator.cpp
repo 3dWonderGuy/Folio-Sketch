@@ -13,6 +13,9 @@
 #include <blend2d/blend2d.h>
 
 #include "folio_sketch/folio_sketch.hpp"
+#include "../src/geometry/ink_stroke_filter.hpp"
+
+using namespace Folio;
 
 void TestStrokeTessellationAndRasterPerformance() {
     std::cout << "[Test 1/2] Running Stroke Tessellation & Rasterization Performance..." << std::endl;
@@ -860,6 +863,76 @@ void TestTailTaper() {
               << pts.back().r * 2.0f << " mm)!" << std::endl;
 }
 
+void TestAcuteTurnMeshAndEndcapNormal() {
+    std::cout << "[Test 11/12] Verifying acute needle turns and tight loops (R3 & R4)..." << std::endl;
+
+    // Acute needle hairpin turn: (0,0) -> (50, 0) -> (0, 0.5) with r = 2.0
+    std::vector<StrokePoint> needlePts = {
+        {  0.0, 0.0, 2.0f, 0.8f, 0.0f, 0.0f },
+        { 50.0, 0.0, 2.0f, 0.8f, 0.0f, 0.0f },
+        {  0.0, 0.5, 2.0f, 0.8f, 0.0f, 0.0f }
+    };
+
+    InkMesh mesh;
+    InkMeshBuilder::BuildSolidMesh(needlePts, CapType::Round, 0xFF000000, mesh);
+    assert(!mesh.empty());
+    assert(mesh.coreIndexCount > 0);
+    assert(mesh.indices.size() > mesh.coreIndexCount);
+
+    // Verify all skirt triangles have valid vertices
+    for (size_t i = mesh.coreIndexCount; i < mesh.indices.size(); i += 3) {
+        assert(mesh.indices[i] < mesh.vertices.size());
+        assert(mesh.indices[i + 1] < mesh.vertices.size());
+        assert(mesh.indices[i + 2] < mesh.vertices.size());
+    }
+
+    // Verify endcap normal validation when leftPt and rightPt are crossed near small radius
+    // Forward direction is +X (1, 0). If left and right are inverted, chord normal points -X (-1, 0) without dirX check.
+    BLPath path;
+    StrokePoint center(100.0, 0.0, 0.1f);
+    // Crossed rails: leftPt at (100, 1) and rightPt at (100, -1) for tail cap
+    // vx = 0, vy = -2 => initial chord normal ux = vy/vLen = -1.0, uy = 0.0
+    // With dirX = 1.0, dirY = 0.0, ux * dirX < 0, so ux should flip to +1.0 (outward)
+    InkGenerator::TraceCap(path, center, {100.0, 1.0}, {100.0, -1.0}, CapType::Round, true, 1.0, 0.0);
+    assert(!path.is_empty());
+
+    // Verify ribbon generation with acute needle points
+    BLPath ribbon = InkGenerator::GenerateStroke(needlePts, CapType::Round, StrokePattern::Solid);
+    assert(!ribbon.is_empty());
+
+    std::cout << "  -> Acute turn mesh and endcap normal tests passed!" << std::endl;
+}
+
+void TestPreFilterPointsPreservesEndpoint() {
+    std::cout << "[Test 12/12] Verifying StrokeFilter::PreFilterPoints preserves endpoint on pen lift (R6)..." << std::endl;
+
+    // Stroke with trailing segment shorter than 0.20 * r (0.1mm < 0.20 * 2.0mm = 0.40mm)
+    std::vector<StrokePoint> pts = {
+        { 0.0, 0.0, 2.0f, 0.5f, 0.0f, 0.0f },
+        { 10.0, 0.0, 2.0f, 0.5f, 0.0f, 0.0f },
+        { 20.0, 0.0, 2.0f, 0.5f, 0.0f, 0.0f },
+        { 20.1, 0.0, 2.0f, 0.5f, 0.0f, 0.0f }
+    };
+
+    auto clean = Folio::InkInternal::StrokeFilter::PreFilterPoints(pts);
+    assert(!clean.empty());
+    assert(std::abs(clean.back().x - 20.1) < 1e-4);
+    assert(std::abs(clean.back().y - 0.0) < 1e-4);
+
+    // Two-point short segment (< 0.20 * r, > 0.05 * r)
+    std::vector<StrokePoint> twoPts = {
+        { 5.0, 5.0, 2.0f, 0.5f, 0.0f, 0.0f },
+        { 5.25, 5.0, 2.0f, 0.6f, 0.0f, 0.0f }
+    };
+    auto cleanTwo = Folio::InkInternal::StrokeFilter::PreFilterPoints(twoPts);
+    assert(cleanTwo.size() == 1);
+    assert(std::abs(cleanTwo.back().x - 5.25) < 1e-4);
+    assert(std::abs(cleanTwo.back().y - 5.0) < 1e-4);
+    assert(cleanTwo.back().pressure >= 0.6f);
+
+    std::cout << "  -> StrokeFilter endpoint preservation tests passed!" << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Starting Folio-Sketch Test Suite" << std::endl;
@@ -875,6 +948,8 @@ int main() {
     TestCrescentTurnGeometry();
     TestQuickStrokeLoopMesh();
     TestTailTaper();
+    TestAcuteTurnMeshAndEndcapNormal();
+    TestPreFilterPointsPreservesEndpoint();
 
     std::cout << "========================================" << std::endl;
     std::cout << "All Folio-Sketch Tests Passed!" << std::endl;

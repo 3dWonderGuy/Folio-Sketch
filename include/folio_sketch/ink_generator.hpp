@@ -164,13 +164,17 @@ public:
      * @param rightPt Right edge coordinate of ribbon.
      * @param capType Cap style (Round, Chisel, Square).
      * @param isTail True for tail cap (sweeps forward left -> right), false for head cap (sweeps backward right -> left).
+     * @param dirX Tangent X direction of the stroke cap (optional hint to enforce outward chord normal).
+     * @param dirY Tangent Y direction of the stroke cap (optional hint to enforce outward chord normal).
      */
     static void TraceCap(BLPath& path,
                          const StrokePoint& center,
                          const Point2D& leftPt,
                          const Point2D& rightPt,
                          CapType capType = CapType::Round,
-                         bool isTail = true);
+                         bool isTail = true,
+                         double dirX = 0.0,
+                         double dirY = 0.0);
 
 private:
     // =========================================================================

@@ -334,11 +334,12 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
             innerMiterDist = std::min(innerMiterDist, std::max(0.0, safeLimit));
 
             double innerSign = leftIsInner ? 1.0 : -1.0;
+            double innerSkirtDist = std::min(static_cast<double>(innerMiterDist + delta), safeLimit);
             uint32_t innerIdx = addVertex(cleanPts[nextPtIdx].x + innerSign * avgNx * innerMiterDist,
                                           cleanPts[nextPtIdx].y + innerSign * avgNy * innerMiterDist,
                                           1.0f, rNext);
-            uint32_t innerSkirtIdx = addVertex(cleanPts[nextPtIdx].x + innerSign * avgNx * (innerMiterDist + delta),
-                                               cleanPts[nextPtIdx].y + innerSign * avgNy * (innerMiterDist + delta),
+            uint32_t innerSkirtIdx = addVertex(cleanPts[nextPtIdx].x + innerSign * avgNx * innerSkirtDist,
+                                               cleanPts[nextPtIdx].y + innerSign * avgNy * innerSkirtDist,
                                                skirtDistNext, rNext);
 
             double outerSign = leftIsInner ? -1.0 : 1.0;
