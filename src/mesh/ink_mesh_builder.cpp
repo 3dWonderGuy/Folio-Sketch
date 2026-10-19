@@ -40,11 +40,14 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
 
     if (cleanPts.empty()) return;
 
-    // Exterior Anti-Aliasing Skirt Width: exactly 1 screen pixel wide in world millimeters
+    // Exterior Anti-Aliasing Skirt Width: 3 screen pixels wide in world millimeters for soft anti-aliasing
     const float effectiveScale = scalePxPerMm > 0.001f ? scalePxPerMm : 3.7795f;
-    const float delta = 1.0f / effectiveScale;
+    const float delta = 3.0f / effectiveScale;
 
-    // Helper lambdas to append vertices and triangles
+    // Partitioned index buffers: Core indices first, AA Skirt indices second
+    std::vector<uint32_t> coreIndices;
+    std::vector<uint32_t> skirtIndices;
+
     auto addVertex = [&](double vx, double vy, float edgeDist, float radius) -> uint32_t {
         uint32_t idx = static_cast<uint32_t>(outMesh.vertices.size());
         outMesh.vertices.push_back(InkVertex{
@@ -57,10 +60,22 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
         return idx;
     };
 
-    auto addTriangle = [&](uint32_t i0, uint32_t i1, uint32_t i2) {
-        outMesh.indices.push_back(i0);
-        outMesh.indices.push_back(i1);
-        outMesh.indices.push_back(i2);
+    auto addCoreTriangle = [&](uint32_t i0, uint32_t i1, uint32_t i2) {
+        coreIndices.push_back(i0);
+        coreIndices.push_back(i1);
+        coreIndices.push_back(i2);
+    };
+
+    auto addSkirtTriangle = [&](uint32_t i0, uint32_t i1, uint32_t i2) {
+        skirtIndices.push_back(i0);
+        skirtIndices.push_back(i1);
+        skirtIndices.push_back(i2);
+    };
+
+    auto finalizeMesh = [&]() {
+        outMesh.indices = std::move(coreIndices);
+        outMesh.coreIndexCount = static_cast<uint32_t>(outMesh.indices.size());
+        outMesh.indices.insert(outMesh.indices.end(), skirtIndices.begin(), skirtIndices.end());
     };
 
     // 2. Single Point: Emit smooth round circle dot or oriented polygonal nib with 1-pixel exterior skirt
@@ -85,10 +100,11 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
             }
             for (uint32_t k = 0; k < K; ++k) {
                 uint32_t nextK = (k + 1) % K;
-                addTriangle(centerIdx, baseRim + k, baseRim + nextK);
-                addTriangle(baseRim + k, skirtRim + k, skirtRim + nextK);
-                addTriangle(baseRim + k, skirtRim + nextK, baseRim + nextK);
+                addCoreTriangle(centerIdx, baseRim + k, baseRim + nextK);
+                addSkirtTriangle(baseRim + k, skirtRim + k, skirtRim + nextK);
+                addSkirtTriangle(baseRim + k, skirtRim + nextK, baseRim + nextK);
             }
+            finalizeMesh();
             return;
         }
 
@@ -109,10 +125,11 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
         }
         for (int i = 0; i < steps; ++i) {
             int nextI = (i + 1) % steps;
-            addTriangle(centerIdx, baseRim + i, baseRim + nextI);
-            addTriangle(baseRim + i, skirtRim + i, skirtRim + nextI);
-            addTriangle(baseRim + i, skirtRim + nextI, baseRim + nextI);
+            addCoreTriangle(centerIdx, baseRim + i, baseRim + nextI);
+            addSkirtTriangle(baseRim + i, skirtRim + i, skirtRim + nextI);
+            addSkirtTriangle(baseRim + i, skirtRim + nextI, baseRim + nextI);
         }
+        finalizeMesh();
         return;
     }
 
@@ -145,43 +162,42 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
         float skirtDistStart = 1.0f + delta / std::max(1e-4f, rStart);
 
         uint32_t curLeftIdx   = addVertex(cleanPts[startIdx].x + s0.nx * rStart,
-                                          cleanPts[startIdx].y + s0.ny * rStart, -1.0f, rStart);
+                                          cleanPts[startIdx].y + s0.ny * rStart, 1.0f, rStart);
         uint32_t curCenterIdx = addVertex(cleanPts[startIdx].x, cleanPts[startIdx].y, 0.0f, rStart);
         uint32_t curRightIdx  = addVertex(cleanPts[startIdx].x - s0.nx * rStart,
                                           cleanPts[startIdx].y - s0.ny * rStart, 1.0f, rStart);
 
         uint32_t curLeftSkirtIdx  = addVertex(cleanPts[startIdx].x + s0.nx * (rStart + delta),
-                                              cleanPts[startIdx].y + s0.ny * (rStart + delta), -skirtDistStart, rStart);
+                                              cleanPts[startIdx].y + s0.ny * (rStart + delta), skirtDistStart, rStart);
         uint32_t curRightSkirtIdx = addVertex(cleanPts[startIdx].x - s0.nx * (rStart + delta),
                                               cleanPts[startIdx].y - s0.ny * (rStart + delta), skirtDistStart, rStart);
 
         // Head Endcap at startIdx: smooth round semicircle facing backward (-s0.u) with exterior skirt
         constexpr int headSteps = 16;
-        double aStart = std::atan2(-s0.ny, -s0.nx);
-        double aEnd   = std::atan2( s0.ny,  s0.nx);
-        double sweep  = aEnd - aStart;
-        while (sweep < 0.0) sweep += 2.0 * M_PI;
-        if (sweep > 2.0 * M_PI) sweep -= 2.0 * M_PI;
-
         uint32_t prevFanNom = curRightIdx;
         uint32_t prevFanSkirt = curRightSkirtIdx;
         for (int s = 1; s < headSteps; ++s) {
-            double a = aStart + (static_cast<double>(s) / headSteps) * sweep;
-            uint32_t arcNomIdx = addVertex(cleanPts[startIdx].x + std::cos(a) * rStart,
-                                           cleanPts[startIdx].y + std::sin(a) * rStart,
+            double theta = M_PI * (static_cast<double>(s) / headSteps);
+            double cosT = std::cos(theta);
+            double sinT = std::sin(theta);
+            double dx = -s0.nx * cosT - s0.ux * sinT;
+            double dy = -s0.ny * cosT - s0.uy * sinT;
+
+            uint32_t arcNomIdx = addVertex(cleanPts[startIdx].x + dx * rStart,
+                                           cleanPts[startIdx].y + dy * rStart,
                                            1.0f, rStart);
-            uint32_t arcSkirtIdx = addVertex(cleanPts[startIdx].x + std::cos(a) * (rStart + delta),
-                                             cleanPts[startIdx].y + std::sin(a) * (rStart + delta),
+            uint32_t arcSkirtIdx = addVertex(cleanPts[startIdx].x + dx * (rStart + delta),
+                                             cleanPts[startIdx].y + dy * (rStart + delta),
                                              skirtDistStart, rStart);
-            addTriangle(curCenterIdx, prevFanNom, arcNomIdx);
-            addTriangle(prevFanNom, prevFanSkirt, arcSkirtIdx);
-            addTriangle(prevFanNom, arcSkirtIdx, arcNomIdx);
+            addCoreTriangle(curCenterIdx, prevFanNom, arcNomIdx);
+            addSkirtTriangle(prevFanNom, prevFanSkirt, arcSkirtIdx);
+            addSkirtTriangle(prevFanNom, arcSkirtIdx, arcNomIdx);
             prevFanNom = arcNomIdx;
             prevFanSkirt = arcSkirtIdx;
         }
-        addTriangle(curCenterIdx, prevFanNom, curLeftIdx);
-        addTriangle(prevFanNom, prevFanSkirt, curLeftSkirtIdx);
-        addTriangle(prevFanNom, curLeftSkirtIdx, curLeftIdx);
+        addCoreTriangle(curCenterIdx, prevFanNom, curLeftIdx);
+        addSkirtTriangle(prevFanNom, prevFanSkirt, curLeftSkirtIdx);
+        addSkirtTriangle(prevFanNom, curLeftSkirtIdx, curLeftIdx);
 
         // Traverse interior segments
         for (size_t i = startIdx; i < endIdx; ++i) {
@@ -193,57 +209,56 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
                 // Terminal segment ending at endIdx
                 const auto& lastSeg = segs[i];
                 uint32_t nextLeftIdx   = addVertex(cleanPts[nextPtIdx].x + lastSeg.nx * rNext,
-                                                   cleanPts[nextPtIdx].y + lastSeg.ny * rNext, -1.0f, rNext);
+                                                   cleanPts[nextPtIdx].y + lastSeg.ny * rNext, 1.0f, rNext);
                 uint32_t nextCenterIdx = addVertex(cleanPts[nextPtIdx].x, cleanPts[nextPtIdx].y, 0.0f, rNext);
                 uint32_t nextRightIdx  = addVertex(cleanPts[nextPtIdx].x - lastSeg.nx * rNext,
                                                    cleanPts[nextPtIdx].y - lastSeg.ny * rNext, 1.0f, rNext);
 
                 uint32_t nextLeftSkirtIdx  = addVertex(cleanPts[nextPtIdx].x + lastSeg.nx * (rNext + delta),
-                                                       cleanPts[nextPtIdx].y + lastSeg.ny * (rNext + delta), -skirtDistNext, rNext);
+                                                       cleanPts[nextPtIdx].y + lastSeg.ny * (rNext + delta), skirtDistNext, rNext);
                 uint32_t nextRightSkirtIdx = addVertex(cleanPts[nextPtIdx].x - lastSeg.nx * (rNext + delta),
                                                        cleanPts[nextPtIdx].y - lastSeg.ny * (rNext + delta), skirtDistNext, rNext);
 
                 // Core quads
-                addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-                addTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
+                addCoreTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
+                addCoreTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
 
-                addTriangle(curCenterIdx, curRightIdx, nextRightIdx);
-                addTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
+                addCoreTriangle(curCenterIdx, curRightIdx, nextRightIdx);
+                addCoreTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
 
                 // Skirt quads
-                addTriangle(curLeftIdx, curLeftSkirtIdx, nextLeftSkirtIdx);
-                addTriangle(curLeftIdx, nextLeftSkirtIdx, nextLeftIdx);
+                addSkirtTriangle(curLeftIdx, curLeftSkirtIdx, nextLeftSkirtIdx);
+                addSkirtTriangle(curLeftIdx, nextLeftSkirtIdx, nextLeftIdx);
 
-                addTriangle(curRightIdx, nextRightIdx, nextRightSkirtIdx);
-                addTriangle(curRightIdx, nextRightSkirtIdx, curRightSkirtIdx);
+                addSkirtTriangle(curRightIdx, nextRightIdx, nextRightSkirtIdx);
+                addSkirtTriangle(curRightIdx, nextRightSkirtIdx, curRightSkirtIdx);
 
                 // Tail Endcap at endIdx: smooth round semicircle facing forward (+lastSeg.u) with exterior skirt
                 constexpr int tailSteps = 16;
-                double aStartTail = std::atan2( lastSeg.ny,  lastSeg.nx);
-                double aEndTail   = std::atan2(-lastSeg.ny, -lastSeg.nx);
-                double sweepTail  = aEndTail - aStartTail;
-                while (sweepTail < 0.0) sweepTail += 2.0 * M_PI;
-                if (sweepTail > 2.0 * M_PI) sweepTail -= 2.0 * M_PI;
-
                 uint32_t prevFanNom = nextLeftIdx;
                 uint32_t prevFanSkirt = nextLeftSkirtIdx;
                 for (int s = 1; s < tailSteps; ++s) {
-                    double a = aStartTail + (static_cast<double>(s) / tailSteps) * sweepTail;
-                    uint32_t arcNomIdx = addVertex(cleanPts[nextPtIdx].x + std::cos(a) * rNext,
-                                                   cleanPts[nextPtIdx].y + std::sin(a) * rNext,
+                    double theta = M_PI * (static_cast<double>(s) / tailSteps);
+                    double cosT = std::cos(theta);
+                    double sinT = std::sin(theta);
+                    double dx = lastSeg.nx * cosT + lastSeg.ux * sinT;
+                    double dy = lastSeg.ny * cosT + lastSeg.uy * sinT;
+
+                    uint32_t arcNomIdx = addVertex(cleanPts[nextPtIdx].x + dx * rNext,
+                                                   cleanPts[nextPtIdx].y + dy * rNext,
                                                    1.0f, rNext);
-                    uint32_t arcSkirtIdx = addVertex(cleanPts[nextPtIdx].x + std::cos(a) * (rNext + delta),
-                                                     cleanPts[nextPtIdx].y + std::sin(a) * (rNext + delta),
+                    uint32_t arcSkirtIdx = addVertex(cleanPts[nextPtIdx].x + dx * (rNext + delta),
+                                                     cleanPts[nextPtIdx].y + dy * (rNext + delta),
                                                      skirtDistNext, rNext);
-                    addTriangle(nextCenterIdx, prevFanNom, arcNomIdx);
-                    addTriangle(prevFanNom, prevFanSkirt, arcSkirtIdx);
-                    addTriangle(prevFanNom, arcSkirtIdx, arcNomIdx);
+                    addCoreTriangle(nextCenterIdx, prevFanNom, arcNomIdx);
+                    addSkirtTriangle(prevFanNom, prevFanSkirt, arcSkirtIdx);
+                    addSkirtTriangle(prevFanNom, arcSkirtIdx, arcNomIdx);
                     prevFanNom = arcNomIdx;
                     prevFanSkirt = arcSkirtIdx;
                 }
-                addTriangle(nextCenterIdx, prevFanNom, nextRightIdx);
-                addTriangle(prevFanNom, prevFanSkirt, nextRightSkirtIdx);
-                addTriangle(prevFanNom, nextRightSkirtIdx, nextRightIdx);
+                addCoreTriangle(nextCenterIdx, prevFanNom, nextRightIdx);
+                addSkirtTriangle(prevFanNom, prevFanSkirt, nextRightSkirtIdx);
+                addSkirtTriangle(prevFanNom, nextRightSkirtIdx, nextRightIdx);
                 break;
             }
 
@@ -267,29 +282,29 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
                 miterScale = std::min(miterScale, 1.25);
 
                 uint32_t nextLeftIdx   = addVertex(cleanPts[nextPtIdx].x + avgNx * rNext * miterScale,
-                                                   cleanPts[nextPtIdx].y + avgNy * rNext * miterScale, -1.0f, rNext);
+                                                   cleanPts[nextPtIdx].y + avgNy * rNext * miterScale, 1.0f, rNext);
                 uint32_t nextCenterIdx = addVertex(cleanPts[nextPtIdx].x, cleanPts[nextPtIdx].y, 0.0f, rNext);
                 uint32_t nextRightIdx  = addVertex(cleanPts[nextPtIdx].x - avgNx * rNext * miterScale,
                                                    cleanPts[nextPtIdx].y - avgNy * rNext * miterScale, 1.0f, rNext);
 
                 uint32_t nextLeftSkirtIdx  = addVertex(cleanPts[nextPtIdx].x + avgNx * (rNext * miterScale + delta),
-                                                       cleanPts[nextPtIdx].y + avgNy * (rNext * miterScale + delta), -skirtDistNext, rNext);
+                                                       cleanPts[nextPtIdx].y + avgNy * (rNext * miterScale + delta), skirtDistNext, rNext);
                 uint32_t nextRightSkirtIdx = addVertex(cleanPts[nextPtIdx].x - avgNx * (rNext * miterScale + delta),
                                                        cleanPts[nextPtIdx].y - avgNy * (rNext * miterScale + delta), skirtDistNext, rNext);
 
                 // Core quads
-                addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-                addTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
+                addCoreTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
+                addCoreTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
 
-                addTriangle(curCenterIdx, curRightIdx, nextRightIdx);
-                addTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
+                addCoreTriangle(curCenterIdx, curRightIdx, nextRightIdx);
+                addCoreTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
 
                 // Skirt quads
-                addTriangle(curLeftIdx, curLeftSkirtIdx, nextLeftSkirtIdx);
-                addTriangle(curLeftIdx, nextLeftSkirtIdx, nextLeftIdx);
+                addSkirtTriangle(curLeftIdx, curLeftSkirtIdx, nextLeftSkirtIdx);
+                addSkirtTriangle(curLeftIdx, nextLeftSkirtIdx, nextLeftIdx);
 
-                addTriangle(curRightIdx, nextRightIdx, nextRightSkirtIdx);
-                addTriangle(curRightIdx, nextRightSkirtIdx, curRightSkirtIdx);
+                addSkirtTriangle(curRightIdx, nextRightIdx, nextRightSkirtIdx);
+                addSkirtTriangle(curRightIdx, nextRightSkirtIdx, curRightSkirtIdx);
 
                 curLeftIdx        = nextLeftIdx;
                 curLeftSkirtIdx   = nextLeftSkirtIdx;
@@ -319,51 +334,49 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
             innerMiterDist = std::min(innerMiterDist, std::max(0.0, safeLimit));
 
             double innerSign = leftIsInner ? 1.0 : -1.0;
-            float innerSignF = leftIsInner ? -1.0f : 1.0f;
             uint32_t innerIdx = addVertex(cleanPts[nextPtIdx].x + innerSign * avgNx * innerMiterDist,
                                           cleanPts[nextPtIdx].y + innerSign * avgNy * innerMiterDist,
-                                          innerSignF, rNext);
+                                          1.0f, rNext);
             uint32_t innerSkirtIdx = addVertex(cleanPts[nextPtIdx].x + innerSign * avgNx * (innerMiterDist + delta),
                                                cleanPts[nextPtIdx].y + innerSign * avgNy * (innerMiterDist + delta),
-                                               innerSignF * skirtDistNext, rNext);
+                                               skirtDistNext, rNext);
 
             double outerSign = leftIsInner ? -1.0 : 1.0;
-            float outerSignF = leftIsInner ? 1.0f : -1.0f;
             uint32_t outerInIdx = addVertex(cleanPts[nextPtIdx].x + outerSign * sIn.nx * rNext,
                                             cleanPts[nextPtIdx].y + outerSign * sIn.ny * rNext,
-                                            outerSignF, rNext);
+                                            1.0f, rNext);
             uint32_t outerInSkirtIdx = addVertex(cleanPts[nextPtIdx].x + outerSign * sIn.nx * (rNext + delta),
-                                                 cleanPts[nextPtIdx].y + outerSign * sIn.nx * (rNext + delta),
-                                                 outerSignF * skirtDistNext, rNext);
+                                                 cleanPts[nextPtIdx].y + outerSign * sIn.ny * (rNext + delta),
+                                                 skirtDistNext, rNext);
 
             if (leftIsInner) {
                 // Left Core & Skirt (Inner)
-                addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-                addTriangle(curLeftIdx, nextCenterIdx, innerIdx);
+                addCoreTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
+                addCoreTriangle(curLeftIdx, nextCenterIdx, innerIdx);
 
-                addTriangle(curLeftIdx, curLeftSkirtIdx, innerSkirtIdx);
-                addTriangle(curLeftIdx, innerSkirtIdx, innerIdx);
+                addSkirtTriangle(curLeftIdx, curLeftSkirtIdx, innerSkirtIdx);
+                addSkirtTriangle(curLeftIdx, innerSkirtIdx, innerIdx);
 
                 // Right Core & Skirt (Outer incoming)
-                addTriangle(curCenterIdx, curRightIdx, outerInIdx);
-                addTriangle(curCenterIdx, outerInIdx, nextCenterIdx);
+                addCoreTriangle(curCenterIdx, curRightIdx, outerInIdx);
+                addCoreTriangle(curCenterIdx, outerInIdx, nextCenterIdx);
 
-                addTriangle(curRightIdx, outerInIdx, outerInSkirtIdx);
-                addTriangle(curRightIdx, outerInSkirtIdx, curRightSkirtIdx);
+                addSkirtTriangle(curRightIdx, outerInIdx, outerInSkirtIdx);
+                addSkirtTriangle(curRightIdx, outerInSkirtIdx, curRightSkirtIdx);
             } else {
                 // Left Core & Skirt (Outer incoming)
-                addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-                addTriangle(curLeftIdx, nextCenterIdx, outerInIdx);
+                addCoreTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
+                addCoreTriangle(curLeftIdx, nextCenterIdx, outerInIdx);
 
-                addTriangle(curLeftIdx, curLeftSkirtIdx, outerInSkirtIdx);
-                addTriangle(curLeftIdx, outerInSkirtIdx, outerInIdx);
+                addSkirtTriangle(curLeftIdx, curLeftSkirtIdx, outerInSkirtIdx);
+                addSkirtTriangle(curLeftIdx, outerInSkirtIdx, outerInIdx);
 
                 // Right Core & Skirt (Inner)
-                addTriangle(curCenterIdx, curRightIdx, innerIdx);
-                addTriangle(curCenterIdx, innerIdx, nextCenterIdx);
+                addCoreTriangle(curCenterIdx, curRightIdx, innerIdx);
+                addCoreTriangle(curCenterIdx, innerIdx, nextCenterIdx);
 
-                addTriangle(curRightIdx, innerIdx, innerSkirtIdx);
-                addTriangle(curRightIdx, innerSkirtIdx, curRightSkirtIdx);
+                addSkirtTriangle(curRightIdx, innerIdx, innerSkirtIdx);
+                addSkirtTriangle(curRightIdx, innerSkirtIdx, curRightSkirtIdx);
             }
 
             int fanSteps = std::clamp(static_cast<int>(std::ceil(turnAngle / (M_PI / 16.0))), 2, 16);
@@ -379,23 +392,22 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
 
             uint32_t prevFanNom = outerInIdx;
             uint32_t prevFanSkirt = outerInSkirtIdx;
-            float outerEdgeDist = leftIsInner ? 1.0f : -1.0f;
             for (int s = 1; s <= fanSteps; ++s) {
                 double a = aStartFan + (static_cast<double>(s) / fanSteps) * sweepFan;
                 uint32_t arcNomIdx = addVertex(cleanPts[nextPtIdx].x + std::cos(a) * rNext,
                                                cleanPts[nextPtIdx].y + std::sin(a) * rNext,
-                                               outerEdgeDist, rNext);
+                                               1.0f, rNext);
                 uint32_t arcSkirtIdx = addVertex(cleanPts[nextPtIdx].x + std::cos(a) * (rNext + delta),
                                                  cleanPts[nextPtIdx].y + std::sin(a) * (rNext + delta),
-                                                 outerEdgeDist * skirtDistNext, rNext);
+                                                 skirtDistNext, rNext);
                 if (leftIsInner) {
-                    addTriangle(nextCenterIdx, arcNomIdx, prevFanNom);
-                    addTriangle(prevFanNom, arcNomIdx, arcSkirtIdx);
-                    addTriangle(prevFanNom, arcSkirtIdx, prevFanSkirt);
+                    addCoreTriangle(nextCenterIdx, arcNomIdx, prevFanNom);
+                    addSkirtTriangle(prevFanNom, arcNomIdx, arcSkirtIdx);
+                    addSkirtTriangle(prevFanNom, arcSkirtIdx, prevFanSkirt);
                 } else {
-                    addTriangle(nextCenterIdx, prevFanNom, arcNomIdx);
-                    addTriangle(prevFanNom, prevFanSkirt, arcSkirtIdx);
-                    addTriangle(prevFanNom, arcSkirtIdx, arcNomIdx);
+                    addCoreTriangle(nextCenterIdx, prevFanNom, arcNomIdx);
+                    addSkirtTriangle(prevFanNom, prevFanSkirt, arcSkirtIdx);
+                    addSkirtTriangle(prevFanNom, arcSkirtIdx, arcNomIdx);
                 }
                 prevFanNom = arcNomIdx;
                 prevFanSkirt = arcSkirtIdx;
@@ -504,15 +516,15 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
                 double s = (len > 1e-4) ? (1.0 + delta / len) : 1.0;
                 uint32_t curNom = addVertex(pt.x + verts[idx].x, pt.y + verts[idx].y, edgeDist, r);
                 uint32_t curSkirt = addVertex(pt.x + verts[idx].x * s, pt.y + verts[idx].y * s, edgeDist * static_cast<float>(s), r);
-                addTriangle(cIdx, prevNom, curNom);
-                addTriangle(prevNom, prevSkirt, curSkirt);
-                addTriangle(prevNom, curSkirt, curNom);
+                addCoreTriangle(cIdx, prevNom, curNom);
+                addSkirtTriangle(prevNom, prevSkirt, curSkirt);
+                addSkirtTriangle(prevNom, curSkirt, curNom);
                 prevNom = curNom;
                 prevSkirt = curSkirt;
             }
-            addTriangle(cIdx, prevNom, endVtxIdx);
-            addTriangle(prevNom, prevSkirt, endSkirtIdx);
-            addTriangle(prevNom, endSkirtIdx, endVtxIdx);
+            addCoreTriangle(cIdx, prevNom, endVtxIdx);
+            addSkirtTriangle(prevNom, prevSkirt, endSkirtIdx);
+            addSkirtTriangle(prevNom, endSkirtIdx, endVtxIdx);
         };
 
         // Head Cap at startIdx: covers rear-facing corners of the fixed nib
@@ -527,14 +539,14 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
         double sR0 = (lenR0 > 1e-4) ? (1.0 + delta / lenR0) : 1.0;
 
         uint32_t curLeftIdx   = addVertex(cleanPts[startIdx].x + vertsStart[sc0.idxLeftStart].x,
-                                          cleanPts[startIdx].y + vertsStart[sc0.idxLeftStart].y, -1.0f, rStart);
+                                          cleanPts[startIdx].y + vertsStart[sc0.idxLeftStart].y, 1.0f, rStart);
         uint32_t curCenterIdx = addVertex(cleanPts[startIdx].x, cleanPts[startIdx].y, 0.0f, rStart);
         uint32_t curRightIdx  = addVertex(cleanPts[startIdx].x + vertsStart[sc0.idxRightStart].x,
                                           cleanPts[startIdx].y + vertsStart[sc0.idxRightStart].y, 1.0f, rStart);
 
         uint32_t curLeftSkirtIdx  = addVertex(cleanPts[startIdx].x + vertsStart[sc0.idxLeftStart].x * sL0,
                                               cleanPts[startIdx].y + vertsStart[sc0.idxLeftStart].y * sL0,
-                                              -static_cast<float>(sL0), rStart);
+                                              static_cast<float>(sL0), rStart);
         uint32_t curRightSkirtIdx = addVertex(cleanPts[startIdx].x + vertsStart[sc0.idxRightStart].x * sR0,
                                               cleanPts[startIdx].y + vertsStart[sc0.idxRightStart].y * sR0,
                                               static_cast<float>(sR0), rStart);
@@ -559,31 +571,31 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
             double sRE = (lenRE > 1e-4) ? (1.0 + delta / lenRE) : 1.0;
 
             uint32_t nextLeftIdx   = addVertex(cleanPts[nextPtIdx].x + vertsNext[curSc.idxLeftEnd].x,
-                                               cleanPts[nextPtIdx].y + vertsNext[curSc.idxLeftEnd].y, -1.0f, rNext);
+                                               cleanPts[nextPtIdx].y + vertsNext[curSc.idxLeftEnd].y, 1.0f, rNext);
             uint32_t nextCenterIdx = addVertex(cleanPts[nextPtIdx].x, cleanPts[nextPtIdx].y, 0.0f, rNext);
             uint32_t nextRightIdx  = addVertex(cleanPts[nextPtIdx].x + vertsNext[curSc.idxRightEnd].x,
                                                cleanPts[nextPtIdx].y + vertsNext[curSc.idxRightEnd].y, 1.0f, rNext);
 
             uint32_t nextLeftSkirtIdx  = addVertex(cleanPts[nextPtIdx].x + vertsNext[curSc.idxLeftEnd].x * sLE,
                                                    cleanPts[nextPtIdx].y + vertsNext[curSc.idxLeftEnd].y * sLE,
-                                                   -static_cast<float>(sLE), rNext);
+                                                   static_cast<float>(sLE), rNext);
             uint32_t nextRightSkirtIdx = addVertex(cleanPts[nextPtIdx].x + vertsNext[curSc.idxRightEnd].x * sRE,
                                                    cleanPts[nextPtIdx].y + vertsNext[curSc.idxRightEnd].y * sRE,
                                                    static_cast<float>(sRE), rNext);
 
             // Connect core quads along segment
-            addTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-            addTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
+            addCoreTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
+            addCoreTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
 
-            addTriangle(curCenterIdx, curRightIdx, nextRightIdx);
-            addTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
+            addCoreTriangle(curCenterIdx, curRightIdx, nextRightIdx);
+            addCoreTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
 
             // Connect skirt quads along segment
-            addTriangle(curLeftIdx, curLeftSkirtIdx, nextLeftSkirtIdx);
-            addTriangle(curLeftIdx, nextLeftSkirtIdx, nextLeftIdx);
+            addSkirtTriangle(curLeftIdx, curLeftSkirtIdx, nextLeftSkirtIdx);
+            addSkirtTriangle(curLeftIdx, nextLeftSkirtIdx, nextLeftIdx);
 
-            addTriangle(curRightIdx, nextRightIdx, nextRightSkirtIdx);
-            addTriangle(curRightIdx, nextRightSkirtIdx, curRightSkirtIdx);
+            addSkirtTriangle(curRightIdx, nextRightIdx, nextRightSkirtIdx);
+            addSkirtTriangle(curRightIdx, nextRightSkirtIdx, curRightSkirtIdx);
 
             if (si + 1 == numSubSegs) {
                 // Tail Cap at endIdx: covers front-facing corners of the fixed nib
@@ -601,26 +613,30 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
             const auto& sIn    = segs[segIdx];
             const auto& sOut   = segs[segIdx + 1];
 
+            double cross = sIn.ux * sOut.uy - sIn.uy * sOut.ux;
+            const bool leftIsOuter  = (cross < -1e-4);
+            const bool rightIsOuter = (cross >  1e-4);
+
             uint32_t outLeftStartIdx = nextLeftIdx;
             uint32_t outLeftStartSkirtIdx = nextLeftSkirtIdx;
-            if (curSc.idxLeftEnd != nextSc.idxLeftStart) {
+            if (leftIsOuter && curSc.idxLeftEnd != nextSc.idxLeftStart) {
                 double lenLS = std::hypot(vertsNext[nextSc.idxLeftStart].x, vertsNext[nextSc.idxLeftStart].y);
                 double sLS = (lenLS > 1e-4) ? (1.0 + delta / lenLS) : 1.0;
                 outLeftStartIdx = addVertex(cleanPts[nextPtIdx].x + vertsNext[nextSc.idxLeftStart].x,
-                                            cleanPts[nextPtIdx].y + vertsNext[nextSc.idxLeftStart].y, -1.0f, rNext);
+                                            cleanPts[nextPtIdx].y + vertsNext[nextSc.idxLeftStart].y, 1.0f, rNext);
                 outLeftStartSkirtIdx = addVertex(cleanPts[nextPtIdx].x + vertsNext[nextSc.idxLeftStart].x * sLS,
                                                  cleanPts[nextPtIdx].y + vertsNext[nextSc.idxLeftStart].y * sLS,
-                                                 -static_cast<float>(sLS), rNext);
+                                                 static_cast<float>(sLS), rNext);
                 emitPolygonFan(nextCenterIdx, cleanPts[nextPtIdx], rNext,
                                curSc.idxLeftEnd, nextSc.idxLeftStart,
                                nextLeftIdx, nextLeftSkirtIdx,
                                outLeftStartIdx, outLeftStartSkirtIdx,
-                               sIn.nx + sOut.nx, sIn.ny + sOut.ny, -1.0f);
+                               sIn.nx + sOut.nx, sIn.ny + sOut.ny, 1.0f);
             }
 
             uint32_t outRightStartIdx = nextRightIdx;
             uint32_t outRightStartSkirtIdx = nextRightSkirtIdx;
-            if (curSc.idxRightEnd != nextSc.idxRightStart) {
+            if (rightIsOuter && curSc.idxRightEnd != nextSc.idxRightStart) {
                 double lenRS = std::hypot(vertsNext[nextSc.idxRightStart].x, vertsNext[nextSc.idxRightStart].y);
                 double sRS = (lenRS > 1e-4) ? (1.0 + delta / lenRS) : 1.0;
                 outRightStartIdx = addVertex(cleanPts[nextPtIdx].x + vertsNext[nextSc.idxRightStart].x,
@@ -664,6 +680,8 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
             buildPolygonalSubRibbon(subStart, N - 1);
         }
     }
+
+    finalizeMesh();
 }
 
 } // namespace Folio

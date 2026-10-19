@@ -158,10 +158,12 @@ struct InkVertex {
 struct InkMesh {
     std::vector<InkVertex> vertices;
     std::vector<uint32_t>  indices;
+    uint32_t coreIndexCount = 0; ///< Number of indices belonging to the solid core ribbon
 
     void clear() noexcept {
         vertices.clear();
         indices.clear();
+        coreIndexCount = 0;
     }
 
     [[nodiscard]] bool empty() const noexcept {
