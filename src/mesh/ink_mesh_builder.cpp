@@ -381,14 +381,7 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
 
             int fanSteps = std::clamp(static_cast<int>(std::ceil(turnAngle / (M_PI / 16.0))), 2, 16);
             double aStartFan = std::atan2(outerSign * sIn.ny,  outerSign * sIn.nx);
-            double aEndFan   = std::atan2(outerSign * sOut.ny, outerSign * sOut.nx);
-            double sweepFan  = aEndFan - aStartFan;
-
-            if (leftIsInner) {
-                while (sweepFan > 0.0) sweepFan -= 2.0 * M_PI;
-            } else {
-                while (sweepFan < 0.0) sweepFan += 2.0 * M_PI;
-            }
+            double sweepFan  = leftIsInner ? -turnAngle : turnAngle;
 
             uint32_t prevFanNom = outerInIdx;
             uint32_t prevFanSkirt = outerInSkirtIdx;

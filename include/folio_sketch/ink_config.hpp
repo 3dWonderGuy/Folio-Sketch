@@ -81,6 +81,8 @@ struct InkingConfig {
     float tiltMaxAngleRad = 1.05f;          // ~60 deg from vertical: full side-shading (typical digitizer max)
     float velocityThinningMaxSpeed = 1500.0f; // mm/s
     float dynamicWidthSmoothing = 0.6f;        // EMA factor (0.0 to 1.0)
+    float tailTaperLengthMm = 0.0f;            // Tail taper distance in mm (0.0 = disabled; >0 = taper stroke tail on release)
+    float tailTaperPower = 1.0f;               // Taper easing (1.0 = linear, 2.0 = smooth quadratic ease-out)
 
     // -------------------------------------------------------------
     // 7. POST-PROCESSING & SIMPLIFICATION (Pen-Up Commit)

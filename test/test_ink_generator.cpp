@@ -783,6 +783,83 @@ void TestCrescentTurnGeometry() {
     std::cout << "  -> Crescent Turn Geometry test passed (0 defects, 100% OK)!" << std::endl;
 }
 
+void TestQuickStrokeLoopMesh() {
+    std::cout << "[Test 9/10] Running Quick Stroke Loop Mesh (Branch-Cut & Hole Integrity) test..." << std::endl;
+
+    // Build a circle loop centered at (100, 100) with radius 15mm
+    // Traversing through the branch cut where normal crosses (-1, 0)
+    std::vector<StrokePoint> loopPts;
+    const double centerX = 100.0, centerY = 100.0, loopR = 15.0;
+    const int numSteps = 40;
+    for (int i = 0; i <= numSteps; ++i) {
+        double theta = (2.0 * M_PI * i) / numSteps;
+        double px = centerX + loopR * std::cos(theta);
+        double py = centerY + loopR * std::sin(theta);
+        loopPts.emplace_back(px, py, 0.5f); // 1.0mm stroke width (0.5mm radius)
+    }
+
+    InkMesh mesh;
+    InkMeshBuilder::BuildSolidMesh(loopPts, CapType::Round, 0xFF000000, mesh, 3.7795f);
+    assert(!mesh.empty());
+    assert(!mesh.vertices.empty());
+
+    // Verify that NO vertex intrudes into the central hole of the loop
+    // Expected inner boundary is at loopR - r - delta ~ 15 - 0.5 - 1.0 = 13.5mm
+    for (const auto& v : mesh.vertices) {
+        double distFromCenter = std::hypot(v.x - centerX, v.y - centerY);
+        assert(distFromCenter >= 10.0 && "Vertex intruded into loop center hole! Fan wrap bug detected.");
+    }
+
+    std::cout << "  -> Loop Mesh test passed: central hole completely hollow (0 intruding vertices)!" << std::endl;
+}
+
+void TestTailTaper() {
+    std::cout << "[Test 10/10] Running Configurable Tail Taper test..." << std::endl;
+
+    InkEngine engine;
+    InkingConfig config = engine.GetConfig();
+    config.tailTaperLengthMm = 20.0f;
+    config.tailTaperPower = 1.0f;
+    config.usePressure = true;
+    config.minWidthMultiplier = 0.2f;
+    config.maxWidthMultiplier = 1.0f;
+    engine.SetConfig(config);
+
+    StrokeStyle style;
+    style.baseWidth = 2.0f; // min radius will be 2.0 * 0.2 * 0.5 = 0.2mm
+    style.pattern = StrokePattern::Solid;
+    style.capType = CapType::Round;
+    style.usePressure = true;
+
+    // Draw straight line along X from 0 to 60mm with constant 0.8 pressure
+    engine.BeginStroke(0.0, 0.0, 0.8f, 0.0, style, 1.0f);
+    for (int i = 1; i <= 60; ++i) {
+        engine.AppendPoint(static_cast<double>(i), 0.0, 0.8f, i * 0.01);
+    }
+
+    FinishedStrokeData data = engine.FinishStroke();
+    assert(!data.modeledPoints.empty());
+
+    const auto& pts = data.modeledPoints;
+    float minExpectedR = style.baseWidth * config.minWidthMultiplier * 0.5f;
+
+    // Tip point should be tapered down to minExpectedR
+    assert(pts.back().r <= minExpectedR + 1e-3f);
+    assert(pts.back().pressure <= 1e-4f);
+
+    // Verify monotonic decay over the trailing 15mm span
+    float lastR = pts.back().r;
+    for (size_t i = pts.size() - 1; i > 0; --i) {
+        double distFromEnd = pts.back().x - pts[i].x;
+        if (distFromEnd > 18.0) break;
+        // As we move backwards from tip, radius should be >= previous
+        assert(pts[i - 1].r >= pts[i].r - 1e-4f);
+    }
+
+    std::cout << "  -> Tail Taper test passed: stroke tip tapered smoothly to minWidth ("
+              << pts.back().r * 2.0f << " mm)!" << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Starting Folio-Sketch Test Suite" << std::endl;
@@ -796,6 +873,8 @@ int main() {
     TestPatternAndInfillEdgeCases();
     TestInkMeshBuilderAndDebugger();
     TestCrescentTurnGeometry();
+    TestQuickStrokeLoopMesh();
+    TestTailTaper();
 
     std::cout << "========================================" << std::endl;
     std::cout << "All Folio-Sketch Tests Passed!" << std::endl;

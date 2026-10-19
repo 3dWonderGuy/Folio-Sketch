@@ -249,6 +249,36 @@ FinishedStrokeData InkEngine::FinishStroke() {
         }
     }
 
+    // Optional Tail Taper: smoothly thins out the end of the stroke on pen lift
+    if (m_config.tailTaperLengthMm > 0.0f && m_liveModeledPoints.size() >= 2) {
+        float minRadius = m_activeStyle.baseWidth * std::min(m_config.minWidthMultiplier, m_config.maxWidthMultiplier) * 0.5f;
+        minRadius = std::max(0.001f, minRadius);
+        const double taperTargetLen = static_cast<double>(m_config.tailTaperLengthMm);
+        const float taperPower = (m_config.tailTaperPower > 0.01f) ? m_config.tailTaperPower : 1.0f;
+
+        const size_t ptCount = m_liveModeledPoints.size();
+        double d = 0.0;
+        float origTipR = m_liveModeledPoints.back().r;
+        m_liveModeledPoints.back().r = std::min(origTipR, minRadius);
+        m_liveModeledPoints.back().pressure = 0.0f;
+
+        for (size_t i = ptCount - 1; i > 0; --i) {
+            double segLen = std::hypot(m_liveModeledPoints[i].x - m_liveModeledPoints[i - 1].x,
+                                       m_liveModeledPoints[i].y - m_liveModeledPoints[i - 1].y);
+            d += segLen;
+            if (d >= taperTargetLen) {
+                break;
+            }
+            float u = static_cast<float>(std::clamp(d / taperTargetLen, 0.0, 1.0));
+            float factor = (taperPower == 1.0f) ? u : std::pow(u, taperPower);
+            auto& pt = m_liveModeledPoints[i - 1];
+            if (pt.r > minRadius) {
+                pt.r = minRadius + (pt.r - minRadius) * factor;
+            }
+            pt.pressure *= factor;
+        }
+    }
+
     // Stage 3: Post-processing simplification (decimates redundant collinear vertices while preserving curve roundness)
     if (m_config.enablePostProcessSimplification && m_liveModeledPoints.size() > 2) {
         m_liveModeledPoints = StrokePostProcessor::Simplify(
