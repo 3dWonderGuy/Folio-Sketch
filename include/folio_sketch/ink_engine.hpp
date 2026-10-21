@@ -214,6 +214,7 @@ private:
 
     mutable BLPath m_liveStrokeOutline;
     mutable BLPath m_predictedStrokeOutline;
+    mutable size_t m_lastAppendedOutlineIdx = 0;
     mutable InkMesh m_liveStrokeMesh;
     mutable InkMesh m_predictedStrokeMesh;
     mutable bool m_outlineDirty = false;

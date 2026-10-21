@@ -114,9 +114,27 @@ void StrokeFilter::RegularizeRadiusSlope(std::vector<StrokePoint>& pts, double m
 }
 
 std::vector<size_t> StrokeFilter::FindHairpinTurns(std::span<const StrokePoint> pts, double cosThreshold) {
-    // Disabled: Continuous ribbon generation handles all acute angles and 180° reversals
-    // safely with emitOuter arcs and clamped miters, avoiding sharp split intersections.
-    return {};
+    std::vector<size_t> splitIndices;
+    if (pts.size() < 3) return splitIndices;
+
+    for (size_t i = 1; i < pts.size() - 1; ++i) {
+        double dxIn  = pts[i].x - pts[i - 1].x;
+        double dyIn  = pts[i].y - pts[i - 1].y;
+        double lenIn = std::hypot(dxIn, dyIn);
+
+        double dxOut  = pts[i + 1].x - pts[i].x;
+        double dyOut  = pts[i + 1].y - pts[i].y;
+        double lenOut = std::hypot(dxOut, dyOut);
+
+        if (lenIn > 1e-7 && lenOut > 1e-7) {
+            double cosTheta = (dxIn * dxOut + dyIn * dyOut) / (lenIn * lenOut);
+            if (cosTheta < cosThreshold) {
+                splitIndices.push_back(i);
+            }
+        }
+    }
+
+    return splitIndices;
 }
 
 } // namespace InkInternal

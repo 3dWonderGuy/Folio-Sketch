@@ -154,6 +154,7 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
 
     m_liveStrokeOutline = InkGenerator::GenerateStroke(
         { dotPt }, m_activeStyle.capType, m_activeStyle.pattern);
+    m_lastAppendedOutlineIdx = 0;
     InkMeshBuilder::BuildSolidMesh(
         std::span<const StrokePoint>(&dotPt, 1),
         m_activeStyle.capType,
@@ -348,6 +349,7 @@ void InkEngine::CancelStroke() {
     m_predictedPointsBuffer.clear();
     m_liveStrokeOutline.clear();
     m_predictedStrokeOutline.clear();
+    m_lastAppendedOutlineIdx = 0;
     m_liveStrokeMesh.clear();
     m_predictedStrokeMesh.clear();
     m_outlineDirty = false;
@@ -397,10 +399,12 @@ void InkEngine::EnsureLiveOutline() const {
     m_outlineDirty = false;
     if (m_liveModeledPoints.empty()) {
         m_liveStrokeOutline.clear();
+        m_lastAppendedOutlineIdx = 0;
         return;
     }
-    m_liveStrokeOutline = InkGenerator::GenerateStroke(
-        m_liveModeledPoints, m_activeStyle.capType, m_activeStyle.pattern);
+    InkGenerator::AppendRibbonSegments(
+        m_liveStrokeOutline, m_liveModeledPoints, m_lastAppendedOutlineIdx, m_activeStyle.capType, m_activeStyle.pattern);
+    m_lastAppendedOutlineIdx = m_liveModeledPoints.size() - 1;
 }
 
 void InkEngine::EnsureLiveMesh() const {
