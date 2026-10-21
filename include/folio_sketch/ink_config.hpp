@@ -87,7 +87,7 @@ struct InkingConfig {
     // -------------------------------------------------------------
     // 7. POST-PROCESSING & SIMPLIFICATION (Pen-Up Commit)
     // -------------------------------------------------------------
-    bool enablePostProcessSimplification = true;
+    bool enablePostProcessSimplification = false;
     float simplificationToleranceMm = 0.015f; // Ramer-Douglas-Peucker distance threshold (mm)
     float simplificationMaxTurnDeg = 4.0f;    // Max direction deviation a dropped span may have (keeps curves round)
     float simplificationRadiusTolerance = 0.08f; // Max relative radius error when dropping points (keeps width profile)

@@ -139,17 +139,10 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
 
     // -------------------------------------------------------------------------
     // HAIRPIN SPLIT DETECTION:
-    // When turn angle > ~100° (dot < -0.20), normal vectors cancel out and ribbons
-    // invert into bowtie knots. We split at sharp turnarounds into clean sub-ribbons
-    // sharing the pivot vertex.
+    // Disabled: Splitting meshes into sub-ribbons creates sharp V-notch overlaps
+    // at the turnaround. We rely on standard ProcessCorner fan sweeping for all turns.
     // -------------------------------------------------------------------------
     std::vector<size_t> splitIndices;
-    for (size_t i = 1; i < N - 1; ++i) {
-        double dot = segs[i - 1].ux * segs[i].ux + segs[i - 1].uy * segs[i].uy;
-        if (dot < -0.20) {
-            splitIndices.push_back(i);
-        }
-    }
 
     // Helper to build a round sub-ribbon from cleanPts[startIdx ... endIdx]
     auto buildRoundSubRibbon = [&](size_t startIdx, size_t endIdx) {

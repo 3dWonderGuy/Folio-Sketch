@@ -212,9 +212,16 @@ FinishedStrokeData InkEngine::FinishStroke() {
 
         // Stage 1: Pen-Up event to flush lingering spring inertia in physics modeler
         m_googleResultsBuffer.clear();
-        // we explicitly tell google that we lifted the pen so it can finish the stroke
         if (m_googleModeler->Update(MakeGoogleInput(sm::Input::EventType::kUp, m_activeStrokePoints.back()), m_googleResultsBuffer).ok()) {
-            ProcessGoogleResults(m_googleResultsBuffer);                               // let spring finish catching up to pen lift position
+            // Retain and freeze predicted points so the stroke tip doesn't jump backwards upon pen lift
+            if (m_config.google_enable_prediction && !m_predictedPointsBuffer.empty()) {
+                for (size_t i = 1; i < m_predictedPointsBuffer.size(); ++i) {
+                    m_liveModeledPoints.push_back(m_predictedPointsBuffer[i]);
+                }
+                m_predictedPointsBuffer.clear();
+            } else {
+                ProcessGoogleResults(m_googleResultsBuffer);                               // let spring finish catching up to pen lift position
+            }
         }
 
         // Stage 2: (SPECIAL CASE) Single-tap dot handling (user tapped without lateral dragging)
