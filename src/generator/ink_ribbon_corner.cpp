@@ -182,14 +182,9 @@ void ProcessCorner(const StrokePoint& pt,
             innerDist = std::min(r / cosHalf, 1.4 * r);
         }
 
-        if (innerDist > safeLimit) {
-            // Clamped miter on disk circumference: never enters circle interior (< r)
-            Point2D miterPt = { pt.x + bInX * r, pt.y + bInY * r };
-            PushMonotonic(inPts, miterPt);
-        } else {
-            Point2D miterPt = { pt.x + bInX * innerDist, pt.y + bInY * innerDist };
-            PushMonotonic(inPts, miterPt);
-        }
+        innerDist = std::min(innerDist, std::max(0.0, safeLimit));
+        Point2D miterPt = { pt.x + bInX * innerDist, pt.y + bInY * innerDist };
+        PushMonotonic(inPts, miterPt);
     };
 
     // 2. OUTER CORNER: Smooth circular arc for sharp turns

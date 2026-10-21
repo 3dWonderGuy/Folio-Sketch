@@ -29,9 +29,9 @@ public:
     static void RegularizeRadiusSlope(std::vector<StrokePoint>& pts, double maxSlope = 0.85);
 
     /**
-     * @brief Identifies sharp reversal hairpin turn points (turn angle > ~135°, cosTheta < cosThreshold).
+     * @brief Identifies sharp reversal hairpin turn points (turn angle > ~100°, cosTheta < cosThreshold).
      */
-    static std::vector<size_t> FindHairpinTurns(std::span<const StrokePoint> pts, double cosThreshold = -0.70);
+    static std::vector<size_t> FindHairpinTurns(std::span<const StrokePoint> pts, double cosThreshold = -0.20);
 };
 
 } // namespace InkInternal
