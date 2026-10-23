@@ -194,11 +194,10 @@ using InkMesh   = Folio::InkMesh;
 
 /**
  * @struct FinishedStrokeData
- * @brief Completed inking stroke container encapsulating collision segments, modeled centerline, outline polygon, and GPU mesh.
+ * @brief Completed inking stroke container encapsulating collision segments, modeled centerline, and GPU mesh.
  */
 struct FinishedStrokeData {
     std::vector<Segment1D> liveSegments;
     std::vector<StrokePoint> modeledPoints;
-    BLPath outlinePath;
     Folio::InkMesh mesh;
 };

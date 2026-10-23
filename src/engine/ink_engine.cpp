@@ -68,16 +68,12 @@ InkEngine::InkEngine(InkEngine&& other) noexcept
       m_googleResultsBuffer(std::move(other.m_googleResultsBuffer)),
       m_googlePredictionsBuffer(std::move(other.m_googlePredictionsBuffer)),
       m_predictedPointsBuffer(std::move(other.m_predictedPointsBuffer)),
-      m_liveStrokeOutline(std::move(other.m_liveStrokeOutline)),
-      m_predictedStrokeOutline(std::move(other.m_predictedStrokeOutline)),
       m_liveStrokeMesh(std::move(other.m_liveStrokeMesh)),
       m_predictedStrokeMesh(std::move(other.m_predictedStrokeMesh)),
-      m_outlineDirty(other.m_outlineDirty),
       m_meshDirty(other.m_meshDirty),
       m_predictionDirty(other.m_predictionDirty),
       m_googleModeler(std::move(other.m_googleModeler)) {
     other.m_isStrokeActive = false;
-    other.m_outlineDirty = false;
     other.m_meshDirty = false;
     other.m_predictionDirty = false;
     other.m_smoothedWidth = -1.0f;
@@ -96,17 +92,13 @@ InkEngine& InkEngine::operator=(InkEngine&& other) noexcept {
         m_googleResultsBuffer = std::move(other.m_googleResultsBuffer);
         m_googlePredictionsBuffer = std::move(other.m_googlePredictionsBuffer);
         m_predictedPointsBuffer = std::move(other.m_predictedPointsBuffer);
-        m_liveStrokeOutline = std::move(other.m_liveStrokeOutline);
-        m_predictedStrokeOutline = std::move(other.m_predictedStrokeOutline);
         m_liveStrokeMesh = std::move(other.m_liveStrokeMesh);
         m_predictedStrokeMesh = std::move(other.m_predictedStrokeMesh);
-        m_outlineDirty = other.m_outlineDirty;
         m_meshDirty = other.m_meshDirty;
         m_predictionDirty = other.m_predictionDirty;
         m_googleModeler = std::move(other.m_googleModeler);
 
         other.m_isStrokeActive = false;
-        other.m_outlineDirty = false;
         other.m_meshDirty = false;
         other.m_predictionDirty = false;
         other.m_smoothedWidth = -1.0f;
@@ -152,16 +144,12 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
     m_smoothedWidth = dynamicWidth;
     StrokePoint dotPt(startPt.x, startPt.y, dynamicWidth * 0.5f, startPressure, startPt.tiltX, startPt.tiltY);
 
-    m_liveStrokeOutline = InkGenerator::GenerateStroke(
-        { dotPt }, m_activeStyle.capType, m_activeStyle.pattern);
-    m_lastAppendedOutlineIdx = 0;
     InkMeshBuilder::BuildSolidMesh(
         std::span<const StrokePoint>(&dotPt, 1),
         m_activeStyle.capType,
         PackGpuColor(m_activeStyle.color),
         m_liveStrokeMesh,
         m_zoomScale);
-    m_outlineDirty = false;
     m_meshDirty = false;
 
     // Reset physics engine state for the new stroke (preserves configured physics parameters)
@@ -324,8 +312,6 @@ FinishedStrokeData InkEngine::FinishStroke() {
     }
 
     data.modeledPoints = m_liveModeledPoints;
-    data.outlinePath = InkGenerator::GenerateStroke(
-        m_liveModeledPoints, m_activeStyle.capType, m_activeStyle.pattern);        // builds closed polygon ribbon (CPU path / export)
     InkMeshBuilder::BuildSolidMesh(
         m_liveModeledPoints, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), data.mesh, m_zoomScale);
 
@@ -347,30 +333,12 @@ void InkEngine::CancelStroke() {
     m_googleResultsBuffer.clear();
     m_googlePredictionsBuffer.clear();
     m_predictedPointsBuffer.clear();
-    m_liveStrokeOutline.clear();
-    m_predictedStrokeOutline.clear();
-    m_lastAppendedOutlineIdx = 0;
     m_liveStrokeMesh.clear();
     m_predictedStrokeMesh.clear();
-    m_outlineDirty = false;
     m_meshDirty = false;
     m_predictionDirty = false;
     m_smoothedWidth = -1.0f;
     m_isStrokeActive = false;
-}
-
-const BLPath& InkEngine::GetLiveOutlinePath() const noexcept {
-    if (m_outlineDirty) {
-        EnsureLiveOutline();
-    }
-    return m_liveStrokeOutline;
-}
-
-const BLPath& InkEngine::GetPredictedOutlinePath() const noexcept {
-    if (m_predictionDirty) {
-        EnsurePrediction();
-    }
-    return m_predictedStrokeOutline;
 }
 
 const InkMesh& InkEngine::GetLiveMesh() const noexcept {
@@ -394,19 +362,6 @@ const std::vector<StrokePoint>& InkEngine::GetPredictedPoints() const noexcept {
     return m_predictedPointsBuffer;
 }
 
-void InkEngine::EnsureLiveOutline() const {
-    if (!m_outlineDirty) return;
-    m_outlineDirty = false;
-    if (m_liveModeledPoints.empty()) {
-        m_liveStrokeOutline.clear();
-        m_lastAppendedOutlineIdx = 0;
-        return;
-    }
-    InkGenerator::AppendRibbonSegments(
-        m_liveStrokeOutline, m_liveModeledPoints, m_lastAppendedOutlineIdx, m_activeStyle.capType, m_activeStyle.pattern);
-    m_lastAppendedOutlineIdx = m_liveModeledPoints.size() - 1;
-}
-
 void InkEngine::EnsureLiveMesh() const {
     if (!m_meshDirty) return;
     m_meshDirty = false;
@@ -421,7 +376,6 @@ void InkEngine::EnsureLiveMesh() const {
 void InkEngine::EnsurePrediction() const {
     if (!m_predictionDirty) return;
     m_predictionDirty = false;
-    m_predictedStrokeOutline.clear();
     m_predictedStrokeMesh.clear();
     m_predictedPointsBuffer.clear();
 
@@ -445,8 +399,6 @@ void InkEngine::EnsurePrediction() const {
     }
 
     if (m_predictedPointsBuffer.size() >= 2) {
-        m_predictedStrokeOutline = InkGenerator::GenerateStroke(
-            m_predictedPointsBuffer, m_activeStyle.capType, m_activeStyle.pattern);
         InkMeshBuilder::BuildSolidMesh(
             m_predictedPointsBuffer, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), m_predictedStrokeMesh, m_zoomScale);
     }
@@ -507,7 +459,6 @@ void InkEngine::ProcessGoogleResults(const std::vector<sm::Result>& results) {
     }
 
     if (!m_liveModeledPoints.empty()) {
-        m_outlineDirty = true;
         m_meshDirty = true;
     }
 }

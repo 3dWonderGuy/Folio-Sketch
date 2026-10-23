@@ -591,7 +591,7 @@ void TestInkEngineLifecycle() {
     // 1. Normal Multi-Point Gesture
     engine.BeginStroke(10.0, 10.0, 0.5f, 1.0, style);
     assert(engine.IsStrokeActive());
-    assert(!engine.GetLiveOutlinePath().is_empty());
+    assert(!engine.GetLiveMesh().empty());
 
     for (int i = 1; i <= 10; ++i) {
         engine.AppendPoint(10.0 + i * 2.0, 10.0 + i * 0.5, 0.6f, 1.0 + i * 0.02);
@@ -603,14 +603,14 @@ void TestInkEngineLifecycle() {
     assert(!engine.IsStrokeActive());
     assert(!stroke1.modeledPoints.empty());
     assert(!stroke1.liveSegments.empty());
-    assert(!stroke1.outlinePath.is_empty());
+    assert(!stroke1.mesh.empty());
 
     // 2. Single-Tap Dot Gesture
     engine.BeginStroke(50.0, 50.0, 0.8f, 2.0, style);
     FinishedStrokeData tapStroke = engine.FinishStroke();
     assert(tapStroke.modeledPoints.size() == 1);
     assert(tapStroke.liveSegments.size() == 1);
-    assert(!tapStroke.outlinePath.is_empty());
+    assert(!tapStroke.mesh.empty());
 
     // 3. Cancel Gesture
     engine.BeginStroke(30.0, 30.0, 0.5f, 3.0, style);
@@ -619,7 +619,7 @@ void TestInkEngineLifecycle() {
     engine.CancelStroke();
     assert(!engine.IsStrokeActive());
     assert(engine.GetLiveModeledPoints().empty());
-    assert(engine.GetLiveOutlinePath().is_empty());
+    assert(engine.GetLiveMesh().empty());
 
     // 4. Move Construction & Move Assignment
     engine.BeginStroke(100.0, 100.0, 0.5f, 4.0, style);

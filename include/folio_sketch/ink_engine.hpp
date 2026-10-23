@@ -20,11 +20,10 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
-#include <blend2d/blend2d.h>
+#include <span>
 
 #include "folio_sketch/ink_stroke_data.hpp"
 #include "folio_sketch/ink_config.hpp"
-#include "folio_sketch/ink_generator.hpp"
 #include "folio_sketch/ink_mesh.hpp"
 
 // Forward declarations for Google Ink Stroke Modeler
@@ -122,14 +121,12 @@ public:
     /**
      * @brief Queries whether an inking gesture is currently in progress.
      */
-    [[nodiscard]] bool IsStrokeActive() const noexcept { return m_isStrokeActive; }
-    [[nodiscard]] const BLPath& GetLiveOutlinePath() const noexcept;
-    [[nodiscard]] const BLPath& GetPredictedOutlinePath() const noexcept;
-    [[nodiscard]] const InkMesh& GetLiveMesh() const noexcept;
-    [[nodiscard]] const InkMesh& GetPredictedMesh() const noexcept;
-    [[nodiscard]] const std::vector<StrokePoint>& GetLiveModeledPoints() const noexcept { return m_liveModeledPoints; }
-    [[nodiscard]] const std::vector<StrokePoint>& GetPredictedPoints() const noexcept;
-    [[nodiscard]] const StrokeStyle& GetActiveStyle() const noexcept { return m_activeStyle; }
+    [[nodiscard]] bool IsStrokeActive() const noexcept { return m_isStrokeActive; }   // True while stylus/pointer is held down and receiving stroke inputs
+    [[nodiscard]] const InkMesh& GetLiveMesh() const noexcept;                        // GPU vertex/index buffer (ribbon mesh + AA skirts) for confirmed stroke segments
+    [[nodiscard]] const InkMesh& GetPredictedMesh() const noexcept;                   // GPU vertex/index buffer for speculative forward prediction mesh
+    [[nodiscard]] const std::vector<StrokePoint>& GetLiveModeledPoints() const noexcept { return m_liveModeledPoints; } // Raw physics-modeled stroke coordinates (x, y, radius, pressure)
+    [[nodiscard]] const std::vector<StrokePoint>& GetPredictedPoints() const noexcept; // Predicted future sample points computed by the Kalman/stroke-end predictor
+    [[nodiscard]] const StrokeStyle& GetActiveStyle() const noexcept { return m_activeStyle; } // Current active pen style settings (color, width, caps, blend mode)
 
     // -------------------------------------------------------------------------
     // 3. CONFIGURATION & OUTLINE COMPUTATION AUTHORITY
@@ -152,16 +149,6 @@ public:
      * Pushes spring-mass constant, drag, loop mitigation, wobble filters, and angle upsampling.
      */
     void UpdatePhysicsParams();
-
-    /**
-     * @brief Centralized stroke outline computing authority.
-     */
-    static BLPath BuildStrokeOutline(const std::vector<StrokePoint>& points,
-                                     CapType capType = CapType::Round,
-                                     StrokePattern pattern = StrokePattern::Solid,
-                                     bool isStandardShape = false) {
-        return InkGenerator::GenerateStroke(points, capType, pattern, isStandardShape);
-    }
 
     /**
      * @brief Centralized GPU indexed triangle mesh computing authority.
@@ -189,8 +176,7 @@ private:
     // Processes confirmed Google Ink results into live modeled points and updates 2D live outline
     void ProcessGoogleResults(const std::vector<ink::stroke_model::Result>& results);
 
-    // Builds temporary forward-predicted tip outline to reduce perceived latency
-    void EnsureLiveOutline() const;
+    // Builds temporary forward-predicted tip mesh to reduce perceived latency
     void EnsureLiveMesh() const;
     void EnsurePrediction() const;
 
@@ -212,12 +198,8 @@ private:
     mutable std::vector<ink::stroke_model::Result> m_googlePredictionsBuffer;
     mutable std::vector<StrokePoint> m_predictedPointsBuffer;
 
-    mutable BLPath m_liveStrokeOutline;
-    mutable BLPath m_predictedStrokeOutline;
-    mutable size_t m_lastAppendedOutlineIdx = 0;
     mutable InkMesh m_liveStrokeMesh;
     mutable InkMesh m_predictedStrokeMesh;
-    mutable bool m_outlineDirty = false;
     mutable bool m_meshDirty = false;
     mutable bool m_predictionDirty = false;
 
