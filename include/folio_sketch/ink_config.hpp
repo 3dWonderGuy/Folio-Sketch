@@ -92,6 +92,15 @@ struct InkingConfig {
     float simplificationMaxTurnDeg = 4.0f;    // Max direction deviation a dropped span may have (keeps curves round)
     float simplificationRadiusTolerance = 0.08f; // Max relative radius error when dropping points (keeps width profile)
     float minTurnAngleForJointCapDeg = 3.0f;  // Minimum turn angle (degrees) to emit a joint cap disk
+
+    // -------------------------------------------------------------
+    // 8. MESH TESSELLATION & HAIRPIN TURNS
+    // -------------------------------------------------------------
+    static constexpr float kDefaultHairpinCosThreshold = -0.866f;       // Acute turnaround threshold (> 150 deg reversal)
+    static constexpr float kDefaultHairpinMinSegmentRadiusRatio = 0.25f; // Min segment length (len / r) to avoid micro-noise
+
+    float hairpinCosThreshold = kDefaultHairpinCosThreshold;
+    float hairpinMinSegmentRadiusRatio = kDefaultHairpinMinSegmentRadiusRatio;
 };
 
 using InkingTuningConfig = InkingConfig;

@@ -1,4 +1,5 @@
 #include "folio_sketch/ink_mesh.hpp"
+#include "folio_sketch/ink_config.hpp"
 #include "geometry/ink_nib_geometry.hpp"
 #include "geometry/ink_geometry_utils.hpp"
 #include <cmath>
@@ -20,6 +21,10 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
                                     float scalePxPerMm) {
     outMesh.clear();
     if (points.empty()) return;
+
+    // Use centralized constant thresholds from InkingConfig
+    constexpr float hairpinCosThreshold = InkingConfig::kDefaultHairpinCosThreshold;
+    constexpr float hairpinMinRatio     = InkingConfig::kDefaultHairpinMinSegmentRadiusRatio;
 
     // 1. Pre-filter coincident micro-points (< 1e-4 mm separation)
     std::vector<StrokePoint> cleanPts;
@@ -139,14 +144,20 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
 
     // -------------------------------------------------------------------------
     // HAIRPIN SPLIT DETECTION:
-    // When turn angle > ~100° (dot < -0.20), normal vectors cancel out and ribbons
-    // invert into bowtie knots. We split at sharp turnarounds into clean sub-ribbons
-    // sharing the pivot vertex.
+    // When turn angle is a sharp acute reversal (> 150° turn, dot < hairpinCosThreshold),
+    // normal vectors invert into bowtie knots.
+    // We only split if adjacent segments are sufficiently long (> hairpinMinRatio * radius)
+    // so micro-jitter from fast sampling or physics springs does not false-trigger.
     // -------------------------------------------------------------------------
     std::vector<size_t> splitIndices;
     for (size_t i = 1; i < N - 1; ++i) {
+        float rPivot = std::max(0.01f, cleanPts[i].r);
+        // Ignore micro-segments where directions are unstable noise
+        if (segs[i - 1].len < hairpinMinRatio * rPivot || segs[i].len < hairpinMinRatio * rPivot) {
+            continue;
+        }
         double dot = segs[i - 1].ux * segs[i].ux + segs[i - 1].uy * segs[i].uy;
-        if (dot < -0.20) {
+        if (dot < hairpinCosThreshold) {
             splitIndices.push_back(i);
         }
     }
