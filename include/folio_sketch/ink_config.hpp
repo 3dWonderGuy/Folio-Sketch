@@ -96,8 +96,8 @@ struct InkingConfig {
     // -------------------------------------------------------------
     // 8. MESH TESSELLATION & HAIRPIN TURNS
     // -------------------------------------------------------------
-    static constexpr float kDefaultHairpinCosThreshold = -0.866f;       // Acute turnaround threshold (> 150 deg reversal)
-    static constexpr float kDefaultHairpinMinSegmentRadiusRatio = 0.25f; // Min segment length (len / r) to avoid micro-noise
+    static constexpr float kDefaultHairpinCosThreshold = -0.50f;        // Acute turnaround threshold (> 120 deg reversal)
+    static constexpr float kDefaultHairpinMinSegmentRadiusRatio = 0.20f; // Min segment length (len / r) to avoid micro-noise
 
     float hairpinCosThreshold = kDefaultHairpinCosThreshold;
     float hairpinMinSegmentRadiusRatio = kDefaultHairpinMinSegmentRadiusRatio;

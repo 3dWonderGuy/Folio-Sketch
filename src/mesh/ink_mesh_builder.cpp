@@ -2,6 +2,7 @@
 #include "folio_sketch/ink_config.hpp"
 #include "geometry/ink_nib_geometry.hpp"
 #include "geometry/ink_geometry_utils.hpp"
+#include "geometry/ink_stroke_filter.hpp"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -26,22 +27,9 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
     constexpr float hairpinCosThreshold = InkingConfig::kDefaultHairpinCosThreshold;
     constexpr float hairpinMinRatio     = InkingConfig::kDefaultHairpinMinSegmentRadiusRatio;
 
-    // 1. Pre-filter coincident micro-points (< 1e-4 mm separation)
-    std::vector<StrokePoint> cleanPts;
-    cleanPts.reserve(points.size());
-    for (const auto& p : points) {
-        if (cleanPts.empty()) {
-            cleanPts.push_back(p);
-        } else {
-            double d = std::hypot(p.x - cleanPts.back().x, p.y - cleanPts.back().y);
-            if (d >= 1e-4) {
-                cleanPts.push_back(p);
-            } else {
-                cleanPts.back().r = std::max(cleanPts.back().r, p.r);
-                cleanPts.back().pressure = std::max(cleanPts.back().pressure, p.pressure);
-            }
-        }
-    }
+    // 1. Condition input points: prune submerged containment disks, micro-steps, and regularize radius
+    std::vector<StrokePoint> cleanPts = StrokeFilter::PreFilterPoints(points);
+    StrokeFilter::RegularizeRadiusSlope(cleanPts);
 
     if (cleanPts.empty()) return;
 
