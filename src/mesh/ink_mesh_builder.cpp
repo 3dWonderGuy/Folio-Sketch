@@ -618,13 +618,15 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
             const auto& sIn    = segs[segIdx];
             const auto& sOut   = segs[segIdx + 1];
 
-            double cross = sIn.ux * sOut.uy - sIn.uy * sOut.ux;
-            const bool leftIsOuter  = (cross < -1e-4);
-            const bool rightIsOuter = (cross >  1e-4);
+            // In screen coordinates (+Y down, normal = (+uy, -ux) pointing left):
+            // cross > 0 represents a right turn where LEFT is outer and RIGHT is inner.
+            // cross < 0 represents a left turn where RIGHT is outer and LEFT is inner.
+            const bool leftIsOuter  = (cross >  1e-4);
+            const bool rightIsOuter = (cross < -1e-4);
 
             uint32_t outLeftStartIdx = nextLeftIdx;
             uint32_t outLeftStartSkirtIdx = nextLeftSkirtIdx;
-            if (leftIsOuter && curSc.idxLeftEnd != nextSc.idxLeftStart) {
+            if (curSc.idxLeftEnd != nextSc.idxLeftStart) {
                 double lenLS = std::hypot(vertsNext[nextSc.idxLeftStart].x, vertsNext[nextSc.idxLeftStart].y);
                 double sLS = (lenLS > 1e-4) ? (1.0 + delta / lenLS) : 1.0;
                 outLeftStartIdx = addVertex(cleanPts[nextPtIdx].x + vertsNext[nextSc.idxLeftStart].x,
@@ -632,16 +634,21 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
                 outLeftStartSkirtIdx = addVertex(cleanPts[nextPtIdx].x + vertsNext[nextSc.idxLeftStart].x * sLS,
                                                  cleanPts[nextPtIdx].y + vertsNext[nextSc.idxLeftStart].y * sLS,
                                                  static_cast<float>(sLS), rNext);
-                emitPolygonFan(nextCenterIdx, cleanPts[nextPtIdx], rNext,
-                               curSc.idxLeftEnd, nextSc.idxLeftStart,
-                               nextLeftIdx, nextLeftSkirtIdx,
-                               outLeftStartIdx, outLeftStartSkirtIdx,
-                               sIn.nx + sOut.nx, sIn.ny + sOut.ny, 1.0f);
+                if (leftIsOuter) {
+                    emitPolygonFan(nextCenterIdx, cleanPts[nextPtIdx], rNext,
+                                   curSc.idxLeftEnd, nextSc.idxLeftStart,
+                                   nextLeftIdx, nextLeftSkirtIdx,
+                                   outLeftStartIdx, outLeftStartSkirtIdx,
+                                   sIn.nx + sOut.nx, sIn.ny + sOut.ny, 1.0f);
+                } else {
+                    // Inner corner transition: connect directly across the joint to prevent inner rail crossing
+                    addCoreTriangle(nextCenterIdx, nextLeftIdx, outLeftStartIdx);
+                }
             }
 
             uint32_t outRightStartIdx = nextRightIdx;
             uint32_t outRightStartSkirtIdx = nextRightSkirtIdx;
-            if (rightIsOuter && curSc.idxRightEnd != nextSc.idxRightStart) {
+            if (curSc.idxRightEnd != nextSc.idxRightStart) {
                 double lenRS = std::hypot(vertsNext[nextSc.idxRightStart].x, vertsNext[nextSc.idxRightStart].y);
                 double sRS = (lenRS > 1e-4) ? (1.0 + delta / lenRS) : 1.0;
                 outRightStartIdx = addVertex(cleanPts[nextPtIdx].x + vertsNext[nextSc.idxRightStart].x,
@@ -649,11 +656,16 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
                 outRightStartSkirtIdx = addVertex(cleanPts[nextPtIdx].x + vertsNext[nextSc.idxRightStart].x * sRS,
                                                   cleanPts[nextPtIdx].y + vertsNext[nextSc.idxRightStart].y * sRS,
                                                   static_cast<float>(sRS), rNext);
-                emitPolygonFan(nextCenterIdx, cleanPts[nextPtIdx], rNext,
-                               curSc.idxRightEnd, nextSc.idxRightStart,
-                               nextRightIdx, nextRightSkirtIdx,
-                               outRightStartIdx, outRightStartSkirtIdx,
-                               -(sIn.nx + sOut.nx), -(sIn.ny + sOut.ny), 1.0f);
+                if (rightIsOuter) {
+                    emitPolygonFan(nextCenterIdx, cleanPts[nextPtIdx], rNext,
+                                   curSc.idxRightEnd, nextSc.idxRightStart,
+                                   nextRightIdx, nextRightSkirtIdx,
+                                   outRightStartIdx, outRightStartSkirtIdx,
+                                   -(sIn.nx + sOut.nx), -(sIn.ny + sOut.ny), 1.0f);
+                } else {
+                    // Inner corner transition: connect directly across the joint to prevent inner rail crossing
+                    addCoreTriangle(nextCenterIdx, nextRightIdx, outRightStartIdx);
+                }
             }
 
             curLeftIdx        = outLeftStartIdx;
