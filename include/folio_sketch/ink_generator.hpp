@@ -50,6 +50,20 @@ struct StrokeDebugInfo {
     bool                     hasDefects = false; ///< True if selfIntersections or retrogradeIndices is non-empty
 };
 
+/**
+ * @struct LoopInfillResult
+ * @brief Diagnostic and geometric result of self-loop closure detection.
+ */
+struct LoopInfillResult {
+    bool hasLoop = false;          ///< True if an enclosed watertight loop was identified
+    InkPath fillRegion;            ///< Closed 2D polygon path representing the enclosed cavity
+    BoundingBox2D bounds;          ///< Axis-aligned bounding box of the loop
+    double loopArea = 0.0;         ///< Enclosed cavity area in square millimeters
+    size_t startSegIdx = 0;        ///< First segment index of the intersection
+    size_t endSegIdx = 0;          ///< Second segment index of the intersection
+    Point2D intersectionPoint;     ///< Exact coordinate where the loop seals
+};
+
 class InkGenerator {
 public:
     // =========================================================================
@@ -98,6 +112,24 @@ public:
      */
     static InkPath BuildInfill(const std::vector<Point2D>& vertices);
     static InkPath BuildInfill(const std::vector<StrokePoint>& vertices);
+
+    /**
+     * @brief Detects if a continuous stroke self-intersects to form an enclosed watertight loop,
+     *        and extracts the interior polygon region for vector paint/flood filling.
+     *
+     * Safety features:
+     * - Only extracts closed loops formed by non-adjacent segment crossings.
+     * - Ignores tiny micro-loops smaller than minArea (e.g. handwriting cursive loops in 'e' or 'l').
+     * - Safety checks against maxArea to prevent flooding the entire canvas.
+     *
+     * @param stroke Input centerline points with radii.
+     * @param minArea Minimum loop area threshold in mm^2 (default 1.0 mm^2).
+     * @param maxArea Maximum loop area threshold in mm^2 (safety cap, default 1,000,000 mm^2).
+     * @return LoopInfillResult containing the enclosed cavity InkPath and geometric stats.
+     */
+    static LoopInfillResult DetectStrokeSelfLoop(const std::vector<StrokePoint>& stroke,
+                                                double minArea = 1.0,
+                                                double maxArea = 1000000.0);
 
     /**
      * @brief Incrementally appends newly modeled stroke segments [startIdx - 1 .. pts.size() - 1]

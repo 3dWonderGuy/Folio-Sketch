@@ -716,6 +716,37 @@ void TestPatternAndInfillEdgeCases() {
     BLPath infillClosed = InkGenerator::BuildInfill(closedPoly);
     assert(!infillClosed.is_empty());
 
+    // 3. DetectStrokeSelfLoop test (P-loop or balloon gesture)
+    std::vector<StrokePoint> loopStroke = {
+        {   0.0,   0.0, 1.0f, 0.5f, 0.0f, 0.0f }, // stem start
+        {  50.0,   0.0, 1.0f, 0.5f, 0.0f, 0.0f }, // loop start
+        {  70.0,  20.0, 1.0f, 0.5f, 0.0f, 0.0f },
+        {  70.0,  50.0, 1.0f, 0.5f, 0.0f, 0.0f },
+        {  50.0,  70.0, 1.0f, 0.5f, 0.0f, 0.0f },
+        {  30.0,  50.0, 1.0f, 0.5f, 0.0f, 0.0f },
+        {  30.0,  20.0, 1.0f, 0.5f, 0.0f, 0.0f },
+        {  55.0,   0.0, 1.0f, 0.5f, 0.0f, 0.0f }  // cross over segment (0 -> 1)
+    };
+
+    LoopInfillResult loopRes = InkGenerator::DetectStrokeSelfLoop(loopStroke);
+    assert(loopRes.hasLoop);
+    assert(!loopRes.fillRegion.empty());
+    assert(loopRes.loopArea > 100.0); // Enclosed area > 100 mm^2
+    assert(loopRes.bounds.width() > 10.0);
+    assert(loopRes.bounds.height() > 10.0);
+
+    // Test safety check: area too small rejected
+    LoopInfillResult tinyRes = InkGenerator::DetectStrokeSelfLoop(loopStroke, /*minArea=*/100000.0);
+    assert(!tinyRes.hasLoop);
+
+    // Test non-loop stroke returns hasLoop = false
+    std::vector<StrokePoint> straightStroke = {
+        { 0.0, 0.0, 1.0f, 0.5f, 0.0f, 0.0f },
+        { 10.0, 0.0, 1.0f, 0.5f, 0.0f, 0.0f },
+        { 20.0, 0.0, 1.0f, 0.5f, 0.0f, 0.0f }
+    };
+    assert(!InkGenerator::DetectStrokeSelfLoop(straightStroke).hasLoop);
+
     std::cout << "  -> Pattern and infill edge case tests passed successfully." << std::endl;
 }
 

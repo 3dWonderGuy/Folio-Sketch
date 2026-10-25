@@ -60,6 +60,17 @@ Folio-Sketch/
 
 ---
 
+## Documentation
+
+Comprehensive design documents, mathematical proofs, and architectural details are maintained in the [`docs/`](docs/) directory:
+
+- [**System Architecture Overview**](docs/architecture.md): Overall pipeline, hardware event routing, predictive modeling, and component responsibilities.
+- [**Computational Geometry & Mathematical Primitives**](docs/geometry.md): 2D segment intersection algebra, swallowtail loop removal, nib profiles, and normal derivations.
+- [**Vector Ribbon & Infill Generator**](docs/vector_generator.md): Miter bisectors, safe segment limits, corner sweep fans, watertight loop detection, and SVG debugging.
+- [**GPU Mesh Builder & Anti-Aliasing Skirts**](docs/mesh_builder.md): Direct indexed triangle mesh generation, dual-buffer core/skirt anti-aliasing, and vertex buffer layout.
+
+---
+
 ## Core Features
 
 ### 1. Miter-Clipped Single Contour Tessellation (`BuildSolidRibbon`)
