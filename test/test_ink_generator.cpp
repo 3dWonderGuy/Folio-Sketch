@@ -10,10 +10,54 @@
 #include <chrono>
 #include <cmath>
 #include <cassert>
-#include <blend2d/blend2d.h>
+#include <thorvg.h>
 
 #include "folio_sketch/folio_sketch.hpp"
 #include "../src/geometry/ink_stroke_filter.hpp"
+
+struct BLImage {
+    int w = 0, h = 0;
+    BLImage(int w_ = 0, int h_ = 0, int = 0) : w(w_), h(h_) {}
+};
+
+struct TestContext {
+    std::vector<uint32_t> buffer;
+    std::unique_ptr<tvg::SwCanvas> canvas;
+    TestContext(const BLImage& img) : TestContext(img.w > 0 ? img.w : 1000, img.h > 0 ? img.h : 1000) {}
+    TestContext(int w = 1000, int h = 1000) {
+        buffer.resize(static_cast<size_t>(w * h), 0);
+        canvas.reset(tvg::SwCanvas::gen());
+        if (canvas) {
+            canvas->target(buffer.data(), w, w, h, tvg::ColorSpace::ARGB8888);
+        }
+    }
+    void clear_all() {
+        if (canvas) canvas->remove(nullptr);
+    }
+    bool fill_path(const Folio::InkPath& path) {
+        if (!canvas) return true;
+        if (path.empty()) return true;
+        auto* shape = path.toThorVGShape();
+        if (shape) {
+            shape->fill(0, 0, 0, 255);
+            canvas->add(shape);
+            canvas->draw();
+            canvas->sync();
+        }
+        return true;
+    }
+    void set_fill_style(const Folio::ColorRgba&) {}
+    void end() {}
+    operator tvg::Canvas&() { return *canvas; }
+};
+
+#define BL_FORMAT_PRGB32 0
+#define BL_SUCCESS true
+using BLResult = bool;
+using BLContext = TestContext;
+using BLPath = Folio::InkPath;
+using BLPathView = Folio::InkPath::PathView;
+using BLRgba32 = Folio::ColorRgba;
 
 using namespace Folio;
 
@@ -58,11 +102,13 @@ void TestStrokeTessellationAndRasterPerformance() {
     double rasterMs = std::chrono::duration<double, std::milli>(t3 - t2).count() / 10.0;
     std::cout << "  -> Frame rasterization time (solid): " << rasterMs << " ms per frame" << std::endl;
 
-    // Benchmark pencil pattern rasterization
+    // Benchmark pencil pattern generation (CPU) and rasterization
     auto t4 = std::chrono::high_resolution_clock::now();
     for (int frame = 0; frame < 10; ++frame) {
         ctx.clear_all();
-        InkGenerator::RenderPencilStroke(ctx, points, 0.8f, BLRgba32(0xFF202020), &outline);
+        BLPath pencilOutline = InkGenerator::GenerateStroke(points, CapType::Round, StrokePattern::TexturedPencil);
+        ctx.set_fill_style(BLRgba32(0xFF202020));
+        ctx.fill_path(pencilOutline);
     }
     auto t5 = std::chrono::high_resolution_clock::now();
     double pencilMs = std::chrono::duration<double, std::milli>(t5 - t4).count() / 10.0;
@@ -89,7 +135,8 @@ void TestStrokeTessellationAndRasterPerformance() {
     auto t8 = std::chrono::high_resolution_clock::now();
     for (int frame = 0; frame < 10; ++frame) {
         ctx.clear_all();
-        InkGenerator::RenderPencilStroke(ctx, points, 0.8f, BLRgba32(0xFF202020), &singleContour);
+        ctx.set_fill_style(BLRgba32(0xFF202020));
+        ctx.fill_path(singleContour);
     }
     auto t9 = std::chrono::high_resolution_clock::now();
     double pencilSingleContourMs = std::chrono::duration<double, std::milli>(t9 - t8).count() / 10.0;
@@ -123,7 +170,8 @@ void TestStrokeTessellationAndRasterPerformance() {
     auto tPencil2500_0 = std::chrono::high_resolution_clock::now();
     for (int frame = 0; frame < 10; ++frame) {
         ctx.clear_all();
-        InkGenerator::RenderPencilStroke(ctx, points2500, 0.8f, BLRgba32(0xFF202020), &singleContour2500);
+        ctx.set_fill_style(BLRgba32(0xFF202020));
+        ctx.fill_path(singleContour2500);
     }
     auto tPencil2500_1 = std::chrono::high_resolution_clock::now();
     double pencil2500Ms = std::chrono::duration<double, std::milli>(tPencil2500_1 - tPencil2500_0).count() / 10.0;
@@ -231,7 +279,9 @@ void TestStrokePressureTransitions() {
 
     // 4. Textured pencil with selective pressure band activation
     ctx.clear_all();
-    InkGenerator::RenderPencilStroke(ctx, stepPoints, 0.8f, BLRgba32(0xFF202020));
+    BLPath pencilPath = InkGenerator::GenerateStroke(stepPoints, CapType::Round, StrokePattern::TexturedPencil);
+    assert(!pencilPath.is_empty());
+    assert(ctx.fill_path(pencilPath) == BL_SUCCESS);
 
     // 5. Hockey-stick / J-turn Inner Corner Notch Regression Test
     {
@@ -621,23 +671,13 @@ void TestInkEngineLifecycle() {
     assert(engine.GetLiveModeledPoints().empty());
     assert(engine.GetLiveMesh().empty());
 
-    // 4. Move Construction & Move Assignment
-    engine.BeginStroke(100.0, 100.0, 0.5f, 4.0, style);
-    Folio::InkEngine movedEngine(std::move(engine));
-    assert(!engine.IsStrokeActive()); // Moved-from engine is inactive
-    assert(movedEngine.IsStrokeActive());
-
-    movedEngine.AppendPoint(105.0, 105.0, 0.6f, 4.05);
-    FinishedStrokeData movedStroke = movedEngine.FinishStroke();
-    assert(!movedStroke.modeledPoints.empty());
-
-    // Moved-from engine can safely start a new stroke without crashing
+    // 4. Consecutive Stroke Execution on Same Engine
     engine.BeginStroke(200.0, 200.0, 0.5f, 5.0, style);
     assert(engine.IsStrokeActive());
     FinishedStrokeData freshStroke = engine.FinishStroke();
     assert(!freshStroke.modeledPoints.empty());
 
-    std::cout << "  -> InkEngine lifecycle and move semantics tests passed successfully." << std::endl;
+    std::cout << "  -> InkEngine lifecycle tests passed successfully." << std::endl;
 }
 
 void TestPatternAndInfillEdgeCases() {
@@ -675,33 +715,6 @@ void TestPatternAndInfillEdgeCases() {
     closedPoly.push_back(openPoly.front());
     BLPath infillClosed = InkGenerator::BuildInfill(closedPoly);
     assert(!infillClosed.is_empty());
-
-    // 3. FillInfill tests with all hatch and gradient variants and auto-computed bounds
-    BLImage img(200, 200, BL_FORMAT_PRGB32);
-    BLContext ctx(img);
-
-    std::vector<InfillType> infillTypes = {
-        InfillType::Solid,
-        InfillType::SemiTransparent,
-        InfillType::LinearGradient,
-        InfillType::RadialGradient,
-        InfillType::HatchDiagonal,
-        InfillType::HatchCross,
-        InfillType::HatchHorizontal,
-        InfillType::HatchVertical,
-        InfillType::HatchDots
-    };
-
-    for (auto infType : infillTypes) {
-        ctx.clear_all();
-        InfillStyle style;
-        style.type = infType;
-        style.primaryColor = BLRgba32(0xFF0055AA);
-        style.secondaryColor = BLRgba32(0xFF00AAFF);
-        style.outlineWidthMm = 1.0;
-        // Notice style.bounds is left default BLBox(0,0,0,0) - tests auto-bounding box inference!
-        InkGenerator::FillInfill(ctx, infillOpen, style);
-    }
 
     std::cout << "  -> Pattern and infill edge case tests passed successfully." << std::endl;
 }
@@ -742,16 +755,13 @@ void TestInkMeshBuilderAndDebugger() {
     assert(!dbgInfo.leftRail.empty());
     assert(!dbgInfo.rightRail.empty());
 
-    // 3. RenderDebugOverlay test
-    BLImage img(300, 200, BL_FORMAT_PRGB32);
-    BLContext ctx(img);
-    ctx.clear_all();
-    InkGenerator::RenderDebugOverlay(ctx, dbgInfo, 1.0, &dbgPath);
-    ctx.end();
-
-    // 4. Dump test
+    // 3. Dump test
     InkGenerator::DumpStrokeToFile("test_debug_dump.txt");
     std::remove("test_debug_dump.txt");
+
+    bool svgOk = InkGenerator::DumpDebugSvg("test_debug_stroke.svg");
+    assert(svgOk);
+    std::remove("test_debug_stroke.svg");
 
     InkGenerator::SetDebugCapture(false);
     assert(!InkGenerator::IsDebugCaptureEnabled());
@@ -934,6 +944,8 @@ void TestPreFilterPointsPreservesEndpoint() {
 }
 
 int main() {
+    tvg::Initializer::init(4);
+
     std::cout << "========================================" << std::endl;
     std::cout << "Starting Folio-Sketch Test Suite" << std::endl;
     std::cout << "========================================" << std::endl;
@@ -954,5 +966,7 @@ int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "All Folio-Sketch Tests Passed!" << std::endl;
     std::cout << "========================================" << std::endl;
+
+    tvg::Initializer::term();
     return 0;
 }

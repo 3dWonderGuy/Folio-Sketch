@@ -56,92 +56,39 @@ InkEngine::InkEngine() {
 
 InkEngine::~InkEngine() = default;
 
-InkEngine::InkEngine(InkEngine&& other) noexcept
-    : m_isStrokeActive(other.m_isStrokeActive),
-      m_activeStyle(other.m_activeStyle),
-      m_config(other.m_config),
-      m_evalConfig(other.m_evalConfig),
-      m_zoomScale(other.m_zoomScale),
-      m_smoothedWidth(other.m_smoothedWidth),
-      m_activeStrokePoints(std::move(other.m_activeStrokePoints)),
-      m_liveModeledPoints(std::move(other.m_liveModeledPoints)),
-      m_googleResultsBuffer(std::move(other.m_googleResultsBuffer)),
-      m_googlePredictionsBuffer(std::move(other.m_googlePredictionsBuffer)),
-      m_predictedPointsBuffer(std::move(other.m_predictedPointsBuffer)),
-      m_liveStrokeMesh(std::move(other.m_liveStrokeMesh)),
-      m_predictedStrokeMesh(std::move(other.m_predictedStrokeMesh)),
-      m_meshDirty(other.m_meshDirty),
-      m_predictionDirty(other.m_predictionDirty),
-      m_googleModeler(std::move(other.m_googleModeler)) {
-    other.m_isStrokeActive = false;
-    other.m_meshDirty = false;
-    other.m_predictionDirty = false;
-    other.m_smoothedWidth = -1.0f;
-}
-
-InkEngine& InkEngine::operator=(InkEngine&& other) noexcept {
-    if (this != &other) {
-        m_isStrokeActive = other.m_isStrokeActive;
-        m_activeStyle = other.m_activeStyle;
-        m_config = other.m_config;
-        m_evalConfig = other.m_evalConfig;
-        m_zoomScale = other.m_zoomScale;
-        m_smoothedWidth = other.m_smoothedWidth;
-        m_activeStrokePoints = std::move(other.m_activeStrokePoints);
-        m_liveModeledPoints = std::move(other.m_liveModeledPoints);
-        m_googleResultsBuffer = std::move(other.m_googleResultsBuffer);
-        m_googlePredictionsBuffer = std::move(other.m_googlePredictionsBuffer);
-        m_predictedPointsBuffer = std::move(other.m_predictedPointsBuffer);
-        m_liveStrokeMesh = std::move(other.m_liveStrokeMesh);
-        m_predictedStrokeMesh = std::move(other.m_predictedStrokeMesh);
-        m_meshDirty = other.m_meshDirty;
-        m_predictionDirty = other.m_predictionDirty;
-        m_googleModeler = std::move(other.m_googleModeler);
-
-        other.m_isStrokeActive = false;
-        other.m_meshDirty = false;
-        other.m_predictionDirty = false;
-        other.m_smoothedWidth = -1.0f;
-    }
-    return *this;
-}
-
 // -----------------------------------------------------------------------------
 // 1. INKING LIFECYCLE
 // -----------------------------------------------------------------------------
 
 void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double timeSec,
                             const StrokeStyle& style, float zoomScale, float tiltX, float tiltY) {
-    // Reset transient stroke accumulation buffers
+    // Reset transient stroke accumulation buffers and discard any unfinished gesture
     CancelStroke();
 
+    // Lazy initialization safety check: ensure the physics engine exists
     if (!m_googleModeler) {
         m_googleModeler = std::make_unique<sm::StrokeModeler>();
-        UpdatePhysicsParams();
+        UpdatePhysicsParams(); // Push config parameters (spring-mass, drag, wobble) into Google Modeler
     }
 
+    // Initialize active gesture state flags and style
     m_isStrokeActive = true;
     m_activeStyle = style;
-    UpdateEvalConfig();
+    UpdateEvalConfig(); // Recompute cached dynamic width flags (pressure, tilt, velocity enablement)
     m_zoomScale = zoomScale > 0.001f ? zoomScale : 1.0f;
 
+    // Record raw digitizer touchdown telemetry
     StylusInputPoint startPt(worldX, worldY, pressure, timeSec, 0.0f, tiltX, tiltY);
     m_activeStrokePoints.push_back(startPt);
 
+    // Compute initial dynamic line thickness at touchdown
     float startPressure = (startPt.pressure >= 0.0f) ? startPt.pressure : 0.65f;
-    float dynamicWidth = 0.0f;
-    if (m_activeStyle.pattern == StrokePattern::TexturedPencil) {
-        float tipWidth = m_evalConfig.usePressure
-                             ? (m_activeStyle.baseWidth * (0.90f + 0.12f * std::clamp(startPressure, 0.0f, 1.0f)))
-                             : m_activeStyle.baseWidth;
-        dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidth(
-            tipWidth, -1.0f, 0.0f, startPt.tiltX, startPt.tiltY, -1.0f, m_zoomScale, m_evalConfig);
-    } else {
-        float pForEval = m_evalConfig.usePressure ? startPressure : -1.0f;
-        dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidth(
-            m_activeStyle.baseWidth, pForEval, 0.0f, startPt.tiltX, startPt.tiltY, -1.0f, m_zoomScale, m_evalConfig);
-    }
+    float dynamicWidth = EvaluateTapWidth(startPressure, startPt.tiltX, startPt.tiltY);
     m_smoothedWidth = dynamicWidth;
+
+    // Synthesize an immediate visual fallback dot at touchdown:
+    // Google Modeler buffers initial samples inside its wobble/tremor filter before producing output.
+    // Generating this dot ensures immediate 0ms visual feedback at the pen tip.
     StrokePoint dotPt(startPt.x, startPt.y, dynamicWidth * 0.5f, startPressure, startPt.tiltX, startPt.tiltY);
 
     InkMeshBuilder::BuildSolidMesh(
@@ -152,15 +99,16 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
         m_zoomScale);
     m_meshDirty = false;
 
-    // Reset physics engine state for the new stroke (preserves configured physics parameters)
+    // Reset physics modeler state for this new stroke (retains active physics parameters)
     (void)m_googleModeler->Reset();
 
-    // Seed the first sample into the physics pipeline (inside the google ink)
+    // Seed the touchdown event (kDown) into Google Stroke Modeler
     m_googleResultsBuffer.clear();
     if (m_googleModeler->Update(MakeGoogleInput(sm::Input::EventType::kDown, startPt), m_googleResultsBuffer).ok()) {
         ProcessGoogleResults(m_googleResultsBuffer);
     }
 
+    // Flag predictive tip geometry dirty to refresh latency-hiding projections
     if (m_config.google_enable_prediction) {
         m_predictionDirty = true;
     }
@@ -168,107 +116,144 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
 
 void InkEngine::AppendPoint(double worldX, double worldY, float pressure, double timeSec,
                             float tiltX, float tiltY) {
-    // small check if the stroke is still even active
+    // Discard input if gesture is inactive or physics engine uninitialized
     if (!m_isStrokeActive || !m_googleModeler) return;
 
-    // pen position tracker
+    // Ingest raw hardware digitizer telemetry
     StylusInputPoint pt(worldX, worldY, pressure, timeSec, 0.0f, tiltX, tiltY);
-    m_activeStrokePoints.push_back(pt);                                                // track raw movement history
+    m_activeStrokePoints.push_back(pt);
 
-    // feed moving stylus event into physics solver
+    // Feed the stylus motion event (kMove) into Google Stroke Modeler
     m_googleResultsBuffer.clear();
     if (m_googleModeler->Update(MakeGoogleInput(sm::Input::EventType::kMove, pt), m_googleResultsBuffer).ok()) {
-        ProcessGoogleResults(m_googleResultsBuffer);                                   // convert physics outputs to renderable vector points
+        // Convert physics outputs (position, velocity, pressure) into renderable centerline vertices
+        ProcessGoogleResults(m_googleResultsBuffer);
     }
 
+    // Trigger forward-prediction re-computation for the next frame
     if (m_config.google_enable_prediction) {
         m_predictionDirty = true;
     }
 }
 
+void InkEngine::FlushPhysicsOnPenUp() {
+    if (m_activeStrokePoints.empty() || !m_googleModeler) return;
+
+    m_googleResultsBuffer.clear();
+    if (m_googleModeler->Update(MakeGoogleInput(sm::Input::EventType::kUp, m_activeStrokePoints.back()), m_googleResultsBuffer).ok()) {
+        // Retain and freeze predicted points so the stroke tip does not jump backwards upon pen lift
+        if (m_config.google_enable_prediction && !m_predictedPointsBuffer.empty()) {
+            for (size_t i = 1; i < m_predictedPointsBuffer.size(); ++i) {
+                m_liveModeledPoints.push_back(m_predictedPointsBuffer[i]);
+            }
+            m_predictedPointsBuffer.clear();
+        } else {
+            // Otherwise process remaining flushed results as the spring catches up to the pen lift position
+            ProcessGoogleResults(m_googleResultsBuffer);
+        }
+    }
+}
+
+void InkEngine::HandleSingleTapEdgeCase() {
+    if (m_activeStrokePoints.empty()) return;
+
+    double strokeLen = 0.0;
+    for (size_t i = 1; i < m_liveModeledPoints.size(); ++i) {
+        strokeLen += std::hypot(m_liveModeledPoints[i].x - m_liveModeledPoints[i - 1].x,
+                                m_liveModeledPoints[i].y - m_liveModeledPoints[i - 1].y);
+        if (strokeLen >= 1e-4) {
+            break;
+        }
+    }
+
+    if (m_liveModeledPoints.empty()) {
+        // Tremor filter swallowed the stationary tap: synthesize a dot at touchdown origin
+        StylusInputPoint pt = m_activeStrokePoints.front();
+        float tapPressure = (pt.pressure >= 0.0f) ? pt.pressure : 0.65f;
+        float dynamicWidth = EvaluateTapWidth(tapPressure, pt.tiltX, pt.tiltY);
+        m_liveModeledPoints.push_back(StrokePoint(pt.x, pt.y, dynamicWidth * 0.5f, tapPressure, pt.tiltX, pt.tiltY));
+    } else if (strokeLen < 1e-4) {
+        // Google modeler flushed multiple coincident points for a stationary tap; collapse to a single point
+        m_liveModeledPoints.resize(1);
+    }
+}
+
+void InkEngine::ApplyTailTaper(std::vector<StrokePoint>& points) const {
+    if (m_config.tailTaperLengthMm <= 0.0f || points.size() < 2) return;
+
+    float minRadius = m_activeStyle.baseWidth * std::min(m_config.minWidthMultiplier, m_config.maxWidthMultiplier) * 0.5f;
+    minRadius = std::max(0.001f, minRadius);
+    const double taperTargetLen = static_cast<double>(m_config.tailTaperLengthMm);
+    const float taperPower = (m_config.tailTaperPower > 0.01f) ? m_config.tailTaperPower : 1.0f;
+
+    const size_t ptCount = points.size();
+    double d = 0.0;
+    float origTipR = points.back().r;
+    points.back().r = std::min(origTipR, minRadius);
+    points.back().pressure = 0.0f;
+
+    for (size_t i = ptCount - 1; i > 0; --i) {
+        double segLen = std::hypot(points[i].x - points[i - 1].x,
+                                   points[i].y - points[i - 1].y);
+        d += segLen;
+        if (d >= taperTargetLen) {
+            break;
+        }
+        float u = static_cast<float>(std::clamp(d / taperTargetLen, 0.0, 1.0));
+        float factor = (taperPower == 1.0f) ? u : std::pow(u, taperPower);
+        auto& pt = points[i - 1];
+        if (pt.r > minRadius) {
+            pt.r = minRadius + (pt.r - minRadius) * factor;
+        }
+        pt.pressure *= factor;
+    }
+}
+
+std::vector<Segment1D> InkEngine::BuildCollisionSegments(const std::vector<StrokePoint>& points) const {
+    std::vector<Segment1D> segments;
+    if (points.size() == 1) {
+        // Single-point tap: create a micro-segment because zero-length lines have undefined normals and fail collision checks
+        StrokePoint p0 = points[0];
+        Point2D pt1(p0.x + 0.001, p0.y); // tiny 1-micron offset gives a valid bounding box and direction for R-Tree & eraser
+        Segment1D seg;
+        seg.p0 = p0;
+        seg.p1 = pt1;
+        seg.width = p0.r * 2.0f;
+        segments.push_back(seg);
+    } else if (points.size() >= 2) {
+        // Multi-point stroke: link each consecutive pair of modeled points into a linear collision capsule
+        segments.reserve(points.size() - 1);
+        for (size_t i = 1; i < points.size(); ++i) {
+            Segment1D seg;
+            seg.p0 = points[i - 1];
+            seg.p1 = points[i];
+            seg.width = points[i].r * 2.0f;
+            segments.push_back(seg);
+        }
+    }
+    return segments;
+}
+
 FinishedStrokeData InkEngine::FinishStroke() {
-    
-    // safety check if stroke was active
+    // Fast return if no stroke was active
     if (!m_isStrokeActive) return {};
 
+    // Lazy initialization safety check
     if (!m_googleModeler) {
         m_googleModeler = std::make_unique<sm::StrokeModeler>();
         UpdatePhysicsParams();
     }
 
-    // safety check if there is data in the stroke
-    if (!m_activeStrokePoints.empty()) {
+    // Stage 1: Send Pen-Up (kUp) event to Google Modeler to flush lingering spring inertia
+    FlushPhysicsOnPenUp();
 
-        // Stage 1: Pen-Up event to flush lingering spring inertia in physics modeler
-        m_googleResultsBuffer.clear();
-        if (m_googleModeler->Update(MakeGoogleInput(sm::Input::EventType::kUp, m_activeStrokePoints.back()), m_googleResultsBuffer).ok()) {
-            ProcessGoogleResults(m_googleResultsBuffer);
-            m_predictedPointsBuffer.clear();
-        }
+    // Stage 2: Handle single-tap / click gestures (user touched down and lifted without lateral movement)
+    HandleSingleTapEdgeCase();
 
-        // Stage 2: (SPECIAL CASE) Single-tap dot handling (user tapped without lateral dragging)
-        double strokeLen = 0.0;
-        for (size_t i = 1; i < m_liveModeledPoints.size(); ++i) {
-            strokeLen += std::hypot(m_liveModeledPoints[i].x - m_liveModeledPoints[i - 1].x,
-                                    m_liveModeledPoints[i].y - m_liveModeledPoints[i - 1].y);
-            if (strokeLen >= 1e-4) {
-                break;
-            }
-        }
+    // Stage 3: Optional Tail Taper (smoothly thins out the end of the stroke on pen lift)
+    ApplyTailTaper(m_liveModeledPoints);
 
-        if (m_liveModeledPoints.empty()) {
-            StylusInputPoint pt = m_activeStrokePoints.front();                        // tap origin
-            float tapPressure = (pt.pressure >= 0.0f) ? pt.pressure : 0.65f;
-            float dynamicWidth = 0.0f;
-            if (m_activeStyle.pattern == StrokePattern::TexturedPencil) {
-                float tipWidth = m_evalConfig.usePressure
-                                     ? (m_activeStyle.baseWidth * (0.90f + 0.12f * std::clamp(tapPressure, 0.0f, 1.0f)))
-                                     : m_activeStyle.baseWidth;
-                dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidth(
-                    tipWidth, -1.0f, 0.0f, pt.tiltX, pt.tiltY, -1.0f, m_zoomScale, m_evalConfig);
-            } else {
-                float pForEval = m_evalConfig.usePressure ? tapPressure : -1.0f;
-                dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidth(
-                    m_activeStyle.baseWidth, pForEval, 0.0f, pt.tiltX, pt.tiltY, -1.0f, m_zoomScale, m_evalConfig);
-            }
-            m_liveModeledPoints.push_back(StrokePoint(pt.x, pt.y, dynamicWidth * 0.5f, tapPressure, pt.tiltX, pt.tiltY));
-        } else if (strokeLen < 1e-4) {
-            // Google modeler flushed multiple coincident points for a stationary tap; collapse to single point
-            m_liveModeledPoints.resize(1);
-        }
-    }
-
-    // Optional Tail Taper: smoothly thins out the end of the stroke on pen lift
-    if (m_config.tailTaperLengthMm > 0.0f && m_liveModeledPoints.size() >= 2) {
-        float minRadius = m_activeStyle.baseWidth * std::min(m_config.minWidthMultiplier, m_config.maxWidthMultiplier) * 0.5f;
-        minRadius = std::max(0.001f, minRadius);
-        const double taperTargetLen = static_cast<double>(m_config.tailTaperLengthMm);
-        const float taperPower = (m_config.tailTaperPower > 0.01f) ? m_config.tailTaperPower : 1.0f;
-
-        const size_t ptCount = m_liveModeledPoints.size();
-        double d = 0.0;
-        float origTipR = m_liveModeledPoints.back().r;
-        m_liveModeledPoints.back().r = std::min(origTipR, minRadius);
-        m_liveModeledPoints.back().pressure = 0.0f;
-
-        for (size_t i = ptCount - 1; i > 0; --i) {
-            double segLen = std::hypot(m_liveModeledPoints[i].x - m_liveModeledPoints[i - 1].x,
-                                       m_liveModeledPoints[i].y - m_liveModeledPoints[i - 1].y);
-            d += segLen;
-            if (d >= taperTargetLen) {
-                break;
-            }
-            float u = static_cast<float>(std::clamp(d / taperTargetLen, 0.0, 1.0));
-            float factor = (taperPower == 1.0f) ? u : std::pow(u, taperPower);
-            auto& pt = m_liveModeledPoints[i - 1];
-            if (pt.r > minRadius) {
-                pt.r = minRadius + (pt.r - minRadius) * factor;
-            }
-            pt.pressure *= factor;
-        }
-    }
-
-    // Stage 3: Post-processing simplification (decimates redundant collinear vertices while preserving curve roundness)
+    // Stage 4: Post-processing simplification (decimates redundant collinear vertices while preserving curve roundness)
     if (m_config.enablePostProcessSimplification && m_liveModeledPoints.size() > 2) {
         m_liveModeledPoints = StrokePostProcessor::Simplify(
             m_liveModeledPoints,
@@ -277,50 +262,29 @@ FinishedStrokeData InkEngine::FinishStroke() {
             m_config.simplificationRadiusTolerance);
     }
 
-    // Stage 4: Build collision segments and final vector stroke data once at the end (used for lasso math and eraser detection)
+    // Stage 5: Build collision segments and finalize immutable stroke package
     FinishedStrokeData data;
-    if (m_liveModeledPoints.size() == 1) {
-
-        // Single-point tap: create a micro-segment because zero-length lines have undefined normals and fail collision checks
-        StrokePoint p0 = m_liveModeledPoints[0];
-        Point2D pt1(p0.x + 0.001, p0.y);                                               // tiny 1-micron offset gives a valid bounding box and direction for R-Tree & eraser
-
-        Segment1D seg;
-        seg.p0 = p0;
-        seg.p1 = pt1;
-        seg.width = p0.r * 2.0f;
-        data.liveSegments.push_back(seg);
-
-    } else if (m_liveModeledPoints.size() >= 2) {
-
-        // Multi-point stroke: link each consecutive pair of modeled points into a linear collision capsule
-        data.liveSegments.reserve(m_liveModeledPoints.size() - 1);                     // pre-allocate exact capacity (N points produce N-1 segments)
-        for (size_t i = 1; i < m_liveModeledPoints.size(); ++i) {
-            Segment1D seg;
-            seg.p0 = m_liveModeledPoints[i - 1];
-            seg.p1 = m_liveModeledPoints[i];
-            seg.width = m_liveModeledPoints[i].r * 2.0f;
-            data.liveSegments.push_back(seg);
-        }
-    }
-
+    data.liveSegments = BuildCollisionSegments(m_liveModeledPoints);
     data.modeledPoints = m_liveModeledPoints;
+    data.outlinePath = InkGenerator::GenerateStroke(
+        m_liveModeledPoints, m_activeStyle.capType, m_activeStyle.pattern); // builds closed polygon ribbon (CPU path / export)
     InkMeshBuilder::BuildSolidMesh(
         m_liveModeledPoints, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), data.mesh, m_zoomScale);
 
     // Auto-dump stroke reproducer if geometry defects (self-intersections or retrograde folds) were detected
     if (InkGenerator::IsDebugCaptureEnabled() && InkGenerator::GetLastDebugInfo().hasDefects) {
         InkGenerator::DumpLastStrokeToConsole();
+        InkGenerator::DumpDebugSvg("defect_stroke.svg");
     }
 
-
-    // Stage 4: Reset live state
-    CancelStroke();                                                                    // wipe live inking buffers for next stroke
+    // Stage 6: Reset live state for the next stroke gesture
+    CancelStroke();
 
     return data;
 }
 
 void InkEngine::CancelStroke() {
+    // Clear in-flight buffers while preserving pre-allocated capacity
     m_activeStrokePoints.clear();
     m_liveModeledPoints.clear();
     m_googleResultsBuffer.clear();
@@ -397,6 +361,13 @@ void InkEngine::EnsurePrediction() const {
     }
 }
 
+float InkEngine::EvaluateTapWidth(float pressure, float tiltX, float tiltY) const noexcept {
+    const bool isPencil = (m_activeStyle.pattern == StrokePattern::TexturedPencil);
+    float pForEval = m_evalConfig.usePressure ? pressure : -1.0f;
+    return StrokeWidthEvaluator::CalculateDynamicWidth(
+        m_activeStyle.baseWidth, pForEval, 0.0f, tiltX, tiltY, -1.0f, m_zoomScale, m_evalConfig, isPencil);
+}
+
 // -----------------------------------------------------------------------------
 // 2. MATHEMATICAL THICKNESS & MODELING
 // -----------------------------------------------------------------------------
@@ -415,22 +386,13 @@ StrokePoint InkEngine::ToStrokePoint(const sm::Result& res, float previousWidth)
     }
     float effectivePressure = (res.pressure >= 0.0f) ? res.pressure : 0.65f;
 
-    // For TexturedPencil, tip thickness stays nearly constant under pressure (pressure controls darkness
-    // and grain concentration, whereas stylus tilt expands the shading width).
-    float dynamicWidth = 0.0f;
-    if (m_activeStyle.pattern == StrokePattern::TexturedPencil) {
-        float tipWidth = m_evalConfig.usePressure
-                             ? (m_activeStyle.baseWidth * (0.90f + 0.12f * std::clamp(effectivePressure, 0.0f, 1.0f)))
-                             : m_activeStyle.baseWidth;
-        dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidthWithTiltRad(
-            tipWidth, -1.0f, 0.0f, tiltRad, previousWidth, m_zoomScale, m_evalConfig);
-    } else {
-        float pForEval = m_evalConfig.usePressure ? effectivePressure : -1.0f;
-        float vForEval = m_evalConfig.useVelocity ? speed : 0.0f;
-        dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidthWithTiltRad(
-            m_activeStyle.baseWidth, pForEval, vForEval, tiltRad,
-            previousWidth, m_zoomScale, m_evalConfig);
-    }
+    const bool isPencil = (m_activeStyle.pattern == StrokePattern::TexturedPencil);
+    float pForEval = m_evalConfig.usePressure ? effectivePressure : -1.0f;
+    float vForEval = m_evalConfig.useVelocity ? speed : 0.0f;
+
+    float dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidthWithTiltRad(
+        m_activeStyle.baseWidth, pForEval, vForEval, tiltRad,
+        previousWidth, m_zoomScale, m_evalConfig, isPencil);
 
     return StrokePoint(res.position.x, res.position.y, dynamicWidth * 0.5f, effectivePressure, tiltX, tiltY);
 }

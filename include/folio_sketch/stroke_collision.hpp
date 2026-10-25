@@ -28,6 +28,8 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+namespace Folio {
+
 class StrokeCollisionEngine {
 public:
     struct SegmentHit {
@@ -361,3 +363,8 @@ private:
         };
     }
 };
+
+} // namespace Folio
+
+using StrokeCollisionEngine = Folio::StrokeCollisionEngine;
+using StrokeSlicer = Folio::StrokeSlicer;

@@ -26,10 +26,12 @@
  */
 
 #include <vector>
-#include <blend2d/blend2d.h>
-
 #include <string>
+
+#include "folio_sketch/ink_path.hpp"
 #include "folio_sketch/ink_stroke_data.hpp"
+
+namespace Folio {
 
 /**
  * @struct StrokeDebugInfo
@@ -42,8 +44,7 @@ struct StrokeDebugInfo {
     std::vector<Point2D>     rightRail;          ///< Right boundary vertices generated for the ribbon
     std::vector<Point2D>     selfIntersections;  ///< Exact world coordinates where non-adjacent edges intersect
     std::vector<size_t>      retrogradeIndices;  ///< Indices where boundary stepped backward against tangent
-    BLPath                   builtPath;          ///< Final tessellated BLPath
-    BLPath                   generatedPath;      ///< Alias for builtPath
+    InkPath                  builtPath;          ///< Final tessellated InkPath
     CapType                  capType = CapType::Round;
     bool                     isClosedPolygon = false;
     bool                     hasDefects = false; ///< True if selfIntersections or retrogradeIndices is non-empty
@@ -60,21 +61,18 @@ public:
     static const StrokeDebugInfo& GetLastDebugInfo() noexcept;
     static void ClearDebugInfo() noexcept;
 
-    static void RenderDebugOverlay(BLContext& ctx,
-                                   const StrokeDebugInfo& info,
-                                   double zoomScale = 1.0,
-                                   const BLPath* outlinePath = nullptr);
-
     static void DumpLastStrokeToConsole(const StrokeDebugInfo* info = nullptr);
     static void DumpStrokeToFile(const std::string& filepath = "debug_stroke_dump.txt",
                                  const StrokeDebugInfo* info = nullptr);
+    static bool DumpDebugSvg(const std::string& filepath = "debug_stroke.svg",
+                             const StrokeDebugInfo* info = nullptr);
 
     /**
      * @brief Builds a continuous 2D closed ribbon polygon from an ordered list of points.
      */
-    static BLPath BuildSolidRibbon(const std::vector<StrokePoint>& pts,
-                                   CapType capType = CapType::Round,
-                                   bool isClosedPolygon = false);
+    static InkPath BuildSolidRibbon(const std::vector<StrokePoint>& pts,
+                                    CapType capType = CapType::Round,
+                                    bool isClosedPolygon = false);
 
     /**
      * @brief Builds a 2D closed ribbon polygon or patterned outline (solid, dashed, dotted) from an ordered list of points.
@@ -84,10 +82,10 @@ public:
      * @param pattern Stroke pattern (Solid, Dashed, Dotted, DashDot).
      * @param isStandardShape When true (standard vector shape), closes the loop from the last point to the first point seamlessly.
      */
-    static BLPath GenerateStroke(const std::vector<StrokePoint>& centerline,
-                                 CapType capType = CapType::Round,
-                                 StrokePattern pattern = StrokePattern::Solid,
-                                 bool isStandardShape = false);
+    static InkPath GenerateStroke(const std::vector<StrokePoint>& centerline,
+                                  CapType capType = CapType::Round,
+                                  StrokePattern pattern = StrokePattern::Solid,
+                                  bool isStandardShape = false);
 
     /**
      * @brief Builds the interior fill region of a polygon (the area enclosed by its vertices).
@@ -96,55 +94,26 @@ public:
      * promote enclosed ink into a polygon first).
      *
      * @param vertices Polygon perimeter vertices (open or already closed).
-     * @return Closed BLPath of the enclosed area, ready for solid / gradient / hatch fill.
+     * @return Closed InkPath of the enclosed area, ready for solid / gradient / hatch fill.
      */
-    static BLPath BuildInfill(const std::vector<Point2D>& vertices);
-    static BLPath BuildInfill(const std::vector<StrokePoint>& vertices);
-
-    /**
-     * @brief Paints a polygon interior (solid, translucent, gradient, or drafting hatch).
-     *
-     * @param ctx    Blend2D context (caller owns save/transform state).
-     * @param region Closed interior region (e.g. from BuildInfill or a shape path).
-     * @param style  Fill type, colors, outline width and world bounds.
-     */
-    static void FillInfill(BLContext& ctx, const BLPath& region, const InfillStyle& style);
+    static InkPath BuildInfill(const std::vector<Point2D>& vertices);
+    static InkPath BuildInfill(const std::vector<StrokePoint>& vertices);
 
     /**
      * @brief Incrementally appends newly modeled stroke segments [startIdx - 1 .. pts.size() - 1]
-     *        onto an existing live BLPath in O(1) time per frame (eliminates O(N^2) live inking lag).
+     *        onto an existing live InkPath in O(1) time per frame (eliminates O(N^2) live inking lag).
      *
-     * @param path     Target BLPath being grown incrementally during live inking.
+     * @param path     Target InkPath being grown incrementally during live inking.
      * @param pts      Full modeled point buffer (must have no consecutive duplicates < 1e-4 mm).
      * @param startIdx Index of the first newly appended point in pts.
      * @param capType  Endcap / nib style.
      * @param pattern  Active stroke pattern (Solid or TexturedPencil).
      */
-    static void AppendRibbonSegments(BLPath& path,
+    static void AppendRibbonSegments(InkPath& path,
                                      const std::vector<StrokePoint>& pts,
                                      size_t startIdx,
                                      CapType capType = CapType::Round,
                                      StrokePattern pattern = StrokePattern::Solid);
-
-    /**
-     * @brief Renders a textured graphite pencil stroke using cached high-resolution world-space noise BLPatterns.
-     *
-     * Models physical pencil behavior without concentric contour bands:
-     * - Reuses the pre-built smooth outlinePath directly in O(1) geometry overhead.
-     * - High-density micro-grain base provides dark, crisp initial lines with subtle paper-tooth pores and color noise.
-     * - Pressure darkens and concentrates the graphite fill; stylus tilt expands a directional shading gradient.
-     *
-     * @param ctx             Target Blend2D context (in world-space coordinates).
-     * @param centerline      Modeled stroke vertices containing position, radius, pressure, and tilt.
-     * @param baseWidthMm     Nominal tool base thickness in millimeters.
-     * @param color           Graphite pigment color (including combined opacity).
-     * @param prebuiltOutline Optional pre-tessellated stroke outline path to avoid rebuilding geometry per frame.
-     */
-    static void RenderPencilStroke(BLContext& ctx,
-                                   const std::vector<StrokePoint>& centerline,
-                                   float baseWidthMm,
-                                   const BLRgba32& color,
-                                   const BLPath* prebuiltOutline = nullptr);
 
     /**
      * @brief Universal cap tracer: generates a full closed cap polygon for a single-point tap.
@@ -152,22 +121,13 @@ public:
      * @param pt Centerline point with radius (r).
      * @param capType Cap style (Round, Chisel, Square).
      */
-    static BLPath TraceCap(const StrokePoint& pt,
-                           CapType capType = CapType::Round);
+    static InkPath TraceCap(const StrokePoint& pt,
+                            CapType capType = CapType::Round);
 
     /**
      * @brief Universal endcap tracer: connects ribbon edges across the terminal cap.
-     *
-     * @param path Target BLPath being extruded.
-     * @param center Terminal point with radius (r).
-     * @param leftPt Left edge coordinate of ribbon.
-     * @param rightPt Right edge coordinate of ribbon.
-     * @param capType Cap style (Round, Chisel, Square).
-     * @param isTail True for tail cap (sweeps forward left -> right), false for head cap (sweeps backward right -> left).
-     * @param dirX Tangent X direction of the stroke cap (optional hint to enforce outward chord normal).
-     * @param dirY Tangent Y direction of the stroke cap (optional hint to enforce outward chord normal).
      */
-    static void TraceCap(BLPath& path,
+    static void TraceCap(InkPath& path,
                          const StrokePoint& center,
                          const Point2D& leftPt,
                          const Point2D& rightPt,
@@ -182,41 +142,33 @@ private:
     // =========================================================================
 
     // Builds an open ink stroke. Continuous lines route directly to ribbon generation
-    static BLPath BuildStroke(const std::vector<StrokePoint>& centerline,
-                              CapType capType = CapType::Round,
-                              StrokePattern pattern = StrokePattern::Solid);
+    static InkPath BuildStroke(const std::vector<StrokePoint>& centerline,
+                               CapType capType = CapType::Round,
+                               StrokePattern pattern = StrokePattern::Solid);
 
     // Builds a polygon from vertices, ensuring the loop is closed seamlessly
-    static BLPath BuildPolygon(const std::vector<StrokePoint>& centerline,
-                               StrokePattern pattern = StrokePattern::Solid);
+    static InkPath BuildPolygon(const std::vector<StrokePoint>& centerline,
+                                StrokePattern pattern = StrokePattern::Solid);
 
     // =========================================================================
     // STEP 2: STROKE & RIBBON TESSELLATION
     // =========================================================================
 
     // Dispatches non-solid discontinuous patterns (Dotted, Dashed, DashDot)
-    static BLPath ApplyDiscontinuousPattern(const std::vector<StrokePoint>& pts,
-                                            StrokePattern pattern);
+    static InkPath ApplyDiscontinuousPattern(const std::vector<StrokePoint>& pts,
+                                             StrokePattern pattern);
 
     // Generates a dotted stroke contour spaced proportionally to stroke thickness
-    static BLPath BuildDottedPattern(const std::vector<StrokePoint>& pts);
+    static InkPath BuildDottedPattern(const std::vector<StrokePoint>& pts);
 
     // Generates an arc-length parameterized dashed stroke contour
-    static BLPath BuildDashedPattern(const std::vector<StrokePoint>& pts);
+    static InkPath BuildDashedPattern(const std::vector<StrokePoint>& pts);
 
     // Generates an arc-length parameterized dash-dot sequence contour
-    static BLPath BuildDashDotPattern(const std::vector<StrokePoint>& pts);
+    static InkPath BuildDashDotPattern(const std::vector<StrokePoint>& pts);
 
     // Generates a graphite pencil stroke contour with paper tooth micro-texture and fiber striations
-    static BLPath BuildTexturedPencilPattern(const std::vector<StrokePoint>& pts);
-
-    // =========================================================================
-    // STEP 3: INFILL HATCH PATTERN FACTORY
-    // =========================================================================
-
-    // Creates a seamlessly tiling drafting hatch BLPattern
-    static BLPattern CreateHatchPattern(InfillType type,
-                                        const BLRgba32& color,
-                                        double strokeWidth,
-                                        double spacingMm = 6.0);
+    static InkPath BuildTexturedPencilPattern(const std::vector<StrokePoint>& pts);
 };
+
+} // namespace Folio

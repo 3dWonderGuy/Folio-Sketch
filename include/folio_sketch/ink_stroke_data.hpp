@@ -1,7 +1,7 @@
 #pragma once
 /**
  * =========================================================================================
- * @file core/ink_engine/ink_stroke_data.hpp
+ * @file folio_sketch/ink_stroke_data.hpp
  * @brief Self-Sustained Vector Ink Geometry Data Structures
  * =========================================================================================
  *
@@ -15,7 +15,78 @@
 
 #include <cstdint>
 #include <vector>
-#include <blend2d/blend2d.h>
+
+#include "folio_sketch/ink_path.hpp"
+
+namespace Folio {
+
+/**
+ * @struct ColorRgba
+ * @brief Self-sustained 32-bit RGBA color representation.
+ */
+struct ColorRgba {
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    uint8_t a = 255;
+
+    constexpr ColorRgba() noexcept = default;
+    constexpr ColorRgba(uint8_t r_, uint8_t g_, uint8_t b_, uint8_t a_ = 255) noexcept
+        : r(r_), g(g_), b(b_), a(a_) {}
+    constexpr ColorRgba(uint32_t argb) noexcept
+        : r(static_cast<uint8_t>((argb >> 16) & 0xFF)),
+          g(static_cast<uint8_t>((argb >> 8) & 0xFF)),
+          b(static_cast<uint8_t>(argb & 0xFF)),
+          a(static_cast<uint8_t>((argb >> 24) & 0xFF)) {}
+
+    // Transparent interoperability with Blend2D BLRgba32 or any {r, g, b, a} struct
+    template <typename TColor, typename = std::enable_if_t<
+        std::is_class_v<TColor> &&
+        !std::is_same_v<std::decay_t<TColor>, ColorRgba>>>
+    constexpr ColorRgba(const TColor& c) noexcept
+        : r(static_cast<uint8_t>(c.r)),
+          g(static_cast<uint8_t>(c.g)),
+          b(static_cast<uint8_t>(c.b)),
+          a(static_cast<uint8_t>(c.a)) {}
+
+    [[nodiscard]] constexpr uint8_t red() const noexcept { return r; }
+    [[nodiscard]] constexpr uint8_t green() const noexcept { return g; }
+    [[nodiscard]] constexpr uint8_t blue() const noexcept { return b; }
+    [[nodiscard]] constexpr uint8_t alpha() const noexcept { return a; }
+
+    constexpr void setR(uint8_t v) noexcept { r = v; }
+    constexpr void setG(uint8_t v) noexcept { g = v; }
+    constexpr void setB(uint8_t v) noexcept { b = v; }
+    constexpr void setA(uint8_t v) noexcept { a = v; }
+
+    [[nodiscard]] constexpr uint32_t toU32() const noexcept {
+        return (static_cast<uint32_t>(a) << 24) |
+               (static_cast<uint32_t>(b)  << 16) |
+               (static_cast<uint32_t>(g) << 8)  |
+               static_cast<uint32_t>(r);
+    }
+
+    constexpr bool operator==(const ColorRgba& o) const noexcept {
+        return r == o.r && g == o.g && b == o.b && a == o.a;
+    }
+    constexpr bool operator!=(const ColorRgba& o) const noexcept {
+        return !(*this == o);
+    }
+};
+
+using Color = ColorRgba;
+
+/**
+ * @struct Point2D
+ * @brief Universal 2D coordinate on the infinite canvas in physical world millimeters (mm).
+ */
+struct Point2D {
+    double x = 0.0;
+    double y = 0.0;
+
+    constexpr Point2D() noexcept = default;
+    constexpr Point2D(double x_, double y_) noexcept : x(x_), y(y_) {}
+};
 
 /**
  * @enum CapType
@@ -47,7 +118,7 @@ struct StrokeStyle {
     float         baseWidth   = 0.5f;                             ///< Base line thickness in world millimeters (mm)
     CapType       capType     = CapType::Round;                   ///< Terminal segment cap style
     StrokePattern pattern     = StrokePattern::Solid;             ///< Tessellation pattern (solid, dashed, dotted, dash-dot, textured pencil)
-    BLRgba32      color       = BLRgba32(0x18, 0x1A, 0x20, 0xFF); ///< Pigment color
+    ColorRgba     color       = ColorRgba(0x18, 0x1A, 0x20, 0xFF); ///< Pigment color
     bool          usePressure = true;                             ///< Enable digitizer tip pressure dynamics
     bool          useTilt     = false;                            ///< Enable stylus tilt shading dynamics
     bool          useVelocity = false;                            ///< Enable hydrodynamic velocity thinning
@@ -75,56 +146,54 @@ enum class InfillType : uint8_t {
  * @brief Everything the generator needs to paint a polygon interior.
  */
 struct InfillStyle {
-    InfillType type           = InfillType::None;
-    BLRgba32   primaryColor   = BLRgba32(0x00, 0x78, 0xD4, 0x40); ///< Main fill / hatch color
-    BLRgba32   secondaryColor = BLRgba32(0x00, 0xC4, 0xFF, 0x20); ///< Gradient end color
-    double     outlineWidthMm = 1.0;                              ///< Outline thickness (hatch lines = half of this)
-    BLBox      bounds         = BLBox(0.0, 0.0, 0.0, 0.0);        ///< World-space bounds (gradients & hatch density)
+    InfillType    type           = InfillType::None;
+    ColorRgba     primaryColor   = ColorRgba(0x00, 0x78, 0xD4, 0x40); ///< Main fill / hatch color
+    ColorRgba     secondaryColor = ColorRgba(0x00, 0xC4, 0xFF, 0x20); ///< Gradient end color
+    double        outlineWidthMm = 1.0;                               ///< Outline thickness (hatch lines = half of this)
+    BoundingBox2D bounds         = BoundingBox2D(0.0, 0.0, 0.0, 0.0); ///< World-space bounds (gradients & hatch density)
 };
 
 /**
- * @struct Point2D
- * @brief Universal 2D coordinate on the infinite canvas in physical world millimeters (mm).
+ * @struct StylusTelemetry
+ * @brief Stylus digitizer sensor dynamics (pressure, tilt angles).
  */
-struct Point2D {
-    double x = 0.0;
-    double y = 0.0;
+struct StylusTelemetry {
+    float pressure = 1.0f;    ///< Stylus tip contact pressure [0.0, 1.0]
+    float tiltX    = 0.0f;    ///< Stylus tilt angle along X axis in radians
+    float tiltY    = 0.0f;    ///< Stylus tilt angle along Y axis in radians
+
+    constexpr StylusTelemetry() noexcept = default;
+    constexpr StylusTelemetry(float pressure_, float tiltX_ = 0.0f, float tiltY_ = 0.0f) noexcept
+        : pressure(pressure_), tiltX(tiltX_), tiltY(tiltY_) {}
 };
 
 /**
  * @struct StrokePoint
  * @brief Discrete centerline vertex with pre-resolved stroke radius (r).
  */
-struct StrokePoint {
-    double x        = 0.0;
-    double y        = 0.0;
-    float  r        = 0.25f;  ///< Pre-calculated stroke radius (half-thickness) in world millimeters (mm)
-    float  pressure = 0.65f;  ///< Normalized stylus pressure [0.0, 1.0] (controls pencil darkness & grain concentration)
-    float  tiltX    = 0.0f;   ///< Stylus tilt angle along X axis in radians
-    float  tiltY    = 0.0f;   ///< Stylus tilt angle along Y axis in radians
+struct StrokePoint : public Point2D, public StylusTelemetry {
+    float r = 0.25f;  ///< Pre-calculated stroke radius (half-thickness) in world millimeters (mm)
 
     constexpr StrokePoint() noexcept = default;
     constexpr StrokePoint(double x_, double y_, float r_ = 0.25f,
                           float pressure_ = 0.65f, float tiltX_ = 0.0f, float tiltY_ = 0.0f) noexcept
-        : x(x_), y(y_), r(r_), pressure(pressure_), tiltX(tiltX_), tiltY(tiltY_) {}
-
-    operator Point2D() const noexcept { return {x, y}; }
+        : Point2D(x_, y_), StylusTelemetry(pressure_, tiltX_, tiltY_), r(r_) {}
 };
 
 /**
  * @struct StylusInputPoint
  * @brief Raw hardware digitizer telemetry before physics modeling.
  */
-struct StylusInputPoint {
-    double x = 0.0;
-    double y = 0.0;
-    float  pressure = 1.0f;    ///< Stylus tip pressure [0.0, 1.0]
+struct StylusInputPoint : public Point2D, public StylusTelemetry {
     double timeSeconds = 0.0;  ///< Sampling timestamp in seconds
     float  speed = 0.0f;       ///< Stylus velocity in mm/s
-    float  tiltX = 0.0f;       ///< Stylus tilt angle along X axis in radians
-    float  tiltY = 0.0f;       ///< Stylus tilt angle along Y axis in radians
 
-    operator Point2D() const noexcept { return {x, y}; }
+    constexpr StylusInputPoint() noexcept = default;
+    constexpr StylusInputPoint(double x_, double y_, float pressure_ = 1.0f,
+                               double timeSec_ = 0.0, float speed_ = 0.0f,
+                               float tiltX_ = 0.0f, float tiltY_ = 0.0f) noexcept
+        : Point2D(x_, y_), StylusTelemetry(pressure_, tiltX_, tiltY_),
+          timeSeconds(timeSec_), speed(speed_) {}
 };
 
 /**
@@ -136,8 +205,6 @@ struct Segment1D {
     Point2D p1;               ///< Ending point of the segment
     float width = 0.5f;       ///< Segment line thickness in world millimeters (mm)
 };
-
-namespace Folio {
 
 /**
  * @struct InkVertex
@@ -177,27 +244,27 @@ struct InkMesh {
 };
 
 /**
- * @brief Packs a Blend2D BLRgba32 color into R8G8B8A8 (ABGR32 little-endian) for SDL_GPU UBYTE4_NORM.
+ * @brief Packs a ColorRgba color into R8G8B8A8 (ABGR32 little-endian) for GPU vertex color.
  */
-[[nodiscard]] constexpr uint32_t PackGpuColor(BLRgba32 c, float opacity = 1.0f) noexcept {
-    uint32_t r = c.r();
-    uint32_t g = c.g();
-    uint32_t b = c.b();
-    uint32_t a = static_cast<uint32_t>(static_cast<float>(c.a()) * (opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity)) + 0.5f);
+[[nodiscard]] constexpr uint32_t PackGpuColor(ColorRgba c, float opacity = 1.0f) noexcept {
+    uint32_t r = c.r;
+    uint32_t g = c.g;
+    uint32_t b = c.b;
+    uint32_t a = static_cast<uint32_t>(static_cast<float>(c.a) * (opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity)) + 0.5f);
     return (a << 24) | (b << 16) | (g << 8) | r;
 }
 
-} // namespace Folio
-
-using InkVertex = Folio::InkVertex;
-using InkMesh   = Folio::InkMesh;
-
 /**
  * @struct FinishedStrokeData
- * @brief Completed inking stroke container encapsulating collision segments, modeled centerline, and GPU mesh.
+ * @brief Completed inking stroke container encapsulating collision segments, modeled centerline, outline polygon, and GPU mesh.
  */
 struct FinishedStrokeData {
     std::vector<Segment1D> liveSegments;
     std::vector<StrokePoint> modeledPoints;
-    Folio::InkMesh mesh;
+    InkPath outlinePath;
+    InkMesh mesh;
+
+    FinishedStrokeData() = default;
 };
+
+} // namespace Folio

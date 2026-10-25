@@ -33,13 +33,29 @@ public:
      */
     /**
      * @brief Computes dynamic stroke width from explicit telemetry values with pre-resolved tilt radius.
+     * @param isPencil If true, uses graphite pencil physics where pressure controls grain/opacity rather
+     *                 than ballooning tip width (tilt controls shading spread).
      */
     [[nodiscard]] static float CalculateDynamicWidthWithTiltRad(float baseWidth, float pressure,
                                                                 float speed, float tiltRad,
                                                                 float previousWidth, float zoomScale,
-                                                                const InkingConfig& config) noexcept {
-        float pressureWidth = ScaleWidthByPressure(baseWidth, pressure, config);
-        float velocityFactor = ComputeVelocityThinning(speed, zoomScale, config);
+                                                                const InkingConfig& config,
+                                                                bool isPencil = false) noexcept {
+        float effBaseWidth = baseWidth;
+        float effPressure = pressure;
+        float effSpeed = speed;
+
+        if (isPencil) {
+            // Graphite pencil lead stays rigid under pressure (only ±12% width variance)
+            if (config.usePressure && pressure >= 0.0f) {
+                effBaseWidth = baseWidth * (0.90f + 0.12f * std::clamp(pressure, 0.0f, 1.0f));
+            }
+            effPressure = -1.0f; // bypass non-linear pressure gamma scaling
+            effSpeed = 0.0f;    // pencil lead does not exhibit fountain pen hydrodynamic velocity thinning
+        }
+
+        float pressureWidth = ScaleWidthByPressure(effBaseWidth, effPressure, config);
+        float velocityFactor = ComputeVelocityThinning(effSpeed, zoomScale, config);
         float tiltFactor = ComputeTiltModulation(tiltRad, config);
         float targetWidth = pressureWidth * velocityFactor * tiltFactor;
         return ApplySmoothingEMA(previousWidth, targetWidth, config.dynamicWidthSmoothing);
@@ -51,10 +67,11 @@ public:
     [[nodiscard]] static float CalculateDynamicWidth(float baseWidth, float pressure,
                                                      float speed, float tiltX, float tiltY,
                                                      float previousWidth, float zoomScale,
-                                                     const InkingConfig& config) noexcept {
+                                                     const InkingConfig& config,
+                                                     bool isPencil = false) noexcept {
         float tiltRad = (config.useTilt && (tiltX != 0.0f || tiltY != 0.0f)) ? std::hypot(tiltX, tiltY) : 0.0f;
         return CalculateDynamicWidthWithTiltRad(baseWidth, pressure, speed, tiltRad,
-                                                previousWidth, zoomScale, config);
+                                                previousWidth, zoomScale, config, isPencil);
     }
 
     /**

@@ -22,7 +22,7 @@ namespace InkInternal {
 /**
  * @brief Traces a smooth rounded endcap arc between startPt and endPt bowing in direction (ux, uy).
  */
-void TraceRoundCap(BLPath& path,
+void TraceRoundCap(InkPath& path,
                    const StrokePoint& center,
                    const Point2D& startPt,
                    const Point2D& endPt,
@@ -31,7 +31,7 @@ void TraceRoundCap(BLPath& path,
 /**
  * @brief Traces oriented polygon endcap facets for Square and Chisel nibs.
  */
-void TracePolygonCap(BLPath& path,
+void TracePolygonCap(InkPath& path,
                      const StrokePoint& center,
                      const Point2D& startPt,
                      const Point2D& endPt,

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <algorithm>
 
+namespace Folio {
 using namespace Folio::InkInternal;
 
 namespace {
@@ -16,13 +17,36 @@ namespace {
 // CORE SINGLE RIBBON BUILDER (Open ribbon or closed polygon loop)
 // =============================================================================
 
-BLPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts,
-                         CapType capType,
-                         bool isClosedPolygon,
-                         std::vector<Point2D>* outLeftPts = nullptr,
-                         std::vector<Point2D>* outRightPts = nullptr,
-                         std::vector<size_t>* outRetrogradeIndices = nullptr) {
-    BLPath path;
+/**
+ * @brief Constructs a continuous 2D closed polygon boundary enclosing a single unbroken stroke.
+ *
+ * Algorithm Workflow:
+ * 1. Segments: Computes unit tangents (ux, uy), normals (nx, ny), and chord lengths between adjacent points.
+ * 2. Corners: At each interior joint Pi, evaluates turn angle. Computes miter bevels or smooth arc joins
+ *    connecting incoming and outgoing rail offsets.
+ * 3. Self-Intersection Defense: When stroke radius R > turn radius of curvature, the inner rail
+ *    crosses backward over itself creating a "swallowtail" loop defect. PruneSwallowtailLoops detects
+ *    and removes these local self-intersections.
+ * 4. Boundary Contours:
+ *    - Closed Polygons: Emits an outer loop (CW) followed by an inner hole loop (CCW) for non-zero winding fill.
+ *    - Open Strokes: Traces forward along the left rail, caps the tail (left -> right), traces backward
+ *      along the right rail, and caps the head (right -> left), forming a single continuous closed boundary.
+ *
+ * @param cleanPts Filtered centerline vertices with radii.
+ * @param capType Terminal cap style for open strokes.
+ * @param isClosedPolygon True if generating a closed vector shape (e.g. rectangle, polygon).
+ * @param outLeftPts Optional output container for left rail points (used by debugger).
+ * @param outRightPts Optional output container for right rail points (used by debugger).
+ * @param outRetrogradeIndices Optional output container for retrograde anomaly indices.
+ * @return Closed InkPath ready for non-zero winding rasterization.
+ */
+InkPath BuildSingleRibbon(const std::vector<StrokePoint>& cleanPts,
+                          CapType capType,
+                          bool isClosedPolygon,
+                          std::vector<Point2D>* outLeftPts = nullptr,
+                          std::vector<Point2D>* outRightPts = nullptr,
+                          std::vector<size_t>* outRetrogradeIndices = nullptr) {
+    InkPath path;
     if (cleanPts.empty()) return path;
     if (cleanPts.size() == 1) return InkGenerator::TraceCap(cleanPts[0], capType);
 
@@ -157,7 +181,7 @@ void RecordDebugInfo(const std::vector<StrokePoint>& rawPts,
                      const std::vector<Point2D>& leftRail,
                      const std::vector<Point2D>& rightRail,
                      const std::vector<size_t>& retroIndices,
-                     const BLPath& builtPath,
+                     const InkPath& builtPath,
                      CapType capType,
                      bool isClosedPolygon) {
     auto& dbg = Folio::InkInternal::GetMutableDebugInfo();
@@ -168,7 +192,6 @@ void RecordDebugInfo(const std::vector<StrokePoint>& rawPts,
     dbg.rightRail = rightRail;
     dbg.retrogradeIndices = retroIndices;
     dbg.builtPath = builtPath;
-    dbg.generatedPath = builtPath;
     dbg.capType = capType;
     dbg.isClosedPolygon = isClosedPolygon;
     DetectSelfIntersections(leftRail, rightRail, isClosedPolygon, dbg.selfIntersections);
@@ -181,7 +204,23 @@ void RecordDebugInfo(const std::vector<StrokePoint>& rawPts,
 // CONTINUOUS SOLID RIBBON TESSELLATION (Public Entry Point)
 // =============================================================================
 
-BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapType capType, bool isClosedPolygon) {
+/**
+ * @brief Top-level ribbon generator for continuous solid strokes and closed vector shapes.
+ *
+ * Pipeline Stages:
+ * 1. Filtering: Removes micro-jitter and sub-pixel duplicate vertices (< 1e-4 mm).
+ * 2. Radius Regularization: Enforces maximum slope |dr/ds| <= 0.7 to avoid sharp discontinuous flares.
+ * 3. Closed Shape Processing: If isClosedPolygon is requested, ensures the first and last vertices meet.
+ * 4. Hairpin Turn Splitting: When a stroke executes an abrupt 180° reversal (acute angle < 40°),
+ *    continuous ribbon miter solvers produce overlapping artifacts. The stroke is split into sub-ribbons
+ *    at each hairpin vertex and combined seamlessly.
+ *
+ * @param pts Raw centerline points from the physics/smoothing engine.
+ * @param capType Nib profile (Round, Chisel, Square).
+ * @param isClosedPolygon True if generating a closed vector shape.
+ * @return Closed InkPath geometry.
+ */
+InkPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapType capType, bool isClosedPolygon) {
     bool isDbg = InkGenerator::IsDebugCaptureEnabled();
 
     if (pts.empty()) {
@@ -191,11 +230,11 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
             dbg.capType = capType;
             dbg.isClosedPolygon = isClosedPolygon;
         }
-        return BLPath{};
+        return InkPath{};
     }
 
     if (pts.size() == 1) {
-        BLPath single = TraceCap(pts[0], capType);
+        InkPath single = TraceCap(pts[0], capType);
         if (isDbg) {
             RecordDebugInfo(pts, pts, {}, {}, {}, single, capType, isClosedPolygon);
         }
@@ -206,7 +245,7 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
     std::vector<StrokePoint> cleanPts = StrokeFilter::PreFilterPoints(pts);
 
     if (cleanPts.size() <= 1) {
-        BLPath single = TraceCap(cleanPts.empty() ? pts[0] : cleanPts[0], capType);
+        InkPath single = TraceCap(cleanPts.empty() ? pts[0] : cleanPts[0], capType);
         if (isDbg) {
             RecordDebugInfo(pts, cleanPts, {}, {}, {}, single, capType, isClosedPolygon);
         }
@@ -226,10 +265,10 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         }
         std::vector<Point2D> leftRail, rightRail;
         std::vector<size_t> retroIndices;
-        BLPath resPath = BuildSingleRibbon(cleanPts, capType, true,
-                                           isDbg ? &leftRail : nullptr,
-                                           isDbg ? &rightRail : nullptr,
-                                           isDbg ? &retroIndices : nullptr);
+        InkPath resPath = BuildSingleRibbon(cleanPts, capType, true,
+                                            isDbg ? &leftRail : nullptr,
+                                            isDbg ? &rightRail : nullptr,
+                                            isDbg ? &retroIndices : nullptr);
 
         if (isDbg) {
             RecordDebugInfo(pts, cleanPts, leftRail, rightRail, retroIndices, resPath, capType, true);
@@ -243,10 +282,10 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
     if (splitIndices.empty()) {
         std::vector<Point2D> leftRail, rightRail;
         std::vector<size_t> retroIndices;
-        BLPath resPath = BuildSingleRibbon(cleanPts, capType, false,
-                                           isDbg ? &leftRail : nullptr,
-                                           isDbg ? &rightRail : nullptr,
-                                           isDbg ? &retroIndices : nullptr);
+        InkPath resPath = BuildSingleRibbon(cleanPts, capType, false,
+                                            isDbg ? &leftRail : nullptr,
+                                            isDbg ? &rightRail : nullptr,
+                                            isDbg ? &retroIndices : nullptr);
 
         if (isDbg) {
             RecordDebugInfo(pts, cleanPts, leftRail, rightRail, retroIndices, resPath, capType, false);
@@ -255,7 +294,7 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
     }
 
     // Partition at hairpin reversals into sub-ribbons
-    BLPath combinedPath;
+    InkPath combinedPath;
     std::vector<Point2D> combinedLeft, combinedRight;
     std::vector<size_t> combinedRetro;
     size_t subStart = 0;
@@ -265,7 +304,7 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
             std::vector<StrokePoint> subPts(cleanPts.begin() + subStart, cleanPts.begin() + splitIdx + 1);
             std::vector<Point2D> subLeft, subRight;
             std::vector<size_t> subRetro;
-            BLPath subRibbon = BuildSingleRibbon(subPts, capType, false,
+            InkPath subRibbon = BuildSingleRibbon(subPts, capType, false,
                                                  isDbg ? &subLeft : nullptr,
                                                  isDbg ? &subRight : nullptr,
                                                  isDbg ? &subRetro : nullptr);
@@ -285,7 +324,7 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
         std::vector<StrokePoint> subPts(cleanPts.begin() + subStart, cleanPts.end());
         std::vector<Point2D> subLeft, subRight;
         std::vector<size_t> subRetro;
-        BLPath subRibbon = BuildSingleRibbon(subPts, capType, false,
+        InkPath subRibbon = BuildSingleRibbon(subPts, capType, false,
                                              isDbg ? &subLeft : nullptr,
                                              isDbg ? &subRight : nullptr,
                                              isDbg ? &subRetro : nullptr);
@@ -305,3 +344,6 @@ BLPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapTy
 
     return combinedPath;
 }
+
+} // namespace Folio
+

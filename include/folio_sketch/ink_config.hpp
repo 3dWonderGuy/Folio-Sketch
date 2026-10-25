@@ -107,9 +107,4 @@ using InkingTuningConfig = InkingConfig;
 
 } // namespace Folio
 
-// Global namespace alias for backwards compatibility
-using InkingConfig = Folio::InkingConfig;
-using InkingTuningConfig = Folio::InkingTuningConfig;
-using SplineMode = Folio::SplineMode;
-
 

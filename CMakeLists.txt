@@ -14,34 +14,68 @@ else()
 endif()
 
 option(FOLIO_SKETCH_BUILD_TESTS "Build Folio-Sketch standalone test suite and benchmarks" ${FOLIO_SKETCH_STANDALONE})
+option(FOLIO_SKETCH_ENABLE_THORSVG "Enable ThorVG rasterizer and vector bridge" ${FOLIO_SKETCH_STANDALONE})
 
 # ==============================================================================
-# Blend2D Dependency Resolution
+# ThorVG Dependency Resolution (Only when ThorVG is enabled)
 # ==============================================================================
-if(NOT TARGET blend2d::blend2d)
-    find_package(blend2d QUIET)
-    if(NOT blend2d_FOUND)
-        # 1. Check local third_party/blend2d
-        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/blend2d/CMakeLists.txt")
-            set(BLEND2D_TEST OFF CACHE BOOL "" FORCE)
-            set(BLEND2D_DEMOS OFF CACHE BOOL "" FORCE)
-            add_subdirectory(third_party/blend2d b2d EXCLUDE_FROM_ALL)
-        # 2. Check sibling FolioNote repository
-        elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/blend2d/CMakeLists.txt")
-            set(BLEND2D_TEST OFF CACHE BOOL "" FORCE)
-            set(BLEND2D_DEMOS OFF CACHE BOOL "" FORCE)
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/blend2d" b2d EXCLUDE_FROM_ALL)
-        # 3. Fallback to CMake FetchContent
-        else()
-            include(FetchContent)
-            FetchContent_Declare(
-                blend2d
-                GIT_REPOSITORY https://github.com/blend2d/blend2d.git
-                GIT_TAG master
+if(FOLIO_SKETCH_ENABLE_THORSVG)
+    if(NOT TARGET thorvg::thorvg AND NOT TARGET thorvg)
+        find_package(thorvg QUIET)
+        if(NOT thorvg_FOUND)
+            set(THORVG_SRC_DIR "")
+            if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/thorvg/meson.build")
+                set(THORVG_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/thorvg")
+            elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/thorvg/meson.build")
+                set(THORVG_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/thorvg")
+            else()
+                include(FetchContent)
+                FetchContent_Declare(
+                    thorvg_fetch
+                    GIT_REPOSITORY https://github.com/thorvg/thorvg.git
+                    GIT_TAG main
+                    GIT_SHALLOW TRUE
+                )
+                FetchContent_MakeAvailable(thorvg_fetch)
+                set(THORVG_SRC_DIR "${thorvg_fetch_SOURCE_DIR}")
+            endif()
+
+            include(ExternalProject)
+            set(THORVG_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/thorvg_build")
+            set(THORVG_STATIC_LIB "${THORVG_BUILD_DIR}/src/libthorvg-1.a")
+
+            ExternalProject_Add(
+                thorvg_project
+                SOURCE_DIR "${THORVG_SRC_DIR}"
+                BINARY_DIR "${THORVG_BUILD_DIR}"
+                CONFIGURE_COMMAND meson setup "${THORVG_SRC_DIR}" "${THORVG_BUILD_DIR}"
+                                  --default-library=static
+                                  -Dloaders=svg
+                                  -Dsavers=
+                                  -Dbindings=
+                                  --buildtype=release
+                BUILD_COMMAND ninja -C "${THORVG_BUILD_DIR}"
+                INSTALL_COMMAND ""
+                BUILD_BYPRODUCTS "${THORVG_STATIC_LIB}"
             )
-            set(BLEND2D_TEST OFF CACHE BOOL "" FORCE)
-            set(BLEND2D_DEMOS OFF CACHE BOOL "" FORCE)
-            FetchContent_MakeAvailable(blend2d)
+
+            add_library(thorvg::thorvg STATIC IMPORTED GLOBAL)
+            add_dependencies(thorvg::thorvg thorvg_project)
+
+            file(MAKE_DIRECTORY "${THORVG_BUILD_DIR}/src")
+
+            find_package(OpenMP QUIET)
+            set(THORVG_EXTRA_LIBS "pthread")
+            if(TARGET OpenMP::OpenMP_CXX)
+                list(APPEND THORVG_EXTRA_LIBS OpenMP::OpenMP_CXX)
+            endif()
+
+            set_target_properties(thorvg::thorvg PROPERTIES
+                IMPORTED_LOCATION "${THORVG_STATIC_LIB}"
+                INTERFACE_INCLUDE_DIRECTORIES "${THORVG_SRC_DIR}/inc"
+                INTERFACE_LINK_LIBRARIES "${THORVG_EXTRA_LIBS}"
+            )
+            add_library(thorvg ALIAS thorvg::thorvg)
         endif()
     endif()
 endif()
@@ -127,6 +161,7 @@ set(FOLIO_SKETCH_SOURCES
 set(FOLIO_SKETCH_HEADERS
     # Public API Headers
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/folio_sketch.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_path.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_engine.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_config.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_stroke_data.hpp"
@@ -167,9 +202,13 @@ target_include_directories(FolioSketch
 
 target_link_libraries(FolioSketch
     PUBLIC
-        blend2d::blend2d
         InkStrokeModeler::stroke_modeler
 )
+
+if(FOLIO_SKETCH_ENABLE_THORSVG)
+    target_link_libraries(FolioSketch PRIVATE thorvg::thorvg)
+    target_compile_definitions(FolioSketch PRIVATE FOLIO_ENABLE_THORSVG=1)
+endif()
 
 # Compiler warnings and optimization flags
 if(MSVC)
@@ -190,7 +229,7 @@ if(FOLIO_SKETCH_BUILD_TESTS)
 
     target_link_libraries(test_ink_generator PRIVATE
         FolioSketch::FolioSketch
-        blend2d::blend2d
+        thorvg::thorvg
     )
 
     if(WIN32)

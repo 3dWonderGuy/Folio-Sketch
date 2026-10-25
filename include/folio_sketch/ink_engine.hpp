@@ -22,6 +22,8 @@
 #include <cstdint>
 #include <span>
 
+#include "folio_sketch/ink_path.hpp"
+#include "folio_sketch/ink_generator.hpp"
 #include "folio_sketch/ink_stroke_data.hpp"
 #include "folio_sketch/ink_config.hpp"
 #include "folio_sketch/ink_mesh.hpp"
@@ -43,11 +45,11 @@ public:
     InkEngine();
     ~InkEngine();
 
-    // Move-only semantics (owns unique Google Modeler instance)
+    // Non-copyable, non-movable engine service
     InkEngine(const InkEngine&) = delete;
     InkEngine& operator=(const InkEngine&) = delete;
-    InkEngine(InkEngine&&) noexcept;
-    InkEngine& operator=(InkEngine&&) noexcept;
+    InkEngine(InkEngine&&) = delete;
+    InkEngine& operator=(InkEngine&&) = delete;
 
     // -------------------------------------------------------------------------
     // 1. INKING LIFECYCLE (Coordinates in physical world millimeters)
@@ -151,6 +153,16 @@ public:
     void UpdatePhysicsParams();
 
     /**
+     * @brief Centralized stroke outline computing authority.
+     */
+    static InkPath BuildStrokeOutline(const std::vector<StrokePoint>& points,
+                                      CapType capType = CapType::Round,
+                                      StrokePattern pattern = StrokePattern::Solid,
+                                      bool isStandardShape = false) {
+        return InkGenerator::GenerateStroke(points, capType, pattern, isStandardShape);
+    }
+
+    /**
      * @brief Centralized GPU indexed triangle mesh computing authority.
      */
     static void BuildStrokeMesh(std::span<const StrokePoint> points,
@@ -175,6 +187,15 @@ private:
 
     // Processes confirmed Google Ink results into live modeled points and updates 2D live outline
     void ProcessGoogleResults(const std::vector<ink::stroke_model::Result>& results);
+
+    // Computes static or dynamic touch-down / tap width based on pressure and tilt
+    [[nodiscard]] float EvaluateTapWidth(float pressure, float tiltX, float tiltY) const noexcept;
+
+    // Sub-stages of FinishStroke
+    void FlushPhysicsOnPenUp();
+    void HandleSingleTapEdgeCase();
+    void ApplyTailTaper(std::vector<StrokePoint>& points) const;
+    [[nodiscard]] std::vector<Segment1D> BuildCollisionSegments(const std::vector<StrokePoint>& points) const;
 
     // Builds temporary forward-predicted tip mesh to reduce perceived latency
     void EnsureLiveMesh() const;

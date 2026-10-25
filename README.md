@@ -3,10 +3,10 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)]()
-[![Backend: Blend2D](https://img.shields.io/badge/Backend-Blend2D-orange.svg)](https://blend2d.com)
+[![Backend: ThorSVG](https://img.shields.io/badge/Backend-ThorSVG-blue.svg)](https://www.thorvg.org)
 
 ## Overview
-**Folio-Sketch** is a standalone, hardware-accelerated 2D computational vector geometry and inking engine. It transforms discrete, variable-radius, pressure- and tilt-modeled stroke centerlines into continuous, non-overlapping 2D closed polygon contours (`BLPath`) optimized for real-time subpixel anti-aliased rasterization via [Blend2D](https://blend2d.com).
+**Folio-Sketch** is a standalone, hardware-accelerated 2D computational vector geometry and inking engine. It transforms discrete, variable-radius, pressure- and tilt-modeled stroke centerlines into GPU indexed triangle meshes (`InkMesh`) for real-time hardware rasterization and vector path contours (`InkPath`) with [ThorSVG](https://www.thorvg.org) integration for scalable export and rendering.
 
 Originally engineered for **FolioNote**, Folio-Sketch provides ultra-low latency, physically modeled stroke tessellation suitable for handwriting, note-taking, sketching, and digital calligraphy applications.
 
@@ -135,9 +135,10 @@ Include headers in your code:
 ```cpp
 #include <folio_sketch/ink_generator.hpp>
 
-// Tessellate an ink stroke into a Blend2D BLPath
+// Tessellate an ink stroke into an InkPath (with ThorSVG Shape conversion)
 std::vector<StrokePoint> points = ...;
-BLPath strokePath = InkGenerator::GenerateStroke(points, CapType::Round, StrokePattern::Solid);
+InkPath strokePath = InkGenerator::GenerateStroke(points, CapType::Round, StrokePattern::Solid);
+auto thorvgShape = strokePath.toThorVGShape();
 ```
 
 ---

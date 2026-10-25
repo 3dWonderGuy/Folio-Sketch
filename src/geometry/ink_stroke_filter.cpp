@@ -57,10 +57,25 @@ std::vector<StrokePoint> StrokeFilter::PreFilterPoints(std::span<const StrokePoi
             }
             if (!isSharpTurn) {
                 if (isLast) {
-                    prev.x = p.x;
-                    prev.y = p.y;
-                    prev.pressure = std::max(prev.pressure, p.pressure);
-                    prev.r = std::max(prev.r, p.r);
+                    if (cleanPts.size() == 1) {
+                        prev = p;
+                    } else {
+                        // Check if final segment continues forward along the stroke tangent
+                        double dxIn = 0.0, dyIn = 0.0;
+                        if (cleanPts.size() >= 2) {
+                            dxIn = prev.x - cleanPts[cleanPts.size() - 2].x;
+                            dyIn = prev.y - cleanPts[cleanPts.size() - 2].y;
+                        }
+                        double dxOut = p.x - prev.x;
+                        double dyOut = p.y - prev.y;
+                        if (dxIn * dxOut + dyIn * dyOut > 0.0) {
+                            // Forward continuation: preserve final pen-lift coordinate
+                            prev.x = p.x;
+                            prev.y = p.y;
+                        }
+                        prev.pressure = std::max(prev.pressure, p.pressure);
+                        prev.r = std::max(prev.r, p.r);
+                    }
                 } else {
                     prev.pressure = std::max(prev.pressure, p.pressure);
                     prev.r = std::max(prev.r, p.r);
@@ -72,17 +87,17 @@ std::vector<StrokePoint> StrokeFilter::PreFilterPoints(std::span<const StrokePoi
         cleanPts.push_back(p);
     }
 
-    // When last segment is smaller than 20% of radius, merge previous vertex with final point
-    if (cleanPts.size() >= 2) {
-        double dLast = std::hypot(cleanPts.back().x - cleanPts[cleanPts.size() - 2].x,
-                                  cleanPts.back().y - cleanPts[cleanPts.size() - 2].y);
-        if (dLast < cleanPts.back().r * 0.20) {
-            const auto finalPt = cleanPts.back();
+    // Remove terminal micro-jitter stub if last segment is smaller than 20% of radius and retrograde
+    while (cleanPts.size() >= 3) {
+        double dxIn = cleanPts[cleanPts.size() - 2].x - cleanPts[cleanPts.size() - 3].x;
+        double dyIn = cleanPts[cleanPts.size() - 2].y - cleanPts[cleanPts.size() - 3].y;
+        double dxOut = cleanPts.back().x - cleanPts[cleanPts.size() - 2].x;
+        double dyOut = cleanPts.back().y - cleanPts[cleanPts.size() - 2].y;
+        double dLast = std::hypot(dxOut, dyOut);
+        if (dLast < cleanPts.back().r * 0.20 && (dxIn * dxOut + dyIn * dyOut <= 0.0)) {
             cleanPts.pop_back();
-            cleanPts.back().x = finalPt.x;
-            cleanPts.back().y = finalPt.y;
-            cleanPts.back().r = std::max(cleanPts.back().r, finalPt.r);
-            cleanPts.back().pressure = std::max(cleanPts.back().pressure, finalPt.pressure);
+        } else {
+            break;
         }
     }
 

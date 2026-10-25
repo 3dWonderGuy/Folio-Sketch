@@ -6,6 +6,7 @@
  * =========================================================================================
  */
 
+#include "folio_sketch/ink_path.hpp"
 #include "folio_sketch/ink_stroke_data.hpp"
 #include "folio_sketch/ink_config.hpp"
 #include "folio_sketch/stroke_collision.hpp"
