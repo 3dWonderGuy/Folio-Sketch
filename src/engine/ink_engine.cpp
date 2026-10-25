@@ -444,24 +444,15 @@ void InkEngine::UpdatePhysicsParams() {
     params.position_modeler_params.spring_mass_constant = m_config.google_spring_mass_constant;
     params.position_modeler_params.drag_constant = m_config.google_drag_constant;
 
-    // Speed-based loop contraction mitigation (prevents fast curves/loops from shrinking)
+    // Speed-based loop contraction mitigation:
+    // Note: Google Ink's normal-ray projection (`ProjectAlongStrokeNormal`) snaps erratically across
+    // opposing polyline segments during high-speed acute zigzag reversals, causing staircase jumps.
+    // Keep position purely spring-modeled (`is_enabled = false`) for smooth, artifact-free curves.
     auto& loopParams = params.position_modeler_params.loop_contraction_mitigation_params;
-    loopParams.is_enabled = m_config.google_loop_mitigation_enable;
-    if (loopParams.is_enabled) {
-        float lowSpeed = std::max(0.0f, m_config.google_loop_speed_lower_bound);
-        float highSpeed = std::max(lowSpeed, m_config.google_loop_speed_upper_bound);
-        float lowStrength = std::clamp(m_config.google_loop_strength_at_lower_speed, 0.0f, 1.0f);
-        float highStrength = std::clamp(m_config.google_loop_strength_at_upper_speed, 0.0f, lowStrength);
-        loopParams.speed_lower_bound = lowSpeed;
-        loopParams.speed_upper_bound = highSpeed;
-        loopParams.interpolation_strength_at_speed_lower_bound = lowStrength;
-        loopParams.interpolation_strength_at_speed_upper_bound = highStrength;
-        loopParams.min_speed_sampling_window = sm::Duration(std::max(0.0f, m_config.google_loop_min_speed_window_s));
-    }
+    loopParams.is_enabled = false;
 
-    // Stylus normal projection (required when loop mitigation is enabled)
-    params.stylus_state_modeler_params.use_stroke_normal_projection =
-        m_config.google_use_stroke_normal_projection || m_config.google_loop_mitigation_enable;
+    // Stylus normal projection (disabled to use closest-point projection without normal-ray snapping)
+    params.stylus_state_modeler_params.use_stroke_normal_projection = false;
 
     // Wobble smoother (hand tremor filter)
     params.wobble_smoother_params.is_enabled = m_config.google_wobble_enable;

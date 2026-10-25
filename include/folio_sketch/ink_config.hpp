@@ -53,11 +53,11 @@ struct InkingConfig {
     // -------------------------------------------------------------
     // 4. LOOP CONTRACTION MITIGATION (Speed-Based Curve Accuracy)
     // -------------------------------------------------------------
-    bool google_loop_mitigation_enable = true;
+    bool google_loop_mitigation_enable = false;           // Disabled by default: normal-ray projection snaps across hairpin branches on fast zigzags
     float google_loop_speed_lower_bound = 20.0f;          // Slow speed threshold (mm/s)
     float google_loop_speed_upper_bound = 400.0f;         // Fast speed threshold (mm/s)
     float google_loop_strength_at_lower_speed = 1.0f;     // 1.0 = pure spring smoothing at slow speed
-    float google_loop_strength_at_upper_speed = 0.5f;     // 0.0 = raw input, 1.0 = spring at high speed
+    float google_loop_strength_at_upper_speed = 0.85f;    // 0.0 = raw input, 1.0 = spring at high speed
     float google_loop_min_speed_window_s = 0.04f;         // Moving average window for speed (s)
 
     // -------------------------------------------------------------

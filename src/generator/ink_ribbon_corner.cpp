@@ -248,7 +248,10 @@ void ProcessCorner(const StrokePoint& pt,
         double safeLimit = (std::min(sIn.len, sOut.len) * 0.5) / std::max(1e-4, sinHalf);
 
         double innerDist = r;
-        if (cosHalf > 1e-4) {
+        if (dot < -0.70 || bInLen < 0.1) {
+            // Acute hairpin turnaround: clamp inner miter distance to pivot cleanly on centerline
+            innerDist = 0.0;
+        } else if (cosHalf > 1e-4) {
             // Unconstrained miter capped at 1.4 * r
             innerDist = std::min(r / cosHalf, 1.4 * r);
         }

@@ -327,7 +327,10 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
             double safeLimit = (std::min(sIn.len, sOut.len) * 0.5) / std::max(1e-4, sinHalf);
             double cosHalf = std::sqrt(std::max(0.0, (1.0 + dot) * 0.5));
             double innerMiterDist = rNext;
-            if (cosHalf > 1e-4) {
+            if (dot < -0.65 || avgLen < 1e-4) {
+                // Acute hairpin turnaround: collapse inner miter distance to pivot cleanly on centerline
+                innerMiterDist = 0.0;
+            } else if (cosHalf > 1e-4) {
                 innerMiterDist = std::min(rNext / cosHalf, static_cast<double>(rNext));
             }
             innerMiterDist = std::min(innerMiterDist, std::max(0.0, safeLimit));
