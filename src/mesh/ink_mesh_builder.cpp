@@ -340,7 +340,7 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
             double cosHalf = std::sqrt(std::max(0.0, (1.0 + dot) * 0.5));
             double innerMiterDist = rNext;
             if (cosHalf > 1e-4) {
-                innerMiterDist = std::min(rNext / cosHalf, 1.25 * rNext);
+                innerMiterDist = std::min(rNext / cosHalf, static_cast<double>(rNext));
             }
             innerMiterDist = std::min(innerMiterDist, std::max(0.0, safeLimit));
 
@@ -393,12 +393,21 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
 
             int fanSteps = std::clamp(static_cast<int>(std::ceil(turnAngle / (M_PI / 16.0))), 2, 16);
             double aStartFan = std::atan2(outerSign * sIn.ny,  outerSign * sIn.nx);
-            double sweepFan  = leftIsInner ? -turnAngle : turnAngle;
+            double aEndFan   = std::atan2(outerSign * sOut.ny, outerSign * sOut.nx);
+            // Ensure proper shortest angular direction based on turn side
+            double sweepFan = aEndFan - aStartFan;
+            if (leftIsInner) {
+                while (sweepFan > 0.0) sweepFan -= 2.0 * M_PI;
+                while (sweepFan < -2.0 * M_PI) sweepFan += 2.0 * M_PI;
+            } else {
+                while (sweepFan < 0.0) sweepFan += 2.0 * M_PI;
+                while (sweepFan > 2.0 * M_PI) sweepFan -= 2.0 * M_PI;
+            }
 
             uint32_t prevFanNom = outerInIdx;
             uint32_t prevFanSkirt = outerInSkirtIdx;
             for (int s = 1; s <= fanSteps; ++s) {
-                double a = aStartFan + (static_cast<double>(s) / fanSteps) * sweepFan;
+                double a = (s == fanSteps) ? aEndFan : (aStartFan + (static_cast<double>(s) / fanSteps) * sweepFan);
                 uint32_t arcNomIdx = addVertex(cleanPts[nextPtIdx].x + std::cos(a) * rNext,
                                                cleanPts[nextPtIdx].y + std::sin(a) * rNext,
                                                1.0f, rNext);
