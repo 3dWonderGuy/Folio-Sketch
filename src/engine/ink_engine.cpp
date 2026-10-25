@@ -141,16 +141,11 @@ void InkEngine::FlushPhysicsOnPenUp() {
 
     m_googleResultsBuffer.clear();
     if (m_googleModeler->Update(MakeGoogleInput(sm::Input::EventType::kUp, m_activeStrokePoints.back()), m_googleResultsBuffer).ok()) {
-        // Retain and freeze predicted points so the stroke tip does not jump backwards upon pen lift
-        if (m_config.google_enable_prediction && !m_predictedPointsBuffer.empty()) {
-            for (size_t i = 1; i < m_predictedPointsBuffer.size(); ++i) {
-                m_liveModeledPoints.push_back(m_predictedPointsBuffer[i]);
-            }
-            m_predictedPointsBuffer.clear();
-        } else {
-            // Otherwise process remaining flushed results as the spring catches up to the pen lift position
-            ProcessGoogleResults(m_googleResultsBuffer);
-        }
+        // Upon pen lift, do not append speculative forward-prediction points as permanent stroke geometry.
+        // Speculative points can curl erratically when pen velocity drops sharply before lift.
+        // Instead, simply process the physical flushed modeler results as the spring relaxes to the lift position.
+        m_predictedPointsBuffer.clear();
+        ProcessGoogleResults(m_googleResultsBuffer);
     }
 }
 
