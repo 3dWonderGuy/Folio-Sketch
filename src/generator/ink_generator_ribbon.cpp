@@ -276,74 +276,23 @@ InkPath InkGenerator::BuildSolidRibbon(const std::vector<StrokePoint>& pts, CapT
         return resPath;
     }
 
-    // 4. Hairpin Turn Splitting (Open Strokes Only)
-    std::vector<size_t> splitIndices = StrokeFilter::FindHairpinTurns(cleanPts);
-
-    if (splitIndices.empty()) {
-        std::vector<Point2D> leftRail, rightRail;
-        std::vector<size_t> retroIndices;
-        InkPath resPath = BuildSingleRibbon(cleanPts, capType, false,
-                                            isDbg ? &leftRail : nullptr,
-                                            isDbg ? &rightRail : nullptr,
-                                            isDbg ? &retroIndices : nullptr);
-
-        if (isDbg) {
-            RecordDebugInfo(pts, cleanPts, leftRail, rightRail, retroIndices, resPath, capType, false);
-        }
-        return resPath;
-    }
-
-    // Partition at hairpin reversals into sub-ribbons
-    InkPath combinedPath;
-    std::vector<Point2D> combinedLeft, combinedRight;
-    std::vector<size_t> combinedRetro;
-    size_t subStart = 0;
-
-    for (size_t splitIdx : splitIndices) {
-        if (splitIdx > subStart) {
-            std::vector<StrokePoint> subPts(cleanPts.begin() + subStart, cleanPts.begin() + splitIdx + 1);
-            std::vector<Point2D> subLeft, subRight;
-            std::vector<size_t> subRetro;
-            InkPath subRibbon = BuildSingleRibbon(subPts, capType, false,
-                                                 isDbg ? &subLeft : nullptr,
-                                                 isDbg ? &subRight : nullptr,
-                                                 isDbg ? &subRetro : nullptr);
-            if (!subRibbon.is_empty()) {
-                combinedPath.add_path(subRibbon);
-            }
-            if (isDbg) {
-                combinedLeft.insert(combinedLeft.end(), subLeft.begin(), subLeft.end());
-                combinedRight.insert(combinedRight.end(), subRight.begin(), subRight.end());
-                combinedRetro.insert(combinedRetro.end(), subRetro.begin(), subRetro.end());
-            }
-            subStart = splitIdx;
-        }
-    }
-
-    if (subStart < cleanPts.size() - 1) {
-        std::vector<StrokePoint> subPts(cleanPts.begin() + subStart, cleanPts.end());
-        std::vector<Point2D> subLeft, subRight;
-        std::vector<size_t> subRetro;
-        InkPath subRibbon = BuildSingleRibbon(subPts, capType, false,
-                                             isDbg ? &subLeft : nullptr,
-                                             isDbg ? &subRight : nullptr,
-                                             isDbg ? &subRetro : nullptr);
-        if (!subRibbon.is_empty()) {
-            combinedPath.add_path(subRibbon);
-        }
-        if (isDbg) {
-            combinedLeft.insert(combinedLeft.end(), subLeft.begin(), subLeft.end());
-            combinedRight.insert(combinedRight.end(), subRight.begin(), subRight.end());
-            combinedRetro.insert(combinedRetro.end(), subRetro.begin(), subRetro.end());
-        }
-    }
+    // 4. Open Stroke Ribbon Generation
+    // We rely on ProcessCorner (clamped miter + adaptive outer arc) and
+    // PruneSwallowtailLoops to cleanly sweep turns of any angle without cutting
+    // the stroke into separate overlapping sub-ribbons.
+    std::vector<Point2D> leftRail, rightRail;
+    std::vector<size_t> retroIndices;
+    InkPath resPath = BuildSingleRibbon(cleanPts, capType, false,
+                                        isDbg ? &leftRail : nullptr,
+                                        isDbg ? &rightRail : nullptr,
+                                        isDbg ? &retroIndices : nullptr);
 
     if (isDbg) {
-        RecordDebugInfo(pts, cleanPts, combinedLeft, combinedRight, combinedRetro, combinedPath, capType, false);
+        RecordDebugInfo(pts, cleanPts, leftRail, rightRail, retroIndices, resPath, capType, false);
     }
-
-    return combinedPath;
+    return resPath;
 }
 
 } // namespace Folio
+
 
