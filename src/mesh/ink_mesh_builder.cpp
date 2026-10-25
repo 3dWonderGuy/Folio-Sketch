@@ -618,6 +618,7 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
             const auto& sIn    = segs[segIdx];
             const auto& sOut   = segs[segIdx + 1];
 
+            double cross = sIn.ux * sOut.uy - sIn.uy * sOut.ux;
             // In screen coordinates (+Y down, normal = (+uy, -ux) pointing left):
             // cross > 0 represents a right turn where LEFT is outer and RIGHT is inner.
             // cross < 0 represents a left turn where RIGHT is outer and LEFT is inner.
