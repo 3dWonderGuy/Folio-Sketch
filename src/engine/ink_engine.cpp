@@ -321,8 +321,13 @@ void InkEngine::EnsureLiveMesh() const {
         m_liveStrokeMesh.clear();
         return;
     }
-    InkMeshBuilder::BuildSolidMesh(
-        m_liveModeledPoints, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), m_liveStrokeMesh, m_zoomScale);
+    if (m_activeStyle.pattern == StrokePattern::Solid) {
+        InkMeshBuilder::BuildSolidMesh(
+            m_liveModeledPoints, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), m_liveStrokeMesh, m_zoomScale);
+    } else {
+        InkMeshBuilder::BuildStyledMesh(
+            m_liveModeledPoints, m_activeStyle.capType, m_activeStyle.pattern, PackGpuColor(m_activeStyle.color), m_liveStrokeMesh, m_zoomScale);
+    }
 }
 
 void InkEngine::EnsurePrediction() const {
@@ -351,8 +356,13 @@ void InkEngine::EnsurePrediction() const {
     }
 
     if (m_predictedPointsBuffer.size() >= 2) {
-        InkMeshBuilder::BuildSolidMesh(
-            m_predictedPointsBuffer, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), m_predictedStrokeMesh, m_zoomScale);
+        if (m_activeStyle.pattern == StrokePattern::Solid) {
+            InkMeshBuilder::BuildSolidMesh(
+                m_predictedPointsBuffer, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), m_predictedStrokeMesh, m_zoomScale);
+        } else {
+            InkMeshBuilder::BuildStyledMesh(
+                m_predictedPointsBuffer, m_activeStyle.capType, m_activeStyle.pattern, PackGpuColor(m_activeStyle.color), m_predictedStrokeMesh, m_zoomScale);
+        }
     }
 }
 

@@ -169,8 +169,13 @@ public:
                                 CapType capType,
                                 uint32_t packedColor,
                                 InkMesh& outMesh,
-                                float scalePxPerMm = 3.7795f) {
-        InkMeshBuilder::BuildSolidMesh(points, capType, packedColor, outMesh, scalePxPerMm);
+                                float scalePxPerMm = 3.7795f,
+                                StrokePattern pattern = StrokePattern::Solid) {
+        if (pattern == StrokePattern::Solid) {
+            InkMeshBuilder::BuildSolidMesh(points, capType, packedColor, outMesh, scalePxPerMm);
+        } else {
+            InkMeshBuilder::BuildStyledMesh(points, capType, pattern, packedColor, outMesh, scalePxPerMm);
+        }
     }
 
 private:

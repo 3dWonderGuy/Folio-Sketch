@@ -37,6 +37,16 @@ public:
                                uint32_t color,
                                InkMesh& outMesh,
                                float scalePxPerMm = 3.7795f);
+
+    /**
+     * @brief Builds an indexed triangle mesh for a styled variable-width stroke (Solid, Dashed, Dotted, DashDot).
+     */
+    static void BuildStyledMesh(std::span<const StrokePoint> points,
+                                CapType capType,
+                                StrokePattern pattern,
+                                uint32_t color,
+                                InkMesh& outMesh,
+                                float scalePxPerMm = 3.7795f);
 };
 
 } // namespace Folio
