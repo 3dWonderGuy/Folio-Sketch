@@ -263,8 +263,13 @@ FinishedStrokeData InkEngine::FinishStroke() {
     data.modeledPoints = m_liveModeledPoints;
     data.outlinePath = InkGenerator::GenerateStroke(
         m_liveModeledPoints, m_activeStyle.capType, m_activeStyle.pattern); // builds closed polygon ribbon (CPU path / export)
-    InkMeshBuilder::BuildSolidMesh(
-        m_liveModeledPoints, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), data.mesh, m_zoomScale);
+    if (m_activeStyle.pattern == StrokePattern::Solid) {
+        InkMeshBuilder::BuildSolidMesh(
+            m_liveModeledPoints, m_activeStyle.capType, PackGpuColor(m_activeStyle.color), data.mesh, m_zoomScale);
+    } else {
+        InkMeshBuilder::BuildStyledMesh(
+            m_liveModeledPoints, m_activeStyle.capType, m_activeStyle.pattern, PackGpuColor(m_activeStyle.color), data.mesh, m_zoomScale);
+    }
 
     // Auto-dump stroke reproducer if geometry defects (self-intersections or retrograde folds) were detected
     if (InkGenerator::IsDebugCaptureEnabled() && InkGenerator::GetLastDebugInfo().hasDefects) {
