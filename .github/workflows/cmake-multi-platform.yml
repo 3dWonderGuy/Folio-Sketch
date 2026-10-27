@@ -1,0 +1,90 @@
+name: FolioNote CI
+
+on:
+  push:
+    branches: [ "main", "feature/**" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    name: ${{ matrix.os }} (${{ matrix.cpp_compiler }}, ${{ matrix.build_type }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        build_type: [Release]
+        include:
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+          - os: ubuntu-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install Linux Dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libegl1-mesa-dev \
+            libgles2-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxrandr-dev \
+            libxss-dev \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libasound2-dev \
+            libpulse-dev \
+            libdbus-1-dev \
+            libudev-dev
+
+      - name: Set reusable strings
+        id: strings
+        shell: bash
+        run: |
+          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
+      - name: Configure CMake (Linux)
+        if: runner.os == 'Linux'
+        run: >
+          cmake -B ${{ steps.strings.outputs.build-output-dir }} -G Ninja
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -S ${{ github.workspace }}
+
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
+        run: >
+          cmake -B ${{ steps.strings.outputs.build-output-dir }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -S ${{ github.workspace }}
+
+      - name: Build
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+
+      - name: Test
+        working-directory: ${{ steps.strings.outputs.build-output-dir }}
+        run: ctest --build-config ${{ matrix.build_type }} --output-on-failure
