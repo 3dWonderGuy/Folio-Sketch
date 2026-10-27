@@ -39,6 +39,7 @@ struct InkingConfig {
     float google_spring_mass_constant = 11.0f / 32400.0f; // ~0.000339
     float google_drag_constant = 72.0f;
     bool google_enable_prediction = true;
+    float google_prediction_duration_ms = 16.0f;          // Kalman prediction lookahead duration (ms)
     bool google_use_stroke_normal_projection = true;
 
     // -------------------------------------------------------------
@@ -101,6 +102,11 @@ struct InkingConfig {
 
     float hairpinCosThreshold = kDefaultHairpinCosThreshold;
     float hairpinMinSegmentRadiusRatio = kDefaultHairpinMinSegmentRadiusRatio;
+
+    float cornerAngleThresholdRad = 1.04719755f; // Corner bevel threshold in radians (default: 60 deg / ~1.05 rad)
+    float miterMinClampRatio      = 0.0f;        // Min miter clamping ratio (0.0 .. 1.0x)
+    float miterMaxClampRatio      = 1.25f;       // Max miter clamping ratio (1.0 .. 2.5x)
+    bool  stationaryEnvelopment   = true;        // Merge consecutive points where ds <= |dr|
 };
 
 using InkingTuningConfig = InkingConfig;

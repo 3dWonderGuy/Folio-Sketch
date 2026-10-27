@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(FolioSketch VERSION 1.0.0 LANGUAGES CXX)
+project(FolioSketch VERSION 1.0.0 LANGUAGES CXX C)
 
 # C++20 Standard Requirement
 set(CMAKE_CXX_STANDARD 20)
@@ -13,8 +13,9 @@ else()
     set(FOLIO_SKETCH_STANDALONE OFF)
 endif()
 
-option(FOLIO_SKETCH_BUILD_TESTS "Build Folio-Sketch standalone test suite and benchmarks" ${FOLIO_SKETCH_STANDALONE})
-option(FOLIO_SKETCH_ENABLE_THORSVG "Enable ThorVG rasterizer and vector bridge" ${FOLIO_SKETCH_STANDALONE})
+option(FOLIO_SKETCH_BUILD_TESTS "Build Folio-Sketch standalone test suite and benchmarks" OFF)
+option(FOLIO_SKETCH_BUILD_INSPECTOR "Build interactive Inking Diagnostic Playground and Inspector" ${FOLIO_SKETCH_STANDALONE})
+option(FOLIO_SKETCH_ENABLE_THORSVG "Enable ThorVG rasterizer and vector bridge (needed by tests)" ${FOLIO_SKETCH_BUILD_TESTS})
 
 # ==============================================================================
 # ThorVG Dependency Resolution (Only when ThorVG is enabled)
@@ -186,6 +187,7 @@ add_library(FolioSketch STATIC
 
 add_library(FolioSketch::FolioSketch ALIAS FolioSketch)
 add_library(Folio::Sketch ALIAS FolioSketch)
+add_library(folio_sketch ALIAS FolioSketch)
 
 target_include_directories(FolioSketch
     PUBLIC
@@ -218,7 +220,75 @@ else()
 endif()
 
 # ==============================================================================
-# Standalone Test Suite & Benchmarks
+# Interactive Inking Diagnostic Playground & Inspector (folio_ink_inspector)
+# Standalone demo + test app. SDL3 and Dear ImGui are vendored in third_party/.
+# Defined BEFORE the test suite so it is the primary/default runnable target.
+# ==============================================================================
+if(FOLIO_SKETCH_BUILD_INSPECTOR)
+    # --- Vendored SDL3 (static) ---
+    if(NOT TARGET SDL3::SDL3)
+        set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+        set(SDL_STATIC ON CACHE BOOL "" FORCE)
+        set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+        set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+        set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+        set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
+        set(SDL_IBUS OFF CACHE BOOL "" FORCE)
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL" sdl EXCLUDE_FROM_ALL)
+        if(NOT TARGET SDL3::SDL3 AND TARGET SDL3-static)
+            add_library(SDL3::SDL3 ALIAS SDL3-static)
+        endif()
+    endif()
+
+    # --- Vendored Dear ImGui (SDL3 + OpenGL3 backends) ---
+    set(FOLIO_IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
+    add_library(imgui STATIC
+        "${FOLIO_IMGUI_DIR}/imgui.cpp"
+        "${FOLIO_IMGUI_DIR}/imgui_draw.cpp"
+        "${FOLIO_IMGUI_DIR}/imgui_tables.cpp"
+        "${FOLIO_IMGUI_DIR}/imgui_widgets.cpp"
+        "${FOLIO_IMGUI_DIR}/backends/imgui_impl_sdl3.cpp"
+        "${FOLIO_IMGUI_DIR}/backends/imgui_impl_opengl3.cpp"
+    )
+    target_include_directories(imgui PUBLIC "${FOLIO_IMGUI_DIR}" "${FOLIO_IMGUI_DIR}/backends")
+    target_compile_definitions(imgui PUBLIC IMGUI_DEFINE_MATH_OPERATORS)
+    target_link_libraries(imgui PUBLIC SDL3::SDL3)
+    if(ANDROID)
+        target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_ES3)
+    endif()
+
+    # --- OpenGL / GLES ---
+    if(NOT ANDROID)
+        find_package(OpenGL REQUIRED)
+    endif()
+
+    add_executable(folio_ink_inspector
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/main_inspector.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/raw_sensor_layer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/modeler_inspector.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/width_inspector.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/geometry_inspector.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/stroke_scrubber.cpp"
+    )
+    target_include_directories(folio_ink_inspector PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(folio_ink_inspector PRIVATE folio_sketch SDL3::SDL3 imgui)
+    if(ANDROID)
+        find_library(ANDROID_GLES3_LIB GLESv3)
+        find_library(ANDROID_EGL_LIB EGL)
+        target_link_libraries(folio_ink_inspector PRIVATE ${ANDROID_GLES3_LIB} ${ANDROID_EGL_LIB})
+    else()
+        target_link_libraries(folio_ink_inspector PRIVATE OpenGL::GL)
+    endif()
+
+    set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY VS_STARTUP_PROJECT folio_ink_inspector)
+endif()
+
+# ==============================================================================
+# Standalone Test Suite & Benchmarks (opt-in: -DFOLIO_SKETCH_BUILD_TESTS=ON)
 # ==============================================================================
 if(FOLIO_SKETCH_BUILD_TESTS)
     enable_testing()
@@ -226,15 +296,9 @@ if(FOLIO_SKETCH_BUILD_TESTS)
     add_executable(test_ink_generator
         "${CMAKE_CURRENT_SOURCE_DIR}/test/test_ink_generator.cpp"
     )
-
-    target_link_libraries(test_ink_generator PRIVATE
-        FolioSketch::FolioSketch
-        thorvg::thorvg
-    )
-
+    target_link_libraries(test_ink_generator PRIVATE FolioSketch::FolioSketch thorvg::thorvg)
     if(WIN32)
         target_link_libraries(test_ink_generator PRIVATE dwmapi ole32 shell32 winspool)
     endif()
-
     add_test(NAME test_ink_generator COMMAND test_ink_generator)
 endif()

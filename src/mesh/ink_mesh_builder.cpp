@@ -15,6 +15,18 @@ namespace Folio {
 
 using namespace Folio::InkInternal;
 
+namespace {
+MeshTessellationParams g_tessellationParams{};
+} // namespace
+
+void InkMeshBuilder::SetTessellationParams(const MeshTessellationParams& params) noexcept {
+    g_tessellationParams = params;
+}
+
+const MeshTessellationParams& InkMeshBuilder::GetTessellationParams() noexcept {
+    return g_tessellationParams;
+}
+
 void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
                                     CapType capType,
                                     uint32_t color,
@@ -26,9 +38,10 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
     // Use centralized constant thresholds from InkingConfig
     constexpr float hairpinCosThreshold = InkingConfig::kDefaultHairpinCosThreshold;
     constexpr float hairpinMinRatio     = InkingConfig::kDefaultHairpinMinSegmentRadiusRatio;
+    const MeshTessellationParams tessParams = g_tessellationParams;
 
     // 1. Condition input points: prune submerged containment disks, micro-steps, and regularize radius
-    std::vector<StrokePoint> cleanPts = StrokeFilter::PreFilterPoints(points);
+    std::vector<StrokePoint> cleanPts = StrokeFilter::PreFilterPoints(points, tessParams.stationaryEnvelopment);
     StrokeFilter::RegularizeRadiusSlope(cleanPts);
 
     if (cleanPts.empty()) return;
@@ -218,12 +231,12 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
                 uint32_t nextRightSkirtIdx = addVertex(cleanPts[nextPtIdx].x - lastSeg.nx * (rNext + delta),
                                                        cleanPts[nextPtIdx].y - lastSeg.ny * (rNext + delta), skirtDistNext, rNext);
 
-                // Core quads
-                addCoreTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-                addCoreTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
+                // Core quads (consistent positive 2D winding matching caps and fans)
+                addCoreTriangle(curLeftIdx, nextCenterIdx, curCenterIdx);
+                addCoreTriangle(curLeftIdx, nextLeftIdx, nextCenterIdx);
 
-                addCoreTriangle(curCenterIdx, curRightIdx, nextRightIdx);
-                addCoreTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
+                addCoreTriangle(curCenterIdx, nextRightIdx, curRightIdx);
+                addCoreTriangle(curCenterIdx, nextCenterIdx, nextRightIdx);
 
                 // Skirt quads
                 addSkirtTriangle(curLeftIdx, curLeftSkirtIdx, nextLeftSkirtIdx);
@@ -269,7 +282,11 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
             double dot   = sIn.ux * sOut.ux + sIn.uy * sOut.uy;
             double turnAngle = std::atan2(std::abs(cross), dot);
 
-            if (turnAngle < 0.35) {
+            const double cornerThreshold = std::clamp(static_cast<double>(tessParams.cornerAngleThresholdRad), 0.05, 2.80);
+            const double minClamp = std::clamp(static_cast<double>(tessParams.miterMinClampRatio), 0.0, 1.0);
+            const double maxClamp = std::clamp(static_cast<double>(tessParams.miterMaxClampRatio), 1.0, 2.5);
+
+            if (turnAngle < cornerThreshold && dot > -0.65) {
                 // Gentle turn: continuous bisector miter with exterior skirts
                 double avgNx = sIn.nx + sOut.nx;
                 double avgNy = sIn.ny + sOut.ny;
@@ -277,26 +294,42 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
                 if (avgLen > 1e-6) { avgNx /= avgLen; avgNy /= avgLen; }
                 else { avgNx = sIn.nx; avgNy = sIn.ny; }
 
-                double miterScale = 1.0 / std::max(0.5, std::cos(turnAngle * 0.5));
-                miterScale = std::min(miterScale, 1.25);
+                double miterScale = 1.0 / std::max(0.25, std::cos(turnAngle * 0.5));
+                miterScale = std::clamp(miterScale, minClamp, maxClamp);
 
-                uint32_t nextLeftIdx   = addVertex(cleanPts[nextPtIdx].x + avgNx * rNext * miterScale,
-                                                   cleanPts[nextPtIdx].y + avgNy * rNext * miterScale, 1.0f, rNext);
+                bool leftIsInner = (cross < 0.0) || (cross == 0.0 && dot < 0.0);
+                double sinHalf = std::sqrt(std::max(0.0, (1.0 - dot) * 0.5));
+                double safeLimit = (std::min(sIn.len, sOut.len) * 0.5) / std::max(1e-4, sinHalf);
+
+                double outerDist = rNext * miterScale;
+                double innerDist = std::min(outerDist, std::max(rNext * minClamp, safeLimit * 0.85));
+                innerDist = std::min(innerDist, std::max(1e-4, safeLimit * 0.85));
+
+                double outerSkirtDist = outerDist + delta;
+                double innerSkirtDist = std::min(innerDist + delta, std::max(innerDist + 1e-3, safeLimit));
+
+                double leftDist       = leftIsInner ? innerDist : outerDist;
+                double rightDist      = leftIsInner ? outerDist : innerDist;
+                double leftSkirtDist  = leftIsInner ? innerSkirtDist : outerSkirtDist;
+                double rightSkirtDist = leftIsInner ? outerSkirtDist : innerSkirtDist;
+
+                uint32_t nextLeftIdx   = addVertex(cleanPts[nextPtIdx].x + avgNx * leftDist,
+                                                   cleanPts[nextPtIdx].y + avgNy * leftDist, 1.0f, rNext);
                 uint32_t nextCenterIdx = addVertex(cleanPts[nextPtIdx].x, cleanPts[nextPtIdx].y, 0.0f, rNext);
-                uint32_t nextRightIdx  = addVertex(cleanPts[nextPtIdx].x - avgNx * rNext * miterScale,
-                                                   cleanPts[nextPtIdx].y - avgNy * rNext * miterScale, 1.0f, rNext);
+                uint32_t nextRightIdx  = addVertex(cleanPts[nextPtIdx].x - avgNx * rightDist,
+                                                   cleanPts[nextPtIdx].y - avgNy * rightDist, 1.0f, rNext);
 
-                uint32_t nextLeftSkirtIdx  = addVertex(cleanPts[nextPtIdx].x + avgNx * (rNext * miterScale + delta),
-                                                       cleanPts[nextPtIdx].y + avgNy * (rNext * miterScale + delta), skirtDistNext, rNext);
-                uint32_t nextRightSkirtIdx = addVertex(cleanPts[nextPtIdx].x - avgNx * (rNext * miterScale + delta),
-                                                       cleanPts[nextPtIdx].y - avgNy * (rNext * miterScale + delta), skirtDistNext, rNext);
+                uint32_t nextLeftSkirtIdx  = addVertex(cleanPts[nextPtIdx].x + avgNx * leftSkirtDist,
+                                                       cleanPts[nextPtIdx].y + avgNy * leftSkirtDist, skirtDistNext, rNext);
+                uint32_t nextRightSkirtIdx = addVertex(cleanPts[nextPtIdx].x - avgNx * rightSkirtDist,
+                                                       cleanPts[nextPtIdx].y - avgNy * rightSkirtDist, skirtDistNext, rNext);
 
                 // Core quads
-                addCoreTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-                addCoreTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
+                addCoreTriangle(curLeftIdx, nextCenterIdx, curCenterIdx);
+                addCoreTriangle(curLeftIdx, nextLeftIdx, nextCenterIdx);
 
-                addCoreTriangle(curCenterIdx, curRightIdx, nextRightIdx);
-                addCoreTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
+                addCoreTriangle(curCenterIdx, nextRightIdx, curRightIdx);
+                addCoreTriangle(curCenterIdx, nextCenterIdx, nextRightIdx);
 
                 // Skirt quads
                 addSkirtTriangle(curLeftIdx, curLeftSkirtIdx, nextLeftSkirtIdx);
@@ -313,7 +346,7 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
                 continue;
             }
 
-            // Sharp turn (turnAngle >= 0.35 rad, dot >= -0.65):
+            // Sharp turn (turnAngle >= cornerThreshold or dot <= -0.65):
             bool leftIsInner = (cross < 0.0) || (cross == 0.0 && dot < 0.0);
             uint32_t nextCenterIdx = addVertex(cleanPts[nextPtIdx].x, cleanPts[nextPtIdx].y, 0.0f, rNext);
 
@@ -329,14 +362,15 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
             double innerMiterDist = rNext;
             if (dot < -0.65 || avgLen < 1e-4) {
                 // Acute hairpin turnaround: collapse inner miter distance to pivot cleanly on centerline
-                innerMiterDist = 0.0;
+                innerMiterDist = std::max(1e-4, rNext * minClamp);
             } else if (cosHalf > 1e-4) {
-                innerMiterDist = std::min(rNext / cosHalf, static_cast<double>(rNext));
+                double rawMiter = (rNext / cosHalf);
+                innerMiterDist = std::clamp(rawMiter, rNext * minClamp, rNext * maxClamp);
             }
-            innerMiterDist = std::min(innerMiterDist, std::max(0.0, safeLimit));
+            innerMiterDist = std::min(innerMiterDist, std::max(1e-4, safeLimit * 0.85));
 
             double innerSign = leftIsInner ? 1.0 : -1.0;
-            double innerSkirtDist = std::min(static_cast<double>(innerMiterDist + delta), safeLimit);
+            double innerSkirtDist = std::min(static_cast<double>(innerMiterDist + delta), std::max(innerMiterDist + 1e-3, safeLimit));
             uint32_t innerIdx = addVertex(cleanPts[nextPtIdx].x + innerSign * avgNx * innerMiterDist,
                                           cleanPts[nextPtIdx].y + innerSign * avgNy * innerMiterDist,
                                           1.0f, rNext);
@@ -354,29 +388,29 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
 
             if (leftIsInner) {
                 // Left Core & Skirt (Inner)
-                addCoreTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-                addCoreTriangle(curLeftIdx, nextCenterIdx, innerIdx);
+                addCoreTriangle(curLeftIdx, nextCenterIdx, curCenterIdx);
+                addCoreTriangle(curLeftIdx, innerIdx, nextCenterIdx);
 
                 addSkirtTriangle(curLeftIdx, curLeftSkirtIdx, innerSkirtIdx);
                 addSkirtTriangle(curLeftIdx, innerSkirtIdx, innerIdx);
 
                 // Right Core & Skirt (Outer incoming)
-                addCoreTriangle(curCenterIdx, curRightIdx, outerInIdx);
-                addCoreTriangle(curCenterIdx, outerInIdx, nextCenterIdx);
+                addCoreTriangle(curCenterIdx, outerInIdx, curRightIdx);
+                addCoreTriangle(curCenterIdx, nextCenterIdx, outerInIdx);
 
                 addSkirtTriangle(curRightIdx, outerInIdx, outerInSkirtIdx);
                 addSkirtTriangle(curRightIdx, outerInSkirtIdx, curRightSkirtIdx);
             } else {
                 // Left Core & Skirt (Outer incoming)
-                addCoreTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-                addCoreTriangle(curLeftIdx, nextCenterIdx, outerInIdx);
+                addCoreTriangle(curLeftIdx, nextCenterIdx, curCenterIdx);
+                addCoreTriangle(curLeftIdx, outerInIdx, nextCenterIdx);
 
                 addSkirtTriangle(curLeftIdx, curLeftSkirtIdx, outerInSkirtIdx);
                 addSkirtTriangle(curLeftIdx, outerInSkirtIdx, outerInIdx);
 
                 // Right Core & Skirt (Inner)
-                addCoreTriangle(curCenterIdx, curRightIdx, innerIdx);
-                addCoreTriangle(curCenterIdx, innerIdx, nextCenterIdx);
+                addCoreTriangle(curCenterIdx, innerIdx, curRightIdx);
+                addCoreTriangle(curCenterIdx, nextCenterIdx, innerIdx);
 
                 addSkirtTriangle(curRightIdx, innerIdx, innerSkirtIdx);
                 addSkirtTriangle(curRightIdx, innerSkirtIdx, curRightSkirtIdx);
@@ -589,11 +623,11 @@ void InkMeshBuilder::BuildSolidMesh(std::span<const StrokePoint> points,
                                                    static_cast<float>(sRE), rNext);
 
             // Connect core quads along segment
-            addCoreTriangle(curLeftIdx, curCenterIdx, nextCenterIdx);
-            addCoreTriangle(curLeftIdx, nextCenterIdx, nextLeftIdx);
+            addCoreTriangle(curLeftIdx, nextCenterIdx, curCenterIdx);
+            addCoreTriangle(curLeftIdx, nextLeftIdx, nextCenterIdx);
 
-            addCoreTriangle(curCenterIdx, curRightIdx, nextRightIdx);
-            addCoreTriangle(curCenterIdx, nextRightIdx, nextCenterIdx);
+            addCoreTriangle(curCenterIdx, nextRightIdx, curRightIdx);
+            addCoreTriangle(curCenterIdx, nextCenterIdx, nextRightIdx);
 
             // Connect skirt quads along segment
             addSkirtTriangle(curLeftIdx, curLeftSkirtIdx, nextLeftSkirtIdx);
@@ -865,8 +899,31 @@ void InkMeshBuilder::BuildStyledMesh(std::span<const StrokePoint> points,
         return;
     }
 
-    // Default fallback
+    // Textured pencil: solid geometry, with stylus pressure baked into vertex alpha so the
+    // fragment shader can modulate graphite grain density (light = sparse, firm = dense).
     BuildSolidMesh(points, capType, color, outMesh, scalePxPerMm);
+    if (pattern == StrokePattern::TexturedPencil && !outMesh.vertices.empty()) {
+        const uint32_t baseA = (color >> 24) & 0xFFu;
+        size_t ptr = 0;
+        for (auto& v : outMesh.vertices) {
+            // Vertices are emitted in stroke order: track nearest centerline point with a moving window.
+            const size_t lo = ptr > 2 ? ptr - 2 : 0;
+            const size_t hi = std::min(N - 1, ptr + 10);
+            double bestD = 1e30;
+            size_t best = ptr;
+            for (size_t i = lo; i <= hi; ++i) {
+                const double dx = v.x - points[i].x, dy = v.y - points[i].y;
+                const double d = dx * dx + dy * dy;
+                if (d < bestD) { bestD = d; best = i; }
+            }
+            ptr = best;
+            const float p = std::clamp(points[best].pressure, 0.0f, 1.0f);
+            const float strength = 0.30f + 0.70f * p;
+            const uint32_t a = static_cast<uint32_t>(std::round(static_cast<float>(baseA) * strength));
+            v.color = (v.color & 0x00FFFFFFu) | (a << 24);
+        }
+        return;
+    }
 }
 
 } // namespace Folio

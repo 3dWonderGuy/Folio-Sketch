@@ -5,7 +5,8 @@
 namespace Folio {
 namespace InkInternal {
 
-std::vector<StrokePoint> StrokeFilter::PreFilterPoints(std::span<const StrokePoint> pts) {
+std::vector<StrokePoint> StrokeFilter::PreFilterPoints(std::span<const StrokePoint> pts,
+                                                       bool stationaryEnvelopment) {
     std::vector<StrokePoint> cleanPts;
     if (pts.empty()) return cleanPts;
 
@@ -22,20 +23,26 @@ std::vector<StrokePoint> StrokeFilter::PreFilterPoints(std::span<const StrokePoi
         double d = std::hypot(p.x - prev.x, p.y - prev.y);
         double maxR = std::max(static_cast<double>(p.r), static_cast<double>(prev.r));
 
-        // 1a. Disk containment: new point engulfed by previous kept point
-        if (d + p.r <= prev.r + maxR * 0.05) {
+        if (stationaryEnvelopment) {
+            // 1a. Disk containment: new point engulfed by previous kept point
+            if (d + p.r <= prev.r + maxR * 0.05) {
+                prev.pressure = std::max(prev.pressure, p.pressure);
+                prev.r = std::max(prev.r, p.r);
+                continue;
+            }
+
+            // 1b. Disk containment: previous kept point engulfed by new point's larger disk
+            if (d + prev.r <= p.r + maxR * 0.05) {
+                if (cleanPts.size() == 1) {
+                    prev = p;
+                } else {
+                    cleanPts.back() = p;
+                }
+                continue;
+            }
+        } else if (d < 1e-5) {
             prev.pressure = std::max(prev.pressure, p.pressure);
             prev.r = std::max(prev.r, p.r);
-            continue;
-        }
-
-        // 1b. Disk containment: previous kept point engulfed by new point's larger disk
-        if (d + prev.r <= p.r + maxR * 0.05) {
-            if (cleanPts.size() == 1) {
-                prev = p;
-            } else {
-                cleanPts.back() = p;
-            }
             continue;
         }
 
