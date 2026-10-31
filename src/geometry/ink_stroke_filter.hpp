@@ -20,7 +20,8 @@ public:
      * @brief Pre-filters raw stroke points by eliminating submerged containment disks,
      *        enforcing radius-proportional minimum step separation, and pruning micro-jitter stubs.
      */
-    static std::vector<StrokePoint> PreFilterPoints(std::span<const StrokePoint> pts);
+    static std::vector<StrokePoint> PreFilterPoints(std::span<const StrokePoint> pts,
+                                                    bool stationaryEnvelopment = true);
 
     /**
      * @brief Regularizes radius rate-of-change across consecutive stroke points:

@@ -456,18 +456,30 @@ void InkEngine::UpdatePhysicsParams() {
 
     // Configure Google Ink Stroke Modeler physics parameters
     sm::StrokeModelParams params;
-    params.position_modeler_params.spring_mass_constant = m_config.google_spring_mass_constant;
-    params.position_modeler_params.drag_constant = m_config.google_drag_constant;
+    params.position_modeler_params.spring_mass_constant = std::max(1e-6f, m_config.google_spring_mass_constant);
+    params.position_modeler_params.drag_constant = std::max(1.0f, m_config.google_drag_constant);
 
     // Speed-based loop contraction mitigation:
     // Note: Google Ink's normal-ray projection (`ProjectAlongStrokeNormal`) snaps erratically across
     // opposing polyline segments during high-speed acute zigzag reversals, causing staircase jumps.
-    // Keep position purely spring-modeled (`is_enabled = false`) for smooth, artifact-free curves.
+    // Keep position purely spring-modeled (`is_enabled = false`) by default for smooth, artifact-free curves,
+    // while allowing diagnostic override from m_config.
     auto& loopParams = params.position_modeler_params.loop_contraction_mitigation_params;
-    loopParams.is_enabled = false;
+    loopParams.is_enabled = m_config.google_loop_mitigation_enable;
+    if (loopParams.is_enabled) {
+        loopParams.speed_lower_bound = std::max(0.0f, m_config.google_loop_speed_lower_bound);
+        loopParams.speed_upper_bound = std::max(loopParams.speed_lower_bound, m_config.google_loop_speed_upper_bound);
+        loopParams.interpolation_strength_at_speed_lower_bound =
+            std::clamp(m_config.google_loop_strength_at_lower_speed, 0.0f, 1.0f);
+        loopParams.interpolation_strength_at_speed_upper_bound =
+            std::clamp(m_config.google_loop_strength_at_upper_speed, 0.0f,
+                       loopParams.interpolation_strength_at_speed_lower_bound);
+        loopParams.min_speed_sampling_window = sm::Duration(std::max(0.0f, m_config.google_loop_min_speed_window_s));
+    }
 
-    // Stylus normal projection (disabled to use closest-point projection without normal-ray snapping)
-    params.stylus_state_modeler_params.use_stroke_normal_projection = false;
+    // Stylus normal projection (Google validation requires this to be true when loop mitigation is enabled)
+    params.stylus_state_modeler_params.use_stroke_normal_projection =
+        m_config.google_use_stroke_normal_projection || m_config.google_loop_mitigation_enable;
 
     // Wobble smoother (hand tremor filter)
     params.wobble_smoother_params.is_enabled = m_config.google_wobble_enable;
@@ -487,8 +499,35 @@ void InkEngine::UpdatePhysicsParams() {
             ? std::clamp(static_cast<double>(m_config.google_max_estimated_angle_rad), 0.005, 3.10)
             : -1.0;
 
+    // Forward Predictor configuration (Kalman lookahead vs StrokeEnd vs Disabled)
+    if (!m_config.google_enable_prediction) {
+        params.prediction_params = sm::DisabledPredictorParams{};
+    } else if (m_config.google_prediction_duration_ms > 0.0f) {
+        sm::KalmanPredictorParams kalman;
+        kalman.process_noise = 0.067;
+        kalman.measurement_noise = 0.1;
+        kalman.min_stable_iteration = 4;
+        kalman.max_time_samples = 20;
+        kalman.min_catchup_velocity = 0.01f;
+        kalman.acceleration_weight = 0.5f;
+        kalman.jerk_weight = 0.1f;
+        kalman.prediction_interval = sm::Duration(std::max(0.001f, m_config.google_prediction_duration_ms * 0.001f));
+        kalman.confidence_params.desired_number_of_samples = 20;
+        kalman.confidence_params.max_estimation_distance = 1.5f;
+        kalman.confidence_params.min_travel_speed = 1.0f;
+        kalman.confidence_params.max_travel_speed = 25.0f;
+        kalman.confidence_params.max_linear_deviation = 5.0f;
+        kalman.confidence_params.baseline_linearity_confidence = 0.4f;
+        params.prediction_params = kalman;
+    } else {
+        params.prediction_params = sm::StrokeEndPredictorParams{};
+    }
+
     // Initialize/re-initialize physics parameters
-    (void)m_googleModeler->Reset(params);
+    if (!m_googleModeler->Reset(params).ok()) {
+        params.prediction_params = sm::StrokeEndPredictorParams{};
+        (void)m_googleModeler->Reset(params);
+    }
 }
 
 } // namespace Folio

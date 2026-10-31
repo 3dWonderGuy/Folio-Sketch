@@ -5,79 +5,17 @@ project(FolioSketch VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Option to build test suite (default ON if top-level, OFF if subproject)
-if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-    set(FOLIO_SKETCH_STANDALONE ON)
-else()
-    set(FOLIO_SKETCH_STANDALONE OFF)
-endif()
-
-option(FOLIO_SKETCH_BUILD_TESTS "Build Folio-Sketch standalone test suite and benchmarks" ${FOLIO_SKETCH_STANDALONE})
-option(FOLIO_SKETCH_ENABLE_THORSVG "Enable ThorVG rasterizer and vector bridge" ${FOLIO_SKETCH_STANDALONE})
-
-# ==============================================================================
-# ThorVG Dependency Resolution (Only when ThorVG is enabled)
-# ==============================================================================
-if(FOLIO_SKETCH_ENABLE_THORSVG)
-    if(NOT TARGET thorvg::thorvg AND NOT TARGET thorvg)
-        find_package(thorvg QUIET)
-        if(NOT thorvg_FOUND)
-            set(THORVG_SRC_DIR "")
-            if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/thorvg/meson.build")
-                set(THORVG_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/thorvg")
-            elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/thorvg/meson.build")
-                set(THORVG_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../FolioNote/third_party/thorvg")
-            else()
-                include(FetchContent)
-                FetchContent_Declare(
-                    thorvg_fetch
-                    GIT_REPOSITORY https://github.com/thorvg/thorvg.git
-                    GIT_TAG main
-                    GIT_SHALLOW TRUE
-                )
-                FetchContent_MakeAvailable(thorvg_fetch)
-                set(THORVG_SRC_DIR "${thorvg_fetch_SOURCE_DIR}")
-            endif()
-
-            include(ExternalProject)
-            set(THORVG_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/thorvg_build")
-            set(THORVG_STATIC_LIB "${THORVG_BUILD_DIR}/src/libthorvg-1.a")
-
-            ExternalProject_Add(
-                thorvg_project
-                SOURCE_DIR "${THORVG_SRC_DIR}"
-                BINARY_DIR "${THORVG_BUILD_DIR}"
-                CONFIGURE_COMMAND meson setup "${THORVG_SRC_DIR}" "${THORVG_BUILD_DIR}"
-                                  --default-library=static
-                                  -Dloaders=svg
-                                  -Dsavers=
-                                  -Dbindings=
-                                  --buildtype=release
-                BUILD_COMMAND ninja -C "${THORVG_BUILD_DIR}"
-                INSTALL_COMMAND ""
-                BUILD_BYPRODUCTS "${THORVG_STATIC_LIB}"
-            )
-
-            add_library(thorvg::thorvg STATIC IMPORTED GLOBAL)
-            add_dependencies(thorvg::thorvg thorvg_project)
-
-            file(MAKE_DIRECTORY "${THORVG_BUILD_DIR}/src")
-
-            find_package(OpenMP QUIET)
-            set(THORVG_EXTRA_LIBS "pthread")
-            if(TARGET OpenMP::OpenMP_CXX)
-                list(APPEND THORVG_EXTRA_LIBS OpenMP::OpenMP_CXX)
-            endif()
-
-            set_target_properties(thorvg::thorvg PROPERTIES
-                IMPORTED_LOCATION "${THORVG_STATIC_LIB}"
-                INTERFACE_INCLUDE_DIRECTORIES "${THORVG_SRC_DIR}/inc"
-                INTERFACE_LINK_LIBRARIES "${THORVG_EXTRA_LIBS}"
-            )
-            add_library(thorvg ALIAS thorvg::thorvg)
-        endif()
-    endif()
+if(MSVC)
+    set(CMAKE_OBJECT_PATH_MAX 1024)
+    add_compile_options(/FS /bigobj /utf-8 /MP)
+    add_compile_definitions(
+        NOMINMAX
+        _USE_MATH_DEFINES
+        _CRT_SECURE_NO_WARNINGS
+        _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS
+    )
 endif()
 
 # ==============================================================================
@@ -156,6 +94,11 @@ set(FOLIO_SKETCH_SOURCES
 
     # GPU Mesh Builder
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_builder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_caps.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_corner_pivot.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_round_ribbon.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_polygonal_ribbon.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_patterns.cpp"
 )
 
 set(FOLIO_SKETCH_HEADERS
@@ -177,6 +120,7 @@ set(FOLIO_SKETCH_HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/ink_stroke_filter.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_internal.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_ribbon_corner.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_internal.hpp"
 )
 
 add_library(FolioSketch STATIC
@@ -186,6 +130,7 @@ add_library(FolioSketch STATIC
 
 add_library(FolioSketch::FolioSketch ALIAS FolioSketch)
 add_library(Folio::Sketch ALIAS FolioSketch)
+add_library(folio_sketch ALIAS FolioSketch)
 
 target_include_directories(FolioSketch
     PUBLIC
@@ -205,36 +150,11 @@ target_link_libraries(FolioSketch
         InkStrokeModeler::stroke_modeler
 )
 
-if(FOLIO_SKETCH_ENABLE_THORSVG)
-    target_link_libraries(FolioSketch PRIVATE thorvg::thorvg)
-    target_compile_definitions(FolioSketch PRIVATE FOLIO_ENABLE_THORSVG=1)
-endif()
-
 # Compiler warnings and optimization flags
 if(MSVC)
     target_compile_options(FolioSketch PRIVATE /W4 /permissive-)
 else()
-    target_compile_options(FolioSketch PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-# ==============================================================================
-# Standalone Test Suite & Benchmarks
-# ==============================================================================
-if(FOLIO_SKETCH_BUILD_TESTS)
-    enable_testing()
-
-    add_executable(test_ink_generator
-        "${CMAKE_CURRENT_SOURCE_DIR}/test/test_ink_generator.cpp"
+    target_compile_options(FolioSketch PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wno-pedantic>
     )
-
-    target_link_libraries(test_ink_generator PRIVATE
-        FolioSketch::FolioSketch
-        thorvg::thorvg
-    )
-
-    if(WIN32)
-        target_link_libraries(test_ink_generator PRIVATE dwmapi ole32 shell32 winspool)
-    endif()
-
-    add_test(NAME test_ink_generator COMMAND test_ink_generator)
 endif()

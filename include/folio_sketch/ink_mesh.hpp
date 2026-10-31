@@ -14,6 +14,17 @@
 namespace Folio {
 
 /**
+ * @struct MeshTessellationParams
+ * @brief Live-tunable geometric parameters for GPU triangle-strip and corner-fan tessellation.
+ */
+struct MeshTessellationParams {
+    float cornerAngleThresholdRad = 0.35f;   ///< Turn angle threshold (rad) for radial bevel fan vs continuous miter
+    float miterMinClampRatio      = 0.0f;    ///< Minimum inner miter clamp multiplier (0.0 .. 1.0x)
+    float miterMaxClampRatio      = 1.25f;   ///< Maximum miter clamp multiplier (1.0 .. 2.5x)
+    bool  stationaryEnvelopment   = true;    ///< Merge consecutive points where ds <= |dr|
+};
+
+/**
  * @class InkMeshBuilder
  * @brief High-performance GPU mesh builder for variable-width strokes.
  *
@@ -23,6 +34,9 @@ namespace Folio {
  */
 class InkMeshBuilder {
 public:
+    static void SetTessellationParams(const MeshTessellationParams& params) noexcept;
+    [[nodiscard]] static const MeshTessellationParams& GetTessellationParams() noexcept;
+
     /**
      * @brief Builds an indexed triangle mesh for a solid variable-width stroke.
      *
