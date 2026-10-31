@@ -14,6 +14,7 @@
  */
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 #if defined(__ANDROID__)
 #include <GLES3/gl3.h>
 #else
@@ -30,9 +31,14 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 
 #include "folio_sketch/folio_sketch.hpp"
+#include "geometry/ink_stroke_filter.hpp"
+#include "geometry/ink_geometry_utils.hpp"
 #include "debug/raw_sensor_layer.hpp"
 #include "debug/modeler_inspector.hpp"
 #include "debug/width_inspector.hpp"
@@ -230,9 +236,241 @@ void DrawBackgroundGrid(ImDrawList* drawList, const CanvasTransform& transform, 
     }
 }
 
+void DumpStrokeDiagnostics(const char* label,
+                           const std::vector<RawInputSample>& rawSamples,
+                           const std::vector<StrokePoint>& modeledPts,
+                           const InkMesh& mesh,
+                           std::ostream& out) {
+    out << "=== STROKE DIAGNOSTICS: " << label << " ===\n";
+    out << "Raw samples: " << rawSamples.size()
+        << " | Modeled pts: " << modeledPts.size()
+        << " | Mesh vertices: " << mesh.vertices.size()
+        << " | Mesh tris: " << (mesh.indices.size() / 3)
+        << " (core: " << (mesh.coreIndexCount / 3) << ")\n";
+
+    const auto& tessParams = InkMeshBuilder::GetTessellationParams();
+    out << "TessParams: cornerAngleThresholdRad=" << tessParams.cornerAngleThresholdRad
+        << " (" << (tessParams.cornerAngleThresholdRad * 180.0 / 3.14159265) << " deg)"
+        << " miterMax=" << tessParams.miterMaxClampRatio
+        << " statEnv=" << tessParams.stationaryEnvelopment << "\n";
+
+    auto cleanPts = InkInternal::StrokeFilter::PreFilterPoints(modeledPts, tessParams.stationaryEnvelopment);
+    InkInternal::StrokeFilter::RegularizeRadiusSlope(cleanPts);
+    auto segs = InkInternal::ComputeSegments(cleanPts);
+    out << "CleanPts: " << cleanPts.size() << " | Segs: " << segs.size() << "\n";
+
+    for (size_t i = 0; i < cleanPts.size(); ++i) {
+        double turnDeg = 0.0;
+        double dot = 1.0;
+        double cross = 0.0;
+        if (i > 0 && i + 1 < cleanPts.size() && i < segs.size()) {
+            cross = segs[i - 1].ux * segs[i].uy - segs[i - 1].uy * segs[i].ux;
+            dot   = segs[i - 1].ux * segs[i].ux + segs[i - 1].uy * segs[i].uy;
+            turnDeg = std::atan2(std::abs(cross), dot) * (180.0 / 3.14159265358979323846);
+        }
+        double segLen = (i < segs.size()) ? segs[i].len : 0.0;
+        if (turnDeg >= 5.0 || i < 3 || i + 3 >= cleanPts.size()) {
+            out << "  cleanPt[" << i << "] = (" << std::fixed << std::setprecision(3)
+                << cleanPts[i].x << ", " << cleanPts[i].y << ") r=" << cleanPts[i].r
+                << " segLen=" << segLen << " turnDeg=" << turnDeg
+                << (cross < 0.0 ? " [LEFT-IN]" : (cross > 0.0 ? " [RIGHT-IN]" : ""))
+                << (dot < InkingConfig::kDefaultHairpinCosThreshold ? " [HAIRPIN-SPLIT!]" : "")
+                << "\n";
+        }
+    }
+
+    // Print core ribbon triangles around ALL sharp turn vertices (turnDeg >= 20)
+    for (size_t k = 1; k + 1 < cleanPts.size() && k < segs.size(); ++k) {
+        double cross = segs[k - 1].ux * segs[k].uy - segs[k - 1].uy * segs[k].ux;
+        double dot   = segs[k - 1].ux * segs[k].ux + segs[k - 1].uy * segs[k].uy;
+        double turnDeg = std::atan2(std::abs(cross), dot) * (180.0 / 3.14159265358979323846);
+        if (turnDeg < 20.0) continue;
+        // Skip if adjacent to previous printed vertex
+        if (k > 1) {
+            double pCross = segs[k - 2].ux * segs[k - 1].uy - segs[k - 2].uy * segs[k - 1].ux;
+            double pDot   = segs[k - 2].ux * segs[k - 1].ux + segs[k - 2].uy * segs[k - 1].uy;
+            if (std::atan2(std::abs(pCross), pDot) * (180.0 / 3.14159265358979323846) >= 20.0) continue;
+        }
+        double cx = cleanPts[k].x;
+        double cy = cleanPts[k].y;
+        double searchR = std::max(15.0, cleanPts[k].r * 2.5);
+        out << "  [Corner neighborhood around cleanPt[" << k << "] = (" << cx << ", " << cy << ") turnDeg=" << turnDeg << "]:\n";
+        for (size_t i = 0; i + 2 < mesh.coreIndexCount; i += 3) {
+            uint32_t i0 = mesh.indices[i], i1 = mesh.indices[i + 1], i2 = mesh.indices[i + 2];
+            const auto& v0 = mesh.vertices[i0];
+            const auto& v1 = mesh.vertices[i1];
+            const auto& v2 = mesh.vertices[i2];
+            if (std::hypot(v0.x - cx, v0.y - cy) <= searchR ||
+                std::hypot(v1.x - cx, v1.y - cy) <= searchR ||
+                std::hypot(v2.x - cx, v2.y - cy) <= searchR) {
+                int centerCount = (v0.edgeDist == 0.0f) + (v1.edgeDist == 0.0f) + (v2.edgeDist == 0.0f);
+                if (centerCount >= 2) {
+                    out << "    coreTri#" << (i / 3) << " v(" << i0 << "," << i1 << "," << i2 << "): "
+                        << "(" << v0.x << "," << v0.y << " ed=" << v0.edgeDist << ") - "
+                        << "(" << v1.x << "," << v1.y << " ed=" << v1.edgeDist << ") - "
+                        << "(" << v2.x << "," << v2.y << " ed=" << v2.edgeDist << ")\n";
+                }
+            }
+        }
+    }
+
+    size_t invCore = 0, invSkirt = 0;
+    for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+        uint32_t i0 = mesh.indices[i];
+        uint32_t i1 = mesh.indices[i + 1];
+        uint32_t i2 = mesh.indices[i + 2];
+        const auto& v0 = mesh.vertices[i0];
+        const auto& v1 = mesh.vertices[i1];
+        const auto& v2 = mesh.vertices[i2];
+        double area = 0.5 * ((static_cast<double>(v1.x) - v0.x) * (static_cast<double>(v2.y) - v0.y) -
+                             (static_cast<double>(v1.y) - v0.y) * (static_cast<double>(v2.x) - v0.x));
+        if (area <= 0.0) {
+            bool isCore = (i < mesh.coreIndexCount);
+            if (isCore) ++invCore; else ++invSkirt;
+            if (invCore + invSkirt <= 15) {
+                out << "  [INVERTED " << (isCore ? "CORE" : "SKIRT") << " TRI #" << (i / 3)
+                    << "] area=" << std::scientific << area << std::fixed
+                    << " v(" << i0 << "," << i1 << "," << i2 << "): "
+                    << "(" << v0.x << "," << v0.y << " ed=" << v0.edgeDist << ") -> "
+                    << "(" << v1.x << "," << v1.y << " ed=" << v1.edgeDist << ") -> "
+                    << "(" << v2.x << "," << v2.y << " ed=" << v2.edgeDist << ")\n";
+            }
+        }
+    }
+    out << "TOTAL INVERTED: " << (invCore + invSkirt)
+        << " (core=" << invCore << ", skirt=" << invSkirt << ")\n\n";
+}
+
+int RunHeadlessDiagnostics() {
+    InkEngine engine;
+    GeometryInspector geomInspector; // Also runs SyncMeshBuilderParams(defaultCfg) just like GUI!
+    StrokeStyle style;
+    style.baseWidth   = 8.0f;
+    style.capType     = CapType::Round;
+    style.pattern     = StrokePattern::Solid;
+    style.color       = ColorRgba(65, 165, 255, 255);
+    style.usePressure = true;
+
+    auto runCornerTest = [&](const char* name, double angleDeg, double cornerPauseSteps) {
+        std::vector<RawInputSample> samples;
+        double t = 0.0;
+        double dt = 0.00831; // 120 Hz like user's screenshot
+        double x = 100.0, y = 200.0;
+        // Horizontal leg going slightly up-right (-8 deg, like screenshot)
+        double a1 = -8.0 * 3.14159265358979323846 / 180.0;
+        for (int i = 0; i < 15; ++i) {
+            double step = (i >= 12) ? 2.5 : 8.0;
+            x += step * std::cos(a1);
+            y += step * std::sin(a1);
+            samples.push_back({ static_cast<float>(x), static_cast<float>(y), 0.65f, 0.0f, t });
+            t += dt;
+        }
+        for (int p = 0; p < cornerPauseSteps; ++p) {
+            x += 0.4 * std::cos(a1);
+            y += 0.4 * std::sin(a1);
+            samples.push_back({ static_cast<float>(x), static_cast<float>(y), 0.65f, 0.0f, t });
+            t += dt;
+        }
+        // Second leg turning down by angleDeg
+        double a2 = a1 + angleDeg * 3.14159265358979323846 / 180.0;
+        for (int i = 0; i < 15; ++i) {
+            double step = (i < 3) ? 2.5 : 8.0;
+            x += step * std::cos(a2);
+            y += step * std::sin(a2);
+            samples.push_back({ static_cast<float>(x), static_cast<float>(y), 0.65f, 0.0f, t });
+            t += dt;
+        }
+        samples.back().pressure = 0.0f;
+
+        FinishedStrokeData finished;
+        ReplayRawSamplesThroughEngine(engine, samples, style, 3.7795f, finished);
+        DumpStrokeDiagnostics(name, samples, finished.modeledPoints, finished.mesh, std::cout);
+    };
+
+    runCornerTest("Corner 90 deg (fast)", 90.0, 0);
+    runCornerTest("Corner 90 deg (with 2 slow corner samples)", 90.0, 2);
+    runCornerTest("Corner 90 deg (sharp stop-and-turn, 5 slow corner samples)", 90.0, 5);
+    runCornerTest("Corner 96 deg (slightly acute L-corner, fast)", 96.0, 0);
+    runCornerTest("Corner 96 deg (with 2 slow corner samples)", 96.0, 2);
+    runCornerTest("Corner 101 deg (sharp stop-and-turn, 5 slow corner samples)", 101.5, 5);
+    runCornerTest("Corner 110 deg (acute corner)", 110.0, 1);
+    runCornerTest("Corner 122 deg (sharp stop-and-turn, 5 slow corner samples)", 121.8, 5);
+    runCornerTest("Corner 135 deg (sharp V-corner)", 135.0, 1);
+    runCornerTest("Corner 165 deg (hairpin reversal)", 165.0, 1);
+
+    // Multi-corner Zig-Zag + S-curve + Loop stress test
+    {
+        std::vector<RawInputSample> samples;
+        double t = 0.0, dt = 0.00831;
+        auto addSeg = [&](double x0, double y0, double x1, double y1, int steps) {
+            for (int i = 0; i < steps; ++i) {
+                double u = static_cast<double>(i) / steps;
+                samples.push_back({ static_cast<float>(x0 + (x1 - x0) * u),
+                                    static_cast<float>(y0 + (y1 - y0) * u), 0.7f, 0.0f, t });
+                t += dt;
+            }
+        };
+        addSeg(100, 100, 220, 100, 15);
+        addSeg(220, 100, 120, 180, 15);
+        addSeg(120, 180, 240, 220, 15);
+        addSeg(240, 220, 240, 110, 15);
+        addSeg(240, 110, 340, 110, 15);
+        addSeg(340, 110, 340, 260, 15);
+        samples.back().pressure = 0.0f;
+        FinishedStrokeData finished;
+        ReplayRawSamplesThroughEngine(engine, samples, style, 3.7795f, finished);
+        DumpStrokeDiagnostics("Multi-corner ZigZag + Box", samples, finished.modeledPoints, finished.mesh, std::cout);
+    }
+
+    // Also test repro114
+    {
+        StrokeScrubber scrubber;
+        std::vector<RawInputSample> raw114;
+        scrubber.LoadRepro114(style, raw114, nullptr);
+        auto slice = scrubber.GetActiveModeledSlice();
+        std::vector<StrokePoint> pts(slice.begin(), slice.end());
+        DumpStrokeDiagnostics("repro114 (slice 125)", raw114, pts, scrubber.GetScrubbedMesh(), std::cout);
+    }
+
+    // Exact 39-point stroke from user's GUI dump: ~180 deg U-turn with soft curve at end
+    {
+        const double coords[39][2] = {
+            {1302.957, 450.944}, {1304.132, 452.301}, {1304.726, 453.921}, {1305.060, 455.489},
+            {1305.243, 457.246}, {1305.260, 459.029}, {1305.245, 460.736}, {1305.239, 462.369},
+            {1305.239, 464.259}, {1305.273, 466.094}, {1305.353, 467.730}, {1305.485, 469.589},
+            {1305.712, 471.532}, {1306.024, 473.544}, {1306.472, 475.826}, {1306.795, 477.417},
+            {1307.253, 479.663}, {1307.674, 481.643}, {1308.026, 483.328}, {1308.423, 485.147},
+            {1308.863, 486.908}, {1309.295, 488.559}, {1309.775, 490.322}, {1310.266, 492.084},
+            {1310.715, 493.703}, {1311.184, 495.278}, {1311.797, 496.823}, {1312.965, 495.659},
+            {1313.081, 494.048}, {1313.078, 492.409}, {1313.078, 490.738}, {1312.957, 489.095},
+            {1312.962, 487.476}, {1312.962, 485.866}, {1312.962, 484.237}, {1312.962, 482.582},
+            {1313.146, 480.915}, {1313.507, 479.347}, {1315.110, 477.273}
+        };
+        std::vector<RawInputSample> rawDummy;
+        std::vector<StrokePoint> pts;
+        for (int i = 0; i < 39; ++i) {
+            StrokePoint sp{};
+            sp.x = static_cast<float>(coords[i][0]);
+            sp.y = static_cast<float>(coords[i][1]);
+            sp.r = 4.574f;
+            pts.push_back(sp);
+        }
+        InkMesh mesh;
+        InkMeshBuilder::BuildSolidMesh(pts, CapType::Round, 0xFF41A5FFu, mesh, 3.7795f);
+        DumpStrokeDiagnostics("User 180-deg U-turn with soft curve at end", rawDummy, pts, mesh, std::cout);
+    }
+
+    return 0;
+}
+
 } // namespace
 
-int main(int /*argc*/, char* /*argv*/[]) {
+int main(int argc, char* argv[]) {
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--diagnose") == 0) {
+            return RunHeadlessDiagnostics();
+        }
+    }
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::cerr << "[folio_ink_inspector] SDL_Init failed: " << SDL_GetError() << std::endl;
         return 1;
@@ -381,6 +619,16 @@ int main(int /*argc*/, char* /*argv*/[]) {
                         // Pen/Mouse Up -> Finish stroke
                         lastFinishedStroke = engine.FinishStroke();
                         lastRawSamples = rawSensorHud.GetActiveOrLastStroke();
+                        {
+                            std::ofstream dbgFile("/tmp/folio_stroke_debug.txt", std::ios::out | std::ios::trunc);
+                            if (dbgFile.is_open()) {
+                                DumpStrokeDiagnostics("Last User GUI Stroke",
+                                                      lastRawSamples,
+                                                      lastFinishedStroke.modeledPoints,
+                                                      lastFinishedStroke.mesh,
+                                                      dbgFile);
+                            }
+                        }
                         if (strokeScrubber.IsAutoFreezeOnLift() && !lastFinishedStroke.modeledPoints.empty()) {
                             strokeScrubber.FreezeStroke(lastRawSamples,
                                                         lastFinishedStroke.modeledPoints,
@@ -447,6 +695,16 @@ int main(int /*argc*/, char* /*argv*/[]) {
                 dirtyFrames = 2;
             }
             ImGui::SameLine();
+            if (ImGui::Button("Reset to Raw-Only")) {
+                modelerInspector.ResetOverlays();
+                widthInspector.SetShowRadiusDiscs(false);
+                geometryInspector.ResetView();
+                strokeScrubber.Unfreeze();
+                strokeScrubber.SetAutoFreezeOnLift(false);
+                rawSensorHud.SetShowCrosshairs(true);
+                dirtyFrames = 2;
+            }
+            ImGui::SameLine();
             ImGui::Text("Zoom: %.2fx", viewport.zoom);
 
             float col4[4] = {
@@ -467,99 +725,173 @@ int main(int /*argc*/, char* /*argv*/[]) {
                 dirtyFrames = 2;
             }
 
-            // -----------------------------------------------------------------
-            // Step 1: Raw Sensor HUD & Input Capture
-            // -----------------------------------------------------------------
-            if (ImGui::CollapsingHeader("Step 1: Raw Sensor HUD & Input Capture", ImGuiTreeNodeFlags_DefaultOpen)) {
-                if (rawSensorHud.RenderControls(strokeStyle.baseWidth * 0.5f)) {
-                    dirtyFrames = 2;
+            // Quick Run / Activate Step Buttons Bar
+            ImGui::SeparatorText("Quick Step Activation");
+            if (ImGui::Button("Run Modeler")) {
+                if (!lastRawSamples.empty()) {
+                    ReplayRawSamplesThroughEngine(engine, lastRawSamples, strokeStyle, viewport.zoom, lastFinishedStroke);
+                    if (strokeScrubber.IsFrozen()) {
+                        strokeScrubber.FreezeStroke(lastRawSamples, lastFinishedStroke.modeledPoints, strokeStyle, viewport.zoom);
+                    }
                 }
+                modelerInspector.SetShowModeledCenterline(true);
+                modelerInspector.SetShowRawPoints(true);
+                modelerInspector.SetShowKalmanSpine(true);
+                dirtyFrames = 2;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Show Widths")) {
+                widthInspector.SetShowRadiusDiscs(true);
+                dirtyFrames = 2;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Run Mesh")) {
+                geometryInspector.SetEnabled(true);
+                geometryInspector.SetViewMode(GeometryViewMode::SolidPlusWireframe);
+                if (strokeScrubber.IsFrozen()) {
+                    strokeScrubber.Retessellate(strokeStyle, viewport.zoom);
+                } else if (!lastFinishedStroke.modeledPoints.empty()) {
+                    lastFinishedStroke.outlinePath = InkEngine::BuildStrokeOutline(
+                        lastFinishedStroke.modeledPoints, strokeStyle.capType, strokeStyle.pattern);
+                    InkEngine::BuildStrokeMesh(
+                        lastFinishedStroke.modeledPoints, strokeStyle.capType,
+                        PackGpuColor(strokeStyle.color), lastFinishedStroke.mesh,
+                        viewport.zoom, strokeStyle.pattern);
+                }
+                dirtyFrames = 2;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Show Wireframe")) {
+                geometryInspector.SetEnabled(true);
+                geometryInspector.SetViewMode(GeometryViewMode::WireframeOnly);
+                dirtyFrames = 2;
             }
 
+            ImGui::Spacing();
+
             // -----------------------------------------------------------------
-            // Step 2: Google Stroke Modeler Inspector
+            // Tab-Based Navigation: Stages isolated into clean submenu tabs
             // -----------------------------------------------------------------
-            if (ImGui::CollapsingHeader("Step 2: Google Stroke Modeler Inspector", ImGuiTreeNodeFlags_DefaultOpen)) {
-                if (modelerInspector.RenderUI(config)) {
-                    engine.UpdatePhysicsParams();
-                    // Re-run raw samples through Google Stroke Modeler if we have captured raw samples
-                    if (!lastRawSamples.empty() && !engine.IsStrokeActive()) {
-                        ReplayRawSamplesThroughEngine(engine, lastRawSamples, strokeStyle, viewport.zoom, lastFinishedStroke);
-                        if (strokeScrubber.IsFrozen()) {
-                            strokeScrubber.FreezeStroke(lastRawSamples, lastFinishedStroke.modeledPoints,
-                                                        strokeStyle, viewport.zoom);
+            if (ImGui::BeginTabBar("InkingPipelineTabBar", ImGuiTabBarFlags_None)) {
+                // TAB 1: Raw Sensor & Telemetry
+                if (ImGui::BeginTabItem("1. Raw Sensor")) {
+                    if (rawSensorHud.RenderControls(strokeStyle.baseWidth * 0.5f)) {
+                        dirtyFrames = 2;
+                    }
+                    ImGui::EndTabItem();
+                }
+
+                // TAB 2: Modeler & Centerline Physics
+                if (ImGui::BeginTabItem("2. Modeler (Physics)")) {
+                    if (ImGui::Button("Re-Run Modeler on Captured Samples")) {
+                        if (!lastRawSamples.empty()) {
+                            ReplayRawSamplesThroughEngine(engine, lastRawSamples, strokeStyle, viewport.zoom, lastFinishedStroke);
+                            if (strokeScrubber.IsFrozen()) {
+                                strokeScrubber.FreezeStroke(lastRawSamples, lastFinishedStroke.modeledPoints, strokeStyle, viewport.zoom);
+                            }
                         }
+                        modelerInspector.SetShowModeledCenterline(true);
+                        dirtyFrames = 2;
                     }
-                    dirtyFrames = 2;
-                }
-            }
 
-            // -----------------------------------------------------------------
-            // Step 3: Width, Pressure & Velocity Evaluator Panel
-            // -----------------------------------------------------------------
-            std::span<const StrokePoint> ptsForPlot =
-                strokeScrubber.IsFrozen()
-                    ? strokeScrubber.GetActiveModeledSlice()
-                    : (engine.IsStrokeActive()
-                           ? std::span<const StrokePoint>(engine.GetLiveModeledPoints())
-                           : std::span<const StrokePoint>(lastFinishedStroke.modeledPoints));
-
-            if (ImGui::CollapsingHeader("Step 3: Width, Pressure & Velocity Evaluator", ImGuiTreeNodeFlags_DefaultOpen)) {
-                if (widthInspector.RenderUI(config, strokeStyle, ptsForPlot)) {
-                    engine.SetConfig(config);
-                    if (strokeScrubber.IsFrozen()) {
-                        WidthInspector::ReevaluateRadii(strokeScrubber.GetMutableFrozenPoints(),
-                                                        config, strokeStyle, viewport.zoom);
-                        strokeScrubber.Retessellate(strokeStyle, viewport.zoom);
-                    } else if (!lastFinishedStroke.modeledPoints.empty()) {
-                        WidthInspector::ReevaluateRadii(lastFinishedStroke.modeledPoints,
-                                                        config, strokeStyle, viewport.zoom);
-                        lastFinishedStroke.outlinePath = InkEngine::BuildStrokeOutline(
-                            lastFinishedStroke.modeledPoints, strokeStyle.capType, strokeStyle.pattern);
-                        InkEngine::BuildStrokeMesh(
-                            lastFinishedStroke.modeledPoints, strokeStyle.capType,
-                            PackGpuColor(strokeStyle.color), lastFinishedStroke.mesh,
-                            viewport.zoom, strokeStyle.pattern);
+                    if (modelerInspector.RenderUI(config)) {
+                        engine.UpdatePhysicsParams();
+                        if (!lastRawSamples.empty() && !engine.IsStrokeActive()) {
+                            ReplayRawSamplesThroughEngine(engine, lastRawSamples, strokeStyle, viewport.zoom, lastFinishedStroke);
+                            if (strokeScrubber.IsFrozen()) {
+                                strokeScrubber.FreezeStroke(lastRawSamples, lastFinishedStroke.modeledPoints, strokeStyle, viewport.zoom);
+                            }
+                        }
+                        dirtyFrames = 2;
                     }
-                    dirtyFrames = 2;
+                    ImGui::EndTabItem();
                 }
-            }
 
-            // -----------------------------------------------------------------
-            // Step 4: Geometry Tessellator vs. Outline Polygon
-            // -----------------------------------------------------------------
-            if (ImGui::CollapsingHeader("Step 4: Geometry Tessellator vs. Outline Polygon", ImGuiTreeNodeFlags_DefaultOpen)) {
-                if (geometryInspector.RenderUI(config, strokeStyle)) {
-                    if (strokeScrubber.IsFrozen()) {
-                        strokeScrubber.Retessellate(strokeStyle, viewport.zoom);
-                    } else if (!lastFinishedStroke.modeledPoints.empty()) {
-                        lastFinishedStroke.outlinePath = InkEngine::BuildStrokeOutline(
-                            lastFinishedStroke.modeledPoints, strokeStyle.capType, strokeStyle.pattern);
-                        InkEngine::BuildStrokeMesh(
-                            lastFinishedStroke.modeledPoints, strokeStyle.capType,
-                            PackGpuColor(strokeStyle.color), lastFinishedStroke.mesh,
-                            viewport.zoom, strokeStyle.pattern);
+                // TAB 3: Width & Velocity Evaluation
+                if (ImGui::BeginTabItem("3. Width Evaluator")) {
+                    std::span<const StrokePoint> ptsForPlot =
+                        strokeScrubber.IsFrozen()
+                            ? strokeScrubber.GetActiveModeledSlice()
+                            : (engine.IsStrokeActive()
+                                   ? std::span<const StrokePoint>(engine.GetLiveModeledPoints())
+                                   : std::span<const StrokePoint>(lastFinishedStroke.modeledPoints));
+
+                    if (ImGui::Button("Evaluate & Apply Width Dynamics")) {
+                        widthInspector.SetShowRadiusDiscs(true);
+                        if (strokeScrubber.IsFrozen()) {
+                            WidthInspector::ReevaluateRadii(strokeScrubber.GetMutableFrozenPoints(),
+                                                            config, strokeStyle, viewport.zoom);
+                            strokeScrubber.Retessellate(strokeStyle, viewport.zoom);
+                        } else if (!lastFinishedStroke.modeledPoints.empty()) {
+                            WidthInspector::ReevaluateRadii(lastFinishedStroke.modeledPoints,
+                                                            config, strokeStyle, viewport.zoom);
+                            lastFinishedStroke.outlinePath = InkEngine::BuildStrokeOutline(
+                                lastFinishedStroke.modeledPoints, strokeStyle.capType, strokeStyle.pattern);
+                            InkEngine::BuildStrokeMesh(
+                                lastFinishedStroke.modeledPoints, strokeStyle.capType,
+                                PackGpuColor(strokeStyle.color), lastFinishedStroke.mesh,
+                                viewport.zoom, strokeStyle.pattern);
+                        }
+                        dirtyFrames = 2;
                     }
-                    dirtyFrames = 2;
-                }
-            }
 
-            // -----------------------------------------------------------------
-            // Step 5: Time-Travel Point Scrubber
-            // -----------------------------------------------------------------
-            if (ImGui::CollapsingHeader("Step 5: Time-Travel Point Scrubber", ImGuiTreeNodeFlags_DefaultOpen)) {
-                const auto& curModeled = engine.IsStrokeActive()
-                                             ? engine.GetLiveModeledPoints()
-                                             : lastFinishedStroke.modeledPoints;
-                if (strokeScrubber.RenderUI(strokeStyle,
-                                            rawSensorHud.GetActiveOrLastStroke(),
-                                            curModeled,
-                                            lastRawSamples,
-                                            viewport,
-                                            viewport.zoom)) {
-                    rawSensorHud.SetStrokeSamples(lastRawSamples);
-                    dirtyFrames = 2;
+                    if (widthInspector.RenderUI(config, strokeStyle, ptsForPlot)) {
+                        engine.SetConfig(config);
+                        if (strokeScrubber.IsFrozen()) {
+                            WidthInspector::ReevaluateRadii(strokeScrubber.GetMutableFrozenPoints(),
+                                                            config, strokeStyle, viewport.zoom);
+                            strokeScrubber.Retessellate(strokeStyle, viewport.zoom);
+                        } else if (!lastFinishedStroke.modeledPoints.empty()) {
+                            WidthInspector::ReevaluateRadii(lastFinishedStroke.modeledPoints,
+                                                            config, strokeStyle, viewport.zoom);
+                            lastFinishedStroke.outlinePath = InkEngine::BuildStrokeOutline(
+                                lastFinishedStroke.modeledPoints, strokeStyle.capType, strokeStyle.pattern);
+                            InkEngine::BuildStrokeMesh(
+                                lastFinishedStroke.modeledPoints, strokeStyle.capType,
+                                PackGpuColor(strokeStyle.color), lastFinishedStroke.mesh,
+                                viewport.zoom, strokeStyle.pattern);
+                        }
+                        dirtyFrames = 2;
+                    }
+                    ImGui::EndTabItem();
                 }
+
+                // TAB 4: Geometry Tessellation & Defect Telemetry
+                if (ImGui::BeginTabItem("4. Geometry & Mesh")) {
+                    if (geometryInspector.RenderUI(config, strokeStyle)) {
+                        if (strokeScrubber.IsFrozen()) {
+                            strokeScrubber.Retessellate(strokeStyle, viewport.zoom);
+                        } else if (!lastFinishedStroke.modeledPoints.empty()) {
+                            lastFinishedStroke.outlinePath = InkEngine::BuildStrokeOutline(
+                                lastFinishedStroke.modeledPoints, strokeStyle.capType, strokeStyle.pattern);
+                            InkEngine::BuildStrokeMesh(
+                                lastFinishedStroke.modeledPoints, strokeStyle.capType,
+                                PackGpuColor(strokeStyle.color), lastFinishedStroke.mesh,
+                                viewport.zoom, strokeStyle.pattern);
+                        }
+                        dirtyFrames = 2;
+                    }
+                    ImGui::EndTabItem();
+                }
+
+                // TAB 5: Time-Travel Point Scrubber & Repro Injector
+                if (ImGui::BeginTabItem("5. Scrubber")) {
+                    const auto& curModeled = engine.IsStrokeActive()
+                                                 ? engine.GetLiveModeledPoints()
+                                                 : lastFinishedStroke.modeledPoints;
+                    if (strokeScrubber.RenderUI(strokeStyle,
+                                                rawSensorHud.GetActiveOrLastStroke(),
+                                                curModeled,
+                                                lastRawSamples,
+                                                viewport,
+                                                viewport.zoom)) {
+                        rawSensorHud.SetStrokeSamples(lastRawSamples);
+                        dirtyFrames = 2;
+                    }
+                    ImGui::EndTabItem();
+                }
+
+                ImGui::EndTabBar();
             }
         }
         ImGui::End();

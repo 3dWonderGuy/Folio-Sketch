@@ -34,6 +34,8 @@ bool WidthInspector::RenderUI(InkingConfig& config,
     widthDirty |= ImGui::SliderFloat("velocityMaxClamp", &config.velocityThinningMaxSpeed, 50.0f, 3500.0f, "%.0f");
     widthDirty |= ImGui::SliderFloat("EMA Smoothing Factor", &config.dynamicWidthSmoothing, 0.01f, 1.0f, "%.2f");
     widthDirty |= ImGui::SliderFloat("Pressure Gamma", &config.pressureGamma, 0.25f, 3.0f, "%.2f");
+    widthDirty |= ImGui::SliderFloat("Pressure Deadzone", &config.pressureDeadzoneMin, 0.0f, 0.25f, "%.3f");
+    widthDirty |= ImGui::SliderFloat("Pressure Saturation", &config.pressureSaturationMax, 0.50f, 1.0f, "%.3f");
 
     ImGui::SeparatorText("Width Overlays & Curve Plot");
     ImGui::Checkbox("Show Hollow Radius Discs (r_i)", &m_showRadiusDiscs);

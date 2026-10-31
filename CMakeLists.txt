@@ -5,6 +5,18 @@ project(FolioSketch VERSION 1.0.0 LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+if(MSVC)
+    set(CMAKE_OBJECT_PATH_MAX 1024)
+    add_compile_options(/FS /bigobj /utf-8 /MP)
+    add_compile_definitions(
+        NOMINMAX
+        _USE_MATH_DEFINES
+        _CRT_SECURE_NO_WARNINGS
+        _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS
+    )
+endif()
 
 # Option to build test suite (default ON if top-level, OFF if subproject)
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
@@ -157,6 +169,11 @@ set(FOLIO_SKETCH_SOURCES
 
     # GPU Mesh Builder
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_builder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_caps.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_corner_pivot.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_round_ribbon.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_polygonal_ribbon.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_patterns.cpp"
 )
 
 set(FOLIO_SKETCH_HEADERS
@@ -178,6 +195,7 @@ set(FOLIO_SKETCH_HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/ink_stroke_filter.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_internal.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_ribbon_corner.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_internal.hpp"
 )
 
 add_library(FolioSketch STATIC
@@ -216,7 +234,10 @@ endif()
 if(MSVC)
     target_compile_options(FolioSketch PRIVATE /W4 /permissive-)
 else()
-    target_compile_options(FolioSketch PRIVATE -Wall -Wextra -Wpedantic)
+    # Suppress pedantic / non-standard extension warnings in third-party headers (e.g. abseil __int128)
+    target_compile_options(FolioSketch PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wno-pedantic>
+    )
 endif()
 
 # ==============================================================================
@@ -263,7 +284,7 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
         find_package(OpenGL REQUIRED)
     endif()
 
-    add_executable(folio_ink_inspector
+    set(FOLIO_INSPECTOR_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/main_inspector.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/raw_sensor_layer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/modeler_inspector.cpp"
@@ -271,20 +292,48 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/geometry_inspector.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/stroke_scrubber.cpp"
     )
-    target_include_directories(folio_ink_inspector PRIVATE
+
+    if(ANDROID)
+        # Android SDLActivity loads libmain.so
+        add_library(main SHARED ${FOLIO_INSPECTOR_SOURCES})
+        set_target_properties(main PROPERTIES
+            C_VISIBILITY_PRESET default
+            CXX_VISIBILITY_PRESET default
+            VISIBILITY_INLINES_HIDDEN 0
+        )
+        set(INSPECTOR_TARGET main)
+    else()
+        add_executable(folio_ink_inspector ${FOLIO_INSPECTOR_SOURCES})
+        set(INSPECTOR_TARGET folio_ink_inspector)
+    endif()
+
+    target_include_directories(${INSPECTOR_TARGET} PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
-    target_link_libraries(folio_ink_inspector PRIVATE folio_sketch SDL3::SDL3 imgui)
+    target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch SDL3::SDL3 imgui)
     if(ANDROID)
+        find_library(ANDROID_LOG_LIB log)
+        find_library(ANDROID_LIB android)
         find_library(ANDROID_GLES3_LIB GLESv3)
         find_library(ANDROID_EGL_LIB EGL)
-        target_link_libraries(folio_ink_inspector PRIVATE ${ANDROID_GLES3_LIB} ${ANDROID_EGL_LIB})
+        target_compile_definitions(${INSPECTOR_TARGET} PRIVATE IMGUI_IMPL_OPENGL_ES3)
+        target_link_libraries(${INSPECTOR_TARGET} PRIVATE
+            ${ANDROID_LOG_LIB}
+            ${ANDROID_LIB}
+            ${ANDROID_GLES3_LIB}
+            ${ANDROID_EGL_LIB}
+        )
     else()
-        target_link_libraries(folio_ink_inspector PRIVATE OpenGL::GL)
+        target_link_libraries(${INSPECTOR_TARGET} PRIVATE OpenGL::GL)
+        if(WIN32)
+            target_link_libraries(${INSPECTOR_TARGET} PRIVATE dwmapi ole32 oleaut32 shell32 winspool)
+        endif()
     endif()
 
-    set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY VS_STARTUP_PROJECT folio_ink_inspector)
+    if(NOT ANDROID)
+        set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY VS_STARTUP_PROJECT folio_ink_inspector)
+    endif()
 endif()
 
 # ==============================================================================

@@ -77,6 +77,7 @@ bool GeometryInspector::RenderUI(InkingConfig& config, StrokeStyle& style) {
     bool geomDirty = false;
 
     ImGui::SeparatorText("Unified View Mode Selector");
+    ImGui::Checkbox("Enable Geometry View (off = raw stroke only)", &m_enabled);
     int modeInt = static_cast<int>(m_viewMode);
     const char* modeItems[] = {
         "Mode 0: Discs Only (Evaluated Circles)",
@@ -169,7 +170,7 @@ void GeometryInspector::RenderCanvasOverlays(ImDrawList* drawList,
                                              const InkPath& outlinePath,
                                              const InkMesh& mesh,
                                              const CanvasTransform& transform) const {
-    if (!drawList) return;
+    if (!drawList || !m_enabled) return;
 
     // -------------------------------------------------------------------------
     // Mode 0: Discs Only (Overlapping evaluated circles; zero polygon/mesh logic)

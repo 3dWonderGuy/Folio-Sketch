@@ -47,48 +47,37 @@ std::vector<StrokePoint> StrokeFilter::PreFilterPoints(std::span<const StrokePoi
         }
 
         // 1c. Radius-proportional minimum step for interior points
+        // Spacing curve points by at least 0.35 * maxR prevents inner offset curve
+        // retrograde swallowtail self-intersections when r > rho.
         bool isLast = (idx + 1 == pts.size());
-        double minStep = std::max(0.05, maxR * 0.20);
+        double minStep = std::max(0.25, maxR * 0.35);
+
         if (d < minStep) {
-            bool isSharpTurn = false;
-            if (!isLast && idx + 1 < pts.size() && d > 1e-5) {
-                double dxIn = p.x - prev.x, dyIn = p.y - prev.y;
-                double dxOut = pts[idx + 1].x - p.x, dyOut = pts[idx + 1].y - p.y;
-                double lenOut = std::hypot(dxOut, dyOut);
-                if (lenOut > 1e-5) {
-                    double cosTurn = (dxIn * dxOut + dyIn * dyOut) / (d * lenOut);
-                    if (cosTurn < 0.70 && d >= maxR * 0.08) {
-                        isSharpTurn = true;
-                    }
-                }
-            }
-            if (!isSharpTurn) {
-                if (isLast) {
-                    if (cleanPts.size() == 1) {
-                        prev = p;
-                    } else {
-                        // Check if final segment continues forward along the stroke tangent
-                        double dxIn = 0.0, dyIn = 0.0;
-                        if (cleanPts.size() >= 2) {
-                            dxIn = prev.x - cleanPts[cleanPts.size() - 2].x;
-                            dyIn = prev.y - cleanPts[cleanPts.size() - 2].y;
-                        }
-                        double dxOut = p.x - prev.x;
-                        double dyOut = p.y - prev.y;
-                        if (dxIn * dxOut + dyIn * dyOut > 0.0) {
-                            // Forward continuation: preserve final pen-lift coordinate
-                            prev.x = p.x;
-                            prev.y = p.y;
-                        }
-                        prev.pressure = std::max(prev.pressure, p.pressure);
-                        prev.r = std::max(prev.r, p.r);
-                    }
+            if (isLast) {
+                if (cleanPts.size() == 1) {
+                    prev = p;
                 } else {
+                    // Check if final segment continues forward along the stroke tangent
+                    double dxIn = 0.0, dyIn = 0.0;
+                    if (cleanPts.size() >= 2) {
+                        dxIn = prev.x - cleanPts[cleanPts.size() - 2].x;
+                        dyIn = prev.y - cleanPts[cleanPts.size() - 2].y;
+                    }
+                    double dxOut = p.x - prev.x;
+                    double dyOut = p.y - prev.y;
+                    if (dxIn * dxOut + dyIn * dyOut > 0.0) {
+                        // Forward continuation: preserve final pen-lift coordinate
+                        prev.x = p.x;
+                        prev.y = p.y;
+                    }
                     prev.pressure = std::max(prev.pressure, p.pressure);
                     prev.r = std::max(prev.r, p.r);
                 }
-                continue;
+            } else {
+                prev.pressure = std::max(prev.pressure, p.pressure);
+                prev.r = std::max(prev.r, p.r);
             }
+            continue;
         }
 
         cleanPts.push_back(p);

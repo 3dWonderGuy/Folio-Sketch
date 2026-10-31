@@ -76,10 +76,16 @@ public:
                               const InkMesh& mesh,
                               const CanvasTransform& transform) const;
 
+    /// Master switch: when false no mesh/outline/wireframe/needle rendering is performed.
+    [[nodiscard]] bool IsEnabled() const noexcept { return m_enabled; }
+    void SetEnabled(bool v) noexcept { m_enabled = v; }
+    void ResetView() noexcept { m_enabled = false; m_viewMode = GeometryViewMode::SolidPlusWireframe; }
+
     [[nodiscard]] GeometryViewMode GetViewMode() const noexcept { return m_viewMode; }
     void SetViewMode(GeometryViewMode mode) noexcept { m_viewMode = mode; }
 
     [[nodiscard]] bool ShouldRenderSolidGpuMesh() const noexcept {
+        if (!m_enabled) return false;
         return m_viewMode == GeometryViewMode::SolidGpuMesh ||
                m_viewMode == GeometryViewMode::SolidPlusWireframe ||
                (m_viewMode == GeometryViewMode::MiterNormalNeedles && m_showMeshBehindNeedles);
@@ -93,6 +99,7 @@ public:
     static void SyncMeshBuilderParams(const InkingConfig& config) noexcept;
 
 private:
+    bool m_enabled = false;
     GeometryViewMode m_viewMode = GeometryViewMode::SolidPlusWireframe;
     MeshDefectStats m_stats{};
     bool m_highlightInvertedTriangles = true;

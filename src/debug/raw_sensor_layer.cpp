@@ -159,9 +159,8 @@ bool RawSensorHUD::HandleEvent(const SDL_Event& event,
             RecordTimestamp(nowSec);
 
             if (m_mouseDown) {
-                // Simulate subtle pressure modulation with speed during mouse drawing for testing
-                float speedPx = std::hypot(event.motion.xrel, event.motion.yrel);
-                m_currentPressure = std::clamp(0.75f - speedPx * 0.006f, 0.20f, 0.95f);
+                // Keep simulated pressure constant so testing width/velocity features isn't affected by mouse speed
+                m_currentPressure = 0.65f;
                 outSample = RawInputSample{
                     .x = m_currentX,
                     .y = m_currentY,

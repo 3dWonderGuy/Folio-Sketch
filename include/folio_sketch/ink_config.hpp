@@ -40,7 +40,7 @@ struct InkingConfig {
     float google_drag_constant = 72.0f;
     bool google_enable_prediction = true;
     float google_prediction_duration_ms = 16.0f;          // Kalman prediction lookahead duration (ms)
-    bool google_use_stroke_normal_projection = true;
+    bool google_use_stroke_normal_projection = false;
 
     // -------------------------------------------------------------
     // 3. ADAPTIVE SAMPLING & ROTATIONAL VELOCITY
@@ -55,10 +55,10 @@ struct InkingConfig {
     // 4. LOOP CONTRACTION MITIGATION (Speed-Based Curve Accuracy)
     // -------------------------------------------------------------
     bool google_loop_mitigation_enable = false;           // Disabled by default: normal-ray projection snaps across hairpin branches on fast zigzags
-    float google_loop_speed_lower_bound = 20.0f;          // Slow speed threshold (mm/s)
-    float google_loop_speed_upper_bound = 400.0f;         // Fast speed threshold (mm/s)
+    float google_loop_speed_lower_bound = 100.0f;         // Slow speed threshold (px/s)
+    float google_loop_speed_upper_bound = 1500.0f;        // Fast speed threshold (px/s)
     float google_loop_strength_at_lower_speed = 1.0f;     // 1.0 = pure spring smoothing at slow speed
-    float google_loop_strength_at_upper_speed = 0.85f;    // 0.0 = raw input, 1.0 = spring at high speed
+    float google_loop_strength_at_upper_speed = 0.0f;     // 0.0 = pull all the way to raw input at high speed, 1.0 = pure spring
     float google_loop_min_speed_window_s = 0.04f;         // Moving average window for speed (s)
 
     // -------------------------------------------------------------
@@ -97,13 +97,13 @@ struct InkingConfig {
     // -------------------------------------------------------------
     // 8. MESH TESSELLATION & HAIRPIN TURNS
     // -------------------------------------------------------------
-    static constexpr float kDefaultHairpinCosThreshold = -0.50f;        // Acute turnaround threshold (> 120 deg reversal)
-    static constexpr float kDefaultHairpinMinSegmentRadiusRatio = 0.20f; // Min segment length (len / r) to avoid micro-noise
+    static constexpr float kDefaultHairpinCosThreshold = -0.866f;        // Acute turnaround threshold (> 150 deg reversal triggers seamless rounded cap overlap)
+    static constexpr float kDefaultHairpinMinSegmentRadiusRatio = 0.15f; // Min segment length (len / r) to avoid micro-noise
 
     float hairpinCosThreshold = kDefaultHairpinCosThreshold;
     float hairpinMinSegmentRadiusRatio = kDefaultHairpinMinSegmentRadiusRatio;
 
-    float cornerAngleThresholdRad = 1.04719755f; // Corner bevel threshold in radians (default: 60 deg / ~1.05 rad)
+    float cornerAngleThresholdRad = 0.35f;       // Corner bevel threshold in radians (default: ~20 deg / 0.35 rad)
     float miterMinClampRatio      = 0.0f;        // Min miter clamping ratio (0.0 .. 1.0x)
     float miterMaxClampRatio      = 1.25f;       // Max miter clamping ratio (1.0 .. 2.5x)
     bool  stationaryEnvelopment   = true;        // Merge consecutive points where ds <= |dr|

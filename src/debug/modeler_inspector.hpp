@@ -45,14 +45,21 @@ public:
                         std::span<const StrokePoint> predictedPoints,
                         const CanvasTransform& transform) const;
 
+    /// Restores default (all overlays off).
+    void ResetOverlays() noexcept { m_showRawPoints = m_showModeledCenterline = m_showKalmanSpine = false; }
+
+    void SetShowRawPoints(bool v) noexcept { m_showRawPoints = v; }
+    void SetShowModeledCenterline(bool v) noexcept { m_showModeledCenterline = v; }
+    void SetShowKalmanSpine(bool v) noexcept { m_showKalmanSpine = v; }
+
     [[nodiscard]] bool ShowRawInputDots() const noexcept { return m_showRawPoints; }
     [[nodiscard]] bool ShowModeledCenterline() const noexcept { return m_showModeledCenterline; }
     [[nodiscard]] bool ShowKalmanPrediction() const noexcept { return m_showKalmanSpine; }
 
 private:
-    bool m_showRawPoints = true;
-    bool m_showModeledCenterline = true;
-    bool m_showKalmanSpine = true;
+    bool m_showRawPoints = false;
+    bool m_showModeledCenterline = false;
+    bool m_showKalmanSpine = false;
 };
 
 } // namespace Folio::Debug

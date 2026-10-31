@@ -92,7 +92,7 @@ public:
 
 private:
     bool m_isFrozen = false;
-    bool m_autoFreezeOnLift = true;
+    bool m_autoFreezeOnLift = false;
     int  m_cursor = 0;
 
     std::vector<RawInputSample> m_frozenRawSamples;

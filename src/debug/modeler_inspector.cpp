@@ -21,7 +21,15 @@ bool ModelerInspector::RenderUI(InkingConfig& config) {
     physicsDirty |= ImGui::Checkbox("Wobble is_enabled", &config.google_wobble_enable);
     if (config.google_wobble_enable) {
         physicsDirty |= ImGui::SliderFloat("Wobble timeout (s)", &config.google_wobble_timeout_s,
-                                           0.001f, 0.150f, "%.3f s");
+                                           0.005f, 0.500f, "%.3f s");
+        physicsDirty |= ImGui::SliderFloat("Wobble speed_floor", &config.google_wobble_speed_floor,
+                                           0.0f, 100.0f, "%.2f");
+        physicsDirty |= ImGui::SliderFloat("Wobble speed_ceiling", &config.google_wobble_speed_ceiling,
+                                           0.1f, 200.0f, "%.2f");
+        if (config.google_wobble_speed_ceiling < config.google_wobble_speed_floor) {
+            config.google_wobble_speed_ceiling = config.google_wobble_speed_floor + 0.1f;
+        }
+        ImGui::TextDisabled("Smoothing factor = 100%% at <= floor, tapering to 0%% at >= ceiling.");
     }
 
     ImGui::SeparatorText("Loop Contraction & Projection");
@@ -31,6 +39,15 @@ bool ModelerInspector::RenderUI(InkingConfig& config) {
             config.google_use_stroke_normal_projection = true;
         }
         physicsDirty = true;
+    }
+    if (config.google_loop_mitigation_enable) {
+        physicsDirty |= ImGui::SliderFloat("Loop speed_lower (px/s)", &config.google_loop_speed_lower_bound,
+                                           0.0f, 2000.0f, "%.0f px/s");
+        physicsDirty |= ImGui::SliderFloat("Loop speed_upper (px/s)", &config.google_loop_speed_upper_bound,
+                                           100.0f, 5000.0f, "%.0f px/s");
+        physicsDirty |= ImGui::SliderFloat("Strength at high speed", &config.google_loop_strength_at_upper_speed,
+                                           0.0f, 1.0f, "%.2f (0=raw, 1=spring)");
+        ImGui::TextDisabled("Lower value pulls high-speed corners closer to raw points.");
     }
     if (ImGui::Checkbox("use_stroke_normal_projection", &config.google_use_stroke_normal_projection)) {
         if (!config.google_use_stroke_normal_projection && config.google_loop_mitigation_enable) {
