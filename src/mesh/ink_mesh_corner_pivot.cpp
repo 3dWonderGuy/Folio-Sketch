@@ -18,7 +18,6 @@ void ResolveRoundCornerPivots(const std::vector<StrokePoint>& cleanPts,
                               InkMeshAccumulator& acc,
                               std::vector<PinnedCornerSide>& pinnedLeft,
                               std::vector<PinnedCornerSide>& pinnedRight) {
-    const size_t subN = endIdx - startIdx + 1;
     const float delta = acc.delta;
 
     auto evalCornerLines = [&](size_t m0, size_t m1, double innerSign,
@@ -37,6 +36,12 @@ void ResolveRoundCornerPivots(const std::vector<StrokePoint>& cleanPts,
         outTIn0  = (dx * sLeave.uy - dy * sLeave.ux) / crossUL;
         outTOut0 = (dx * sEnter.uy - dy * sEnter.ux) / crossUL;
 
+        // Ensure ray intersection lies forward along sEnter from cleanPts[m0 - 1]
+        // and backward along sLeave from cleanPts[m1 + 1] (rejects converging loop crossovers).
+        if (outTIn0 < -0.25 * sEnter.len || outTOut0 > 0.25 * sLeave.len) {
+            return false;
+        }
+
         outApexX = cleanPts[m0].x + outTIn0 * sEnter.ux;
         outApexY = cleanPts[m0].y + outTIn0 * sEnter.uy;
 
@@ -54,14 +59,6 @@ void ResolveRoundCornerPivots(const std::vector<StrokePoint>& cleanPts,
         return true;
     };
 
-    // Compute cumulative arc length along the sub-stroke so corner reach is measured
-    // along the true incoming/outgoing stroke arms rather than a single short segment.
-    std::vector<double> cumArc(subN, 0.0);
-    for (size_t m = 1; m < subN; ++m) {
-        cumArc[m] = cumArc[m - 1] + segs[startIdx + m - 1].len;
-    }
-    const double totalSubArc = cumArc.back();
-
     for (size_t k = startIdx + 1; k < endIdx; ++k) {
         const auto& sIn  = segs[k - 1];
         const auto& sOut = segs[k];
@@ -73,13 +70,16 @@ void ResolveRoundCornerPivots(const std::vector<StrokePoint>& cleanPts,
         bool leftIsInner = (cross < 0.0) || (cross == 0.0 && dot < 0.0);
         double innerSign = leftIsInner ? 1.0 : -1.0;
         auto& targetPins = leftIsInner ? pinnedLeft : pinnedRight;
-        if (targetPins[k - startIdx].nomIdx != UINT32_MAX) {
+        if (targetPins[k - startIdx].nomIdx != UINT32_MAX ||
+            targetPins[k - 1 - startIdx].nomIdx != UINT32_MAX) {
             continue;
         }
 
-        // 1. Group contiguous vertices that turn in the same direction around the corner
+        // 1. Group contiguous vertices that turn sharply in the same direction around the corner,
+        //    stopping before total turn exceeds ~166 deg so curved loops don't wind past 180 deg.
         size_t c0 = k;
         size_t c1 = k;
+        double cumTurn = turnAngle;
         while (c1 + 1 < endIdx &&
                targetPins[c1 + 1 - startIdx].nomIdx == UINT32_MAX) {
             const auto& sA = segs[c1];
@@ -87,8 +87,9 @@ void ResolveRoundCornerPivots(const std::vector<StrokePoint>& cleanPts,
             double cNext = sA.ux * sB.uy - sA.uy * sB.ux;
             double dNext = sA.ux * sB.ux + sA.uy * sB.uy;
             double aNext = std::atan2(std::abs(cNext), dNext);
-            if (innerSign * cNext < -1e-3 && aNext >= 0.15) {
+            if (innerSign * cNext < -1e-3 && aNext >= gentleAngleLimit && (cumTurn + aNext) <= 2.90) {
                 ++c1;
+                cumTurn += aNext;
             } else {
                 break;
             }
@@ -101,13 +102,20 @@ void ResolveRoundCornerPivots(const std::vector<StrokePoint>& cleanPts,
         if (!evalCornerLines(m0, m1, innerSign, apexX, apexY, tIn0, tOut0, tanHalf, cosHalf, bx, by)) {
             m0 = k;
             m1 = k;
+            c0 = k;
+            c1 = k;
             if (!evalCornerLines(m0, m1, innerSign, apexX, apexY, tIn0, tOut0, tanHalf, cosHalf, bx, by)) {
                 continue;
             }
         }
 
-        // 2. Expand [m0, m1] symmetrically backward and forward along the incoming/outgoing arms
-        // so every vertex inside the corner's inner trim distance shares the same inner pivot.
+        const auto& sBaseEnter = segs[c0 - 1];
+        const auto& sBaseLeave = segs[c1];
+
+        // 2. Expand [m0, m1] symmetrically backward and forward along straight incoming/outgoing arms
+        //    (or outward-separating U-turn arms where cTanHalf < tanHalf).
+        //    Do NOT expand along inward-curving cursive loop arms where the arm rotates away from sBaseEnter/sBaseLeave
+        //    and causes cTanHalf to grow.
         auto tryExpandBackward = [&](double reqTrim, double spanIn) -> bool {
             if (spanIn >= reqTrim || m0 <= startIdx + 1 ||
                 targetPins[m0 - 1 - startIdx].nomIdx != UINT32_MAX) {
@@ -120,7 +128,10 @@ void ResolveRoundCornerPivots(const std::vector<StrokePoint>& cleanPts,
             if (!evalCornerLines(m0 - 1, m1, innerSign, cApexX, cApexY, cTIn0, cTOut0, cTanHalf, cCosHalf, cBx, cBy)) {
                 return false;
             }
-            if (innerSign * cStep <= 0.15 || cTanHalf < tanHalf) {
+            double dotFromBase = sPrev.ux * sBaseEnter.ux + sPrev.uy * sBaseEnter.uy;
+            bool isStraightArm = (std::abs(cStep) <= 0.12 && dotFromBase >= 0.98 && cTanHalf <= tanHalf * 1.15);
+            bool isOutwardSep  = (cTanHalf < tanHalf);
+            if (isStraightArm || isOutwardSep) {
                 --m0;
                 apexX = cApexX; apexY = cApexY;
                 tIn0 = cTIn0; tOut0 = cTOut0;
@@ -143,7 +154,10 @@ void ResolveRoundCornerPivots(const std::vector<StrokePoint>& cleanPts,
             if (!evalCornerLines(m0, m1 + 1, innerSign, cApexX, cApexY, cTIn0, cTOut0, cTanHalf, cCosHalf, cBx, cBy)) {
                 return false;
             }
-            if (innerSign * cStep <= 0.15 || cTanHalf < tanHalf) {
+            double dotFromBase = sNext.ux * sBaseLeave.ux + sNext.uy * sBaseLeave.uy;
+            bool isStraightArm = (std::abs(cStep) <= 0.12 && dotFromBase >= 0.98 && cTanHalf <= tanHalf * 1.15);
+            bool isOutwardSep  = (cTanHalf < tanHalf);
+            if (isStraightArm || isOutwardSep) {
                 ++m1;
                 apexX = cApexX; apexY = cApexY;
                 tIn0 = cTIn0; tOut0 = cTOut0;
@@ -174,22 +188,12 @@ void ResolveRoundCornerPivots(const std::vector<StrokePoint>& cleanPts,
         float rCorner = std::max(0.0f, 0.5f * (cleanPts[m0].r + cleanPts[m1].r));
         float skirtDistCorner = 1.0f + delta / std::max(1e-4f, rCorner);
 
-        // Available arm length from the start/end of the sub-stroke (or previous pinned corner on the same side)
-        size_t prevPinIdx = startIdx;
-        for (size_t p = m0; p > startIdx; --p) {
-            if (targetPins[p - 1 - startIdx].nomIdx != UINT32_MAX) {
-                prevPinIdx = p - 1;
-                break;
-            }
-        }
+        // Bound pivot distance strictly by the actual pinned span [m0 - 1, m1 + 1]
+        // so pivCore/pivSkirt never jump past unpinned vertices and never depend on future stroke length.
         double spanInFinal  = tIn0 + segs[m0 - 1].len;
         double spanOutFinal = segs[m1].len - tOut0;
-        double extraArcIn   = (m0 - 1 > prevPinIdx) ? (cumArc[m0 - 1 - startIdx] - cumArc[prevPinIdx - startIdx]) * 0.85 : 0.0;
-        double extraArcOut  = (m1 + 1 < endIdx)     ? (totalSubArc - cumArc[m1 + 1 - startIdx]) * 0.85 : 0.0;
-        double availArmIn   = spanInFinal  + extraArcIn;
-        double availArmOut  = spanOutFinal + extraArcOut;
-        double dMaxIn  = availArmIn  / std::max(1e-4, tanHalf);
-        double dMaxOut = availArmOut / std::max(1e-4, tanHalf);
+        double dMaxIn   = spanInFinal  / std::max(1e-4, tanHalf);
+        double dMaxOut  = spanOutFinal / std::max(1e-4, tanHalf);
         double dMaxPerp = std::max(0.0, std::min(dMaxIn, dMaxOut));
 
         double dCorePerp  = static_cast<double>(rCorner);
@@ -230,14 +234,16 @@ void ResolveRoundCornerPivots(const std::vector<StrokePoint>& cleanPts,
             }
         }
 
-        // Verify pivot lies strictly on the inner side of all spanned centerline segments [m0, m1 - 1],
-        // and requires at least 40% of the nominal radius so shallow clamped bends don't pinch the ribbon.
-        bool validFan = (dCorePerp >= 0.40 * static_cast<double>(rCorner) && dSkirtPerp > dCorePerp + 1e-4);
-        for (size_t m = m0; m < m1 && validFan; ++m) {
+        // Verify pivot lies strictly on the inner side of ALL connected segments [m0 - 1, m1],
+        // and has sufficient bisector reach (coreBisectDist >= 0.40 * rCorner).
+        bool validFan = (coreBisectDist >= 0.40 * static_cast<double>(rCorner) && dSkirtPerp > dCorePerp + 1e-4);
+        for (size_t m = m0 - 1; m <= m1 && validFan; ++m) {
             const auto& sm = segs[m];
-            double proj = (pivCoreX - cleanPts[m].x) * (innerSign * sm.nx) +
-                          (pivCoreY - cleanPts[m].y) * (innerSign * sm.ny);
-            if (proj <= 1e-4) validFan = false;
+            double proj0 = (pivCoreX - cleanPts[m].x)     * (innerSign * sm.nx) +
+                           (pivCoreY - cleanPts[m].y)     * (innerSign * sm.ny);
+            double proj1 = (pivCoreX - cleanPts[m + 1].x) * (innerSign * sm.nx) +
+                           (pivCoreY - cleanPts[m + 1].y) * (innerSign * sm.ny);
+            if (proj0 <= 1e-4 || proj1 <= 1e-4) validFan = false;
         }
         if (!validFan) continue;
 

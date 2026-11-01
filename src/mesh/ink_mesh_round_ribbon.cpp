@@ -51,22 +51,58 @@ void BuildRoundSubRibbon(const std::vector<StrokePoint>& cleanPts,
         const size_t nextPtIdx = i + 1;
         float rNext = std::max(0.0f, cleanPts[nextPtIdx].r);
         float skirtDistNext = 1.0f + delta / std::max(1e-4f, rNext);
+        const auto& sIn = segs[i];
+
+        const float curCenterX = acc.outMesh.vertices[curCenterIdx].x;
+        const float curCenterY = acc.outMesh.vertices[curCenterIdx].y;
+        const float nextCenterX = cleanPts[nextPtIdx].x;
+        const float nextCenterY = cleanPts[nextPtIdx].y;
+
+        auto validLeftStep = [&](uint32_t prevNom, uint32_t prevSkirt,
+                                 double candX, double candY,
+                                 double candSX, double candSY) -> bool {
+            const auto& vPrevNom   = acc.outMesh.vertices[prevNom];
+            const auto& vPrevSkirt = acc.outMesh.vertices[prevSkirt];
+            double stepU  = (candX  - vPrevNom.x)   * sIn.ux + (candY  - vPrevNom.y)   * sIn.uy;
+            double stepSU = (candSX - vPrevSkirt.x) * sIn.ux + (candSY - vPrevSkirt.y) * sIn.uy;
+            if (stepU <= 1e-3 || stepSU <= 1e-3) return false;
+            // Ensure quad (prevLeft -> candLeft -> nextCenter -> curCenter) has strictly positive area for both diagonals
+            double a1 = (candX - vPrevNom.x) * (nextCenterY - vPrevNom.y) - (candY - vPrevNom.y) * (nextCenterX - vPrevNom.x);
+            double a2 = (nextCenterX - vPrevNom.x) * (curCenterY - vPrevNom.y) - (nextCenterY - vPrevNom.y) * (curCenterX - vPrevNom.x);
+            double b1 = (candX - vPrevNom.x) * (curCenterY - vPrevNom.y) - (candY - vPrevNom.y) * (curCenterX - vPrevNom.x);
+            double b2 = (nextCenterX - candX) * (curCenterY - candY) - (nextCenterY - candY) * (curCenterX - candX);
+            return std::max(std::min(a1, a2), std::min(b1, b2)) > 1e-5;
+        };
+
+        auto validRightStep = [&](uint32_t prevNom, uint32_t prevSkirt,
+                                  double candX, double candY,
+                                  double candSX, double candSY) -> bool {
+            const auto& vPrevNom   = acc.outMesh.vertices[prevNom];
+            const auto& vPrevSkirt = acc.outMesh.vertices[prevSkirt];
+            double stepU  = (candX  - vPrevNom.x)   * sIn.ux + (candY  - vPrevNom.y)   * sIn.uy;
+            double stepSU = (candSX - vPrevSkirt.x) * sIn.ux + (candSY - vPrevSkirt.y) * sIn.uy;
+            if (stepU <= 1e-3 || stepSU <= 1e-3) return false;
+            // Ensure quad (curCenter -> nextCenter -> candRight -> prevRight) has strictly positive area for both diagonals
+            double a1 = (nextCenterX - curCenterX) * (candY - curCenterY) - (nextCenterY - curCenterY) * (candX - curCenterX);
+            double a2 = (candX - curCenterX) * (vPrevNom.y - curCenterY) - (candY - curCenterY) * (vPrevNom.x - curCenterX);
+            double b1 = (nextCenterX - curCenterX) * (vPrevNom.y - curCenterY) - (nextCenterY - curCenterY) * (vPrevNom.x - curCenterX);
+            double b2 = (candX - nextCenterX) * (vPrevNom.y - nextCenterY) - (candY - nextCenterY) * (vPrevNom.x - nextCenterX);
+            return std::max(std::min(a1, a2), std::min(b1, b2)) > 1e-5;
+        };
 
         if (nextPtIdx == endIdx) {
             // Terminal segment ending at endIdx
-            const auto& lastSeg = segs[i];
+            const auto& lastSeg = sIn;
             uint32_t nextCenterIdx = acc.addVertex(cleanPts[nextPtIdx].x, cleanPts[nextPtIdx].y, 0.0f, rNext);
 
             double candLX  = cleanPts[nextPtIdx].x + lastSeg.nx * rNext;
             double candLY  = cleanPts[nextPtIdx].y + lastSeg.ny * rNext;
             double candLSX = cleanPts[nextPtIdx].x + lastSeg.nx * (rNext + delta);
             double candLSY = cleanPts[nextPtIdx].y + lastSeg.ny * (rNext + delta);
-            double stepLU  = (candLX  - acc.outMesh.vertices[curLeftIdx].x)      * lastSeg.ux + (candLY  - acc.outMesh.vertices[curLeftIdx].y)      * lastSeg.uy;
-            double stepLSU = (candLSX - acc.outMesh.vertices[curLeftSkirtIdx].x) * lastSeg.ux + (candLSY - acc.outMesh.vertices[curLeftSkirtIdx].y) * lastSeg.uy;
 
             uint32_t nextLeftIdx      = curLeftIdx;
             uint32_t nextLeftSkirtIdx = curLeftSkirtIdx;
-            if (stepLU > 1e-3 && stepLSU > 1e-3) {
+            if (validLeftStep(curLeftIdx, curLeftSkirtIdx, candLX, candLY, candLSX, candLSY)) {
                 nextLeftIdx      = acc.addVertex(candLX, candLY, 1.0f, rNext);
                 nextLeftSkirtIdx = acc.addVertex(candLSX, candLSY, skirtDistNext, rNext);
                 acc.addCoreQuad(curLeftIdx, nextLeftIdx, nextCenterIdx, curCenterIdx);
@@ -79,12 +115,10 @@ void BuildRoundSubRibbon(const std::vector<StrokePoint>& cleanPts,
             double candRY  = cleanPts[nextPtIdx].y - lastSeg.ny * rNext;
             double candRSX = cleanPts[nextPtIdx].x - lastSeg.nx * (rNext + delta);
             double candRSY = cleanPts[nextPtIdx].y - lastSeg.ny * (rNext + delta);
-            double stepRU  = (candRX  - acc.outMesh.vertices[curRightIdx].x)      * lastSeg.ux + (candRY  - acc.outMesh.vertices[curRightIdx].y)      * lastSeg.uy;
-            double stepRSU = (candRSX - acc.outMesh.vertices[curRightSkirtIdx].x) * lastSeg.ux + (candRSY - acc.outMesh.vertices[curRightSkirtIdx].y) * lastSeg.uy;
 
             uint32_t nextRightIdx      = curRightIdx;
             uint32_t nextRightSkirtIdx = curRightSkirtIdx;
-            if (stepRU > 1e-3 && stepRSU > 1e-3) {
+            if (validRightStep(curRightIdx, curRightSkirtIdx, candRX, candRY, candRSX, candRSY)) {
                 nextRightIdx      = acc.addVertex(candRX, candRY, 1.0f, rNext);
                 nextRightSkirtIdx = acc.addVertex(candRSX, candRSY, skirtDistNext, rNext);
                 acc.addCoreQuad(curCenterIdx, nextCenterIdx, nextRightIdx, curRightIdx);
@@ -100,7 +134,6 @@ void BuildRoundSubRibbon(const std::vector<StrokePoint>& cleanPts,
         }
 
         // Interior vertex P_{i+1}
-        const auto& sIn  = segs[i];
         const auto& sOut = segs[i + 1];
 
         double cross = sIn.ux * sOut.uy - sIn.uy * sOut.ux;
@@ -165,9 +198,7 @@ void BuildRoundSubRibbon(const std::vector<StrokePoint>& cleanPts,
                 double candLY  = cleanPts[nextPtIdx].y + avgNy * leftCoreDist;
                 double candLSX = cleanPts[nextPtIdx].x + avgNx * leftSkirtDist;
                 double candLSY = cleanPts[nextPtIdx].y + avgNy * leftSkirtDist;
-                double stepLU  = (candLX  - acc.outMesh.vertices[curLeftIdx].x)      * sIn.ux + (candLY  - acc.outMesh.vertices[curLeftIdx].y)      * sIn.uy;
-                double stepLSU = (candLSX - acc.outMesh.vertices[curLeftSkirtIdx].x) * sIn.ux + (candLSY - acc.outMesh.vertices[curLeftSkirtIdx].y) * sIn.uy;
-                if (stepLU > 1e-3 && stepLSU > 1e-3) {
+                if (validLeftStep(curLeftIdx, curLeftSkirtIdx, candLX, candLY, candLSX, candLSY)) {
                     nextLeftIdx      = acc.addVertex(candLX, candLY, 1.0f, rNext);
                     nextLeftSkirtIdx = acc.addVertex(candLSX, candLSY, skirtDistNext, rNext);
                     acc.addCoreQuad(curLeftIdx, nextLeftIdx, nextCenterIdx, curCenterIdx);
@@ -193,9 +224,7 @@ void BuildRoundSubRibbon(const std::vector<StrokePoint>& cleanPts,
                 double candRY  = cleanPts[nextPtIdx].y - avgNy * rightCoreDist;
                 double candRSX = cleanPts[nextPtIdx].x - avgNx * rightSkirtDist;
                 double candRSY = cleanPts[nextPtIdx].y - avgNy * rightSkirtDist;
-                double stepRU  = (candRX  - acc.outMesh.vertices[curRightIdx].x)      * sIn.ux + (candRY  - acc.outMesh.vertices[curRightIdx].y)      * sIn.uy;
-                double stepRSU = (candRSX - acc.outMesh.vertices[curRightSkirtIdx].x) * sIn.ux + (candRSY - acc.outMesh.vertices[curRightSkirtIdx].y) * sIn.uy;
-                if (stepRU > 1e-3 && stepRSU > 1e-3) {
+                if (validRightStep(curRightIdx, curRightSkirtIdx, candRX, candRY, candRSX, candRSY)) {
                     nextRightIdx      = acc.addVertex(candRX, candRY, 1.0f, rNext);
                     nextRightSkirtIdx = acc.addVertex(candRSX, candRSY, skirtDistNext, rNext);
                     acc.addCoreQuad(curCenterIdx, nextCenterIdx, nextRightIdx, curRightIdx);
@@ -241,11 +270,10 @@ void BuildRoundSubRibbon(const std::vector<StrokePoint>& cleanPts,
             double candSkirtX = cleanPts[nextPtIdx].x + innerSign * avgNx * innerSkirtDist;
             double candSkirtY = cleanPts[nextPtIdx].y + innerSign * avgNy * innerSkirtDist;
 
-            const auto& vPrevNom   = acc.outMesh.vertices[prevInnerNom];
-            const auto& vPrevSkirt = acc.outMesh.vertices[prevInnerSkirt];
-            double stepCoreU  = (candCoreX  - vPrevNom.x)   * sIn.ux + (candCoreY  - vPrevNom.y)   * sIn.uy;
-            double stepSkirtU = (candSkirtX - vPrevSkirt.x) * sIn.ux + (candSkirtY - vPrevSkirt.y) * sIn.uy;
-            if (stepCoreU <= 1e-3 || stepSkirtU <= 1e-3) {
+            bool stepOk = leftIsInner
+                              ? validLeftStep(prevInnerNom, prevInnerSkirt, candCoreX, candCoreY, candSkirtX, candSkirtY)
+                              : validRightStep(prevInnerNom, prevInnerSkirt, candCoreX, candCoreY, candSkirtX, candSkirtY);
+            if (!stepOk) {
                 innerIdx      = prevInnerNom;
                 innerSkirtIdx = prevInnerSkirt;
             } else {
@@ -255,12 +283,20 @@ void BuildRoundSubRibbon(const std::vector<StrokePoint>& cleanPts,
         }
 
         double outerSign = leftIsInner ? -1.0 : 1.0;
-        uint32_t outerInIdx = acc.addVertex(cleanPts[nextPtIdx].x + outerSign * sIn.nx * rNext,
-                                            cleanPts[nextPtIdx].y + outerSign * sIn.ny * rNext,
-                                            1.0f, rNext);
-        uint32_t outerInSkirtIdx = acc.addVertex(cleanPts[nextPtIdx].x + outerSign * sIn.nx * (rNext + delta),
-                                                 cleanPts[nextPtIdx].y + outerSign * sIn.ny * (rNext + delta),
-                                                 skirtDistNext, rNext);
+        double candOuterX  = cleanPts[nextPtIdx].x + outerSign * sIn.nx * rNext;
+        double candOuterY  = cleanPts[nextPtIdx].y + outerSign * sIn.ny * rNext;
+        double candOuterSX = cleanPts[nextPtIdx].x + outerSign * sIn.nx * (rNext + delta);
+        double candOuterSY = cleanPts[nextPtIdx].y + outerSign * sIn.ny * (rNext + delta);
+
+        uint32_t outerInIdx      = leftIsInner ? curRightIdx : curLeftIdx;
+        uint32_t outerInSkirtIdx = leftIsInner ? curRightSkirtIdx : curLeftSkirtIdx;
+        bool outerStepOk = leftIsInner
+                               ? validRightStep(curRightIdx, curRightSkirtIdx, candOuterX, candOuterY, candOuterSX, candOuterSY)
+                               : validLeftStep(curLeftIdx, curLeftSkirtIdx, candOuterX, candOuterY, candOuterSX, candOuterSY);
+        if (outerStepOk) {
+            outerInIdx      = acc.addVertex(candOuterX, candOuterY, 1.0f, rNext);
+            outerInSkirtIdx = acc.addVertex(candOuterSX, candOuterSY, skirtDistNext, rNext);
+        }
 
         if (leftIsInner) {
             if (curLeftIdx == innerIdx) {
@@ -269,11 +305,19 @@ void BuildRoundSubRibbon(const std::vector<StrokePoint>& cleanPts,
                 acc.addCoreQuad(curLeftIdx, innerIdx, nextCenterIdx, curCenterIdx);
                 acc.addSkirtQuad(curLeftIdx, curLeftSkirtIdx, innerSkirtIdx, innerIdx);
             }
-            acc.addCoreQuad(curCenterIdx, nextCenterIdx, outerInIdx, curRightIdx);
-            acc.addSkirtQuad(curRightIdx, outerInIdx, outerInSkirtIdx, curRightSkirtIdx);
+            if (curRightIdx == outerInIdx) {
+                acc.addCoreTriangle(curCenterIdx, nextCenterIdx, curRightIdx);
+            } else {
+                acc.addCoreQuad(curCenterIdx, nextCenterIdx, outerInIdx, curRightIdx);
+                acc.addSkirtQuad(curRightIdx, outerInIdx, outerInSkirtIdx, curRightSkirtIdx);
+            }
         } else {
-            acc.addCoreQuad(curLeftIdx, outerInIdx, nextCenterIdx, curCenterIdx);
-            acc.addSkirtQuad(curLeftIdx, curLeftSkirtIdx, outerInSkirtIdx, outerInIdx);
+            if (curLeftIdx == outerInIdx) {
+                acc.addCoreTriangle(curLeftIdx, nextCenterIdx, curCenterIdx);
+            } else {
+                acc.addCoreQuad(curLeftIdx, outerInIdx, nextCenterIdx, curCenterIdx);
+                acc.addSkirtQuad(curLeftIdx, curLeftSkirtIdx, outerInSkirtIdx, outerInIdx);
+            }
             if (curRightIdx == innerIdx) {
                 acc.addCoreTriangle(curCenterIdx, nextCenterIdx, curRightIdx);
             } else {

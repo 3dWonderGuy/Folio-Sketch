@@ -24,58 +24,34 @@ std::vector<StrokePoint> StrokeFilter::PreFilterPoints(std::span<const StrokePoi
         double maxR = std::max(static_cast<double>(p.r), static_cast<double>(prev.r));
 
         if (stationaryEnvelopment) {
-            // 1a. Disk containment: new point engulfed by previous kept point
-            if (d + p.r <= prev.r + maxR * 0.05) {
+            // 1a. Disk containment at touchdown: new point engulfed by initial point
+            if (cleanPts.size() == 1 && d + p.r <= prev.r) {
                 prev.pressure = std::max(prev.pressure, p.pressure);
                 prev.r = std::max(prev.r, p.r);
                 continue;
             }
 
-            // 1b. Disk containment: previous kept point engulfed by new point's larger disk
-            if (d + prev.r <= p.r + maxR * 0.05) {
-                if (cleanPts.size() == 1) {
-                    prev = p;
-                } else {
-                    cleanPts.back() = p;
-                }
+            // 1b. Disk containment at touchdown: initial point engulfed by new point's larger disk
+            if (cleanPts.size() == 1 && d + prev.r <= p.r) {
+                prev = p;
                 continue;
             }
         } else if (d < 1e-5) {
-            prev.pressure = std::max(prev.pressure, p.pressure);
-            prev.r = std::max(prev.r, p.r);
+            if (cleanPts.size() == 1) {
+                prev.pressure = std::max(prev.pressure, p.pressure);
+                prev.r = std::max(prev.r, p.r);
+            }
             continue;
         }
 
-        // 1c. Radius-proportional minimum step for interior points
-        // Spacing curve points by at least 0.35 * maxR prevents inner offset curve
-        // retrograde swallowtail self-intersections when r > rho.
-        bool isLast = (idx + 1 == pts.size());
+        // 1c. Radius-proportional minimum step for interior points.
+        // Keep committed vertices strictly immutable (append-only) once pushed so live
+        // stroke boundaries never shift or twitch as new samples arrive at the pen tip.
         double minStep = std::max(0.25, maxR * 0.35);
 
         if (d < minStep) {
-            if (isLast) {
-                if (cleanPts.size() == 1) {
-                    prev = p;
-                } else {
-                    // Check if final segment continues forward along the stroke tangent
-                    double dxIn = 0.0, dyIn = 0.0;
-                    if (cleanPts.size() >= 2) {
-                        dxIn = prev.x - cleanPts[cleanPts.size() - 2].x;
-                        dyIn = prev.y - cleanPts[cleanPts.size() - 2].y;
-                    }
-                    double dxOut = p.x - prev.x;
-                    double dyOut = p.y - prev.y;
-                    if (dxIn * dxOut + dyIn * dyOut > 0.0) {
-                        // Forward continuation: preserve final pen-lift coordinate
-                        prev.x = p.x;
-                        prev.y = p.y;
-                    }
-                    prev.pressure = std::max(prev.pressure, p.pressure);
-                    prev.r = std::max(prev.r, p.r);
-                }
-            } else {
-                prev.pressure = std::max(prev.pressure, p.pressure);
-                prev.r = std::max(prev.r, p.r);
+            if (idx + 1 == pts.size() && cleanPts.size() == 1 && d > 1e-4) {
+                cleanPts.push_back(p);
             }
             continue;
         }

@@ -460,6 +460,34 @@ int RunHeadlessDiagnostics() {
         DumpStrokeDiagnostics("User 180-deg U-turn with soft curve at end", rawDummy, pts, mesh, std::cout);
     }
 
+    // Exact 38-point cursive loop stroke from user's GUI dump (/tmp/folio_stroke_debug.txt)
+    {
+        const double coords[38][2] = {
+            {957.673, 414.305}, {957.981, 415.880}, {959.713, 415.843}, {961.503, 415.100},
+            {962.930, 414.364}, {965.030, 413.161}, {966.646, 412.190}, {968.645, 410.928},
+            {970.782, 409.488}, {972.929, 407.940}, {975.055, 406.282}, {977.109, 404.523},
+            {979.148, 402.610}, {980.943, 400.773}, {982.386, 399.175}, {983.480, 397.832},
+            {984.601, 396.254}, {985.455, 394.692}, {986.045, 393.111}, {984.367, 394.224},
+            {982.935, 395.704}, {981.737, 397.001}, {980.414, 398.579}, {979.062, 400.394},
+            {977.795, 402.294}, {976.759, 404.153}, {975.721, 406.403}, {974.702, 409.114},
+            {973.702, 412.292}, {973.158, 414.314}, {972.619, 416.505}, {972.087, 418.813},
+            {971.563, 421.188}, {971.059, 423.556}, {970.575, 425.902}, {970.115, 428.214},
+            {966.984, 456.713}, {967.034, 458.339}
+        };
+        std::vector<RawInputSample> rawDummy;
+        std::vector<StrokePoint> pts;
+        for (int i = 0; i < 38; ++i) {
+            StrokePoint sp{};
+            sp.x = static_cast<float>(coords[i][0]);
+            sp.y = static_cast<float>(coords[i][1]);
+            sp.r = 4.574f;
+            pts.push_back(sp);
+        }
+        InkMesh mesh;
+        InkMeshBuilder::BuildSolidMesh(pts, CapType::Round, 0xFF41A5FFu, mesh, 3.7795f);
+        DumpStrokeDiagnostics("User Cursive Loop Stroke", rawDummy, pts, mesh, std::cout);
+    }
+
     return 0;
 }
 
