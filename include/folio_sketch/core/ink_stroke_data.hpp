@@ -1,7 +1,7 @@
 #pragma once
 /**
  * =========================================================================================
- * @file folio_sketch/ink_stroke_data.hpp
+ * @file folio_sketch/core/ink_stroke_data.hpp
  * @brief Self-Sustained Vector Ink Geometry Data Structures
  * =========================================================================================
  *
@@ -16,7 +16,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "folio_sketch/ink_path.hpp"
+#include "folio_sketch/vector/ink_path.hpp"
 
 namespace Folio {
 

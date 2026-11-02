@@ -1,7 +1,7 @@
 #pragma once
 /**
  * =========================================================================================
- * @file folio_sketch/ink_mesh.hpp
+ * @file folio_sketch/gpu/ink_mesh.hpp
  * @brief High-Performance GPU Capsule SDF Instance Streaming Pipeline
  * =========================================================================================
  */
@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <vector>
 #include <span>
-#include "folio_sketch/ink_stroke_data.hpp"
+#include "folio_sketch/core/ink_stroke_data.hpp"
 
 namespace Folio {
 

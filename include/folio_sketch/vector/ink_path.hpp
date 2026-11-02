@@ -1,7 +1,7 @@
 #pragma once
 /**
  * =========================================================================================
- * @file folio_sketch/ink_path.hpp
+ * @file folio_sketch/vector/ink_path.hpp
  * @brief High-Performance 2D Vector Path Definition & ThorSVG Bridge
  * =========================================================================================
  */

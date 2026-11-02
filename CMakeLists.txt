@@ -129,17 +129,6 @@ set(FOLIO_SKETCH_HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/vector/ink_path.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/vector/ink_generator.hpp"
 
-    # Forwarding Compatibility Headers
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_stroke_data.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_config.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_collision.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_engine.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_width_evaluator.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_post_processor.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_mesh.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_path.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_generator.hpp"
-
     # Internal Headers
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/ink_physics_bridge.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/ink_stroke_finisher.hpp"

@@ -22,7 +22,7 @@
 #include <cmath>
 #include <algorithm>
 
-#include "folio_sketch/ink_stroke_data.hpp"
+#include "folio_sketch/core/ink_stroke_data.hpp"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

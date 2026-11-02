@@ -14,8 +14,8 @@
 
 #include <cmath>
 #include <algorithm>
-#include "folio_sketch/ink_config.hpp"
-#include "folio_sketch/ink_stroke_data.hpp"
+#include "folio_sketch/core/ink_config.hpp"
+#include "folio_sketch/core/ink_stroke_data.hpp"
 
 namespace Folio {
 

@@ -1,4 +1,4 @@
-#include "folio_sketch/ink_generator.hpp"
+#include "folio_sketch/vector/ink_generator.hpp"
 #include "ink_generator_internal.hpp"
 
 #include <vector>

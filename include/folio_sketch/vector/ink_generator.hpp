@@ -28,8 +28,8 @@
 #include <vector>
 #include <string>
 
-#include "folio_sketch/ink_path.hpp"
-#include "folio_sketch/ink_stroke_data.hpp"
+#include "folio_sketch/vector/ink_path.hpp"
+#include "folio_sketch/core/ink_stroke_data.hpp"
 
 namespace Folio {
 

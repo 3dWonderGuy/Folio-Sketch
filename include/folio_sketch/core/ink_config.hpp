@@ -1,7 +1,7 @@
 #pragma once
 /**
  * =========================================================================================
- * @file include/folio_sketch/ink_config.hpp
+ * @file include/folio_sketch/core/ink_config.hpp
  * @brief Self-Sustained Inking Physics, Smoothing, and Calibration Configuration
  * =========================================================================================
  *

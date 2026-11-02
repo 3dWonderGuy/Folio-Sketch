@@ -6,7 +6,7 @@
  */
 
 #include "debug/gl_capsule_renderer.hpp"
-#include "folio_sketch/ink_mesh.hpp"
+#include "folio_sketch/gpu/ink_mesh.hpp"
 
 #if defined(__ANDROID__)
 #include <GLES3/gl3.h>

@@ -5,7 +5,7 @@
  * =========================================================================================
  */
 
-#include "folio_sketch/ink_mesh.hpp"
+#include "folio_sketch/gpu/ink_mesh.hpp"
 #include <algorithm>
 #include <vector>
 

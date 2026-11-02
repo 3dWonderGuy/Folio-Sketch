@@ -1,7 +1,7 @@
 #pragma once
 /**
  * =========================================================================================
- * @file include/folio_sketch/ink_engine.hpp
+ * @file include/folio_sketch/engine/ink_engine.hpp
  * @brief Core Vector Inking Engine & Stroke Modeler Orchestrator
  * =========================================================================================
  *
@@ -17,11 +17,11 @@
 #include <memory>
 #include <span>
 
-#include "folio_sketch/ink_path.hpp"
-#include "folio_sketch/ink_generator.hpp"
-#include "folio_sketch/ink_stroke_data.hpp"
-#include "folio_sketch/ink_config.hpp"
-#include "folio_sketch/ink_mesh.hpp"
+#include "folio_sketch/vector/ink_path.hpp"
+#include "folio_sketch/vector/ink_generator.hpp"
+#include "folio_sketch/core/ink_stroke_data.hpp"
+#include "folio_sketch/core/ink_config.hpp"
+#include "folio_sketch/gpu/ink_mesh.hpp"
 
 namespace ink::stroke_model {
     struct Result;

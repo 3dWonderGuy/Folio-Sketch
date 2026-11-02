@@ -6,7 +6,7 @@
  * =========================================================================================
  */
 
-#include "folio_sketch/ink_generator.hpp"
+#include "folio_sketch/vector/ink_generator.hpp"
 #include "geometry/ink_nib_geometry.hpp"
 #include <vector>
 #include <cmath>

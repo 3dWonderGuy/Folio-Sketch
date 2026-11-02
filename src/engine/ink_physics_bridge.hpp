@@ -13,8 +13,8 @@
 
 #include <vector>
 #include <memory>
-#include "folio_sketch/ink_stroke_data.hpp"
-#include "folio_sketch/ink_config.hpp"
+#include "folio_sketch/core/ink_stroke_data.hpp"
+#include "folio_sketch/core/ink_config.hpp"
 
 // Forward declaration of Google Ink Stroke Modeler classes
 namespace ink::stroke_model {

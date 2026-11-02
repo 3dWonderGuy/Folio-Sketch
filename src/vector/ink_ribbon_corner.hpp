@@ -6,7 +6,7 @@
  * =========================================================================================
  */
 
-#include "folio_sketch/ink_stroke_data.hpp"
+#include "folio_sketch/core/ink_stroke_data.hpp"
 #include "geometry/ink_geometry_utils.hpp"
 #include <vector>
 

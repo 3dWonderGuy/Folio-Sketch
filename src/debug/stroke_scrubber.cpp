@@ -1,6 +1,6 @@
 #include "debug/stroke_scrubber.hpp"
-#include "folio_sketch/ink_engine.hpp"
-#include "folio_sketch/ink_generator.hpp"
+#include "folio_sketch/engine/ink_engine.hpp"
+#include "folio_sketch/vector/ink_generator.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>

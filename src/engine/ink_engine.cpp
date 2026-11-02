@@ -5,9 +5,9 @@
  * =========================================================================================
  */
 
-#include "folio_sketch/ink_engine.hpp"
-#include "folio_sketch/stroke_width_evaluator.hpp"
-#include "folio_sketch/stroke_post_processor.hpp"
+#include "folio_sketch/engine/ink_engine.hpp"
+#include "folio_sketch/engine/stroke_width_evaluator.hpp"
+#include "folio_sketch/engine/stroke_post_processor.hpp"
 #include "ink_physics_bridge.hpp"
 #include "ink_stroke_finisher.hpp"
 

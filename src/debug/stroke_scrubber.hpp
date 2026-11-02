@@ -9,9 +9,9 @@
 #include <imgui.h>
 #include <vector>
 #include <span>
-#include "folio_sketch/ink_stroke_data.hpp"
-#include "folio_sketch/ink_mesh.hpp"
-#include "folio_sketch/ink_path.hpp"
+#include "folio_sketch/core/ink_stroke_data.hpp"
+#include "folio_sketch/gpu/ink_mesh.hpp"
+#include "folio_sketch/vector/ink_path.hpp"
 #include "debug/raw_sensor_layer.hpp"
 
 namespace Folio::Debug {

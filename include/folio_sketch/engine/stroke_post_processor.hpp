@@ -19,7 +19,7 @@
 #include <vector>
 #include <cstdint>
 #include <cmath>
-#include "folio_sketch/ink_stroke_data.hpp"
+#include "folio_sketch/core/ink_stroke_data.hpp"
 
 namespace Folio {
 
