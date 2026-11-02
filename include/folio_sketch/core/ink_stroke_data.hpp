@@ -157,16 +157,13 @@ struct StrokeStyle {
  * @brief Interior fill pattern for closed vector shapes.
  */
 enum class InfillType : uint8_t {
-    None = 0,
-    Solid,
-    SemiTransparent,
-    LinearGradient,
-    RadialGradient,
-    HatchDiagonal,
-    HatchCross,
-    HatchHorizontal,
-    HatchVertical,
-    HatchDots
+    None = 0,         // No interior fill (outline only)
+    Solid,            // Uniform color fill (alpha in ColorRgba controls opacity)
+    HatchDiagonal,    // 45-degree diagonal drafting lines
+    HatchCross,       // Intersecting drafting cross-hatch
+    HatchHorizontal,  // Horizontal drafting lines
+    HatchVertical,    // Vertical drafting lines
+    HatchDots         // Stipple dot pattern
 };
 
 /**
@@ -175,9 +172,8 @@ enum class InfillType : uint8_t {
  */
 struct InfillStyle {
     InfillType type           = InfillType::None;
-    ColorRgba  primaryColor   = ColorRgba(0x00, 0x78, 0xD4, 0x40);
-    ColorRgba  secondaryColor = ColorRgba(0x00, 0xC4, 0xFF, 0x20);
-    double     outlineWidthMm = 1.0;
+    ColorRgba  color          = ColorRgba(0x00, 0x78, 0xD4, 0x40); // Fill / hatch color (with alpha)
+    double     outlineWidthMm = 1.0;                               // Reference outline thickness
 };
 
 // =============================================================================

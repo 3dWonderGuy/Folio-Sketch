@@ -15,8 +15,7 @@
  *             -- Polygon (standard shapes)  -> closed loop, always Round joins, supports infill
  *             -- Stroke  (ink)              -> open line, honors CapType, no infill
  *   STEP 2: Apply line pattern to the outline (Solid, Dashed, Dotted, DashDot)
- *   STEP 3: (Polygons only) Infill — BuildInfill() region + FillInfill() paint
- *             (Solid, SemiTransparent, Linear/Radial Gradient, Drafting Hatches)
+ *   STEP 3: (Polygons only) Infill — BuildInfill() region (Solid, Drafting Hatches)
  *
  * Implementation files:
  *   - ink_generator/ink_generator_polygon.cpp  (Dispatcher & closed polygon generation)
