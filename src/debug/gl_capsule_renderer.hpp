@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <imgui.h>
 #include "folio_sketch/core/ink_stroke_data.hpp"
+#include "folio_sketch/gpu/ink_mesh.hpp"
 #include "debug/raw_sensor_layer.hpp"
 
 namespace Folio::Debug {

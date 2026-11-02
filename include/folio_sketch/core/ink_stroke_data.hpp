@@ -2,27 +2,31 @@
 /**
  * =========================================================================================
  * @file folio_sketch/core/ink_stroke_data.hpp
- * @brief Self-Sustained Vector Ink Geometry Data Structures
+ * @brief Fundamental Inking Value Types & Telemetry Structures
  * =========================================================================================
- *
- * Fundamental 2D point, line segment, and finished stroke data structures used
- * across vector ink stroke modeling, outline tessellation, collision testing, and rendering.
- *
- * Self-Sustained Design:
- * Holds pure geometric and telemetry value types without dependencies on external engine
- * logic, solvers, or UI palettes.
  */
 
 #include <cstdint>
 #include <vector>
 
-#include "folio_sketch/vector/ink_path.hpp"
-
 namespace Folio {
+
+// =============================================================================
+// 1. PRIMITIVES: COORDINATES & COLOR
+// =============================================================================
+
+/**
+ * @struct Point2D
+ * @brief 2D canvas coordinate in physical world millimeters (mm).
+ */
+struct Point2D {
+    double x = 0.0;
+    double y = 0.0;
+};
 
 /**
  * @struct ColorRgba
- * @brief Self-sustained 32-bit RGBA color representation.
+ * @brief 32-bit RGBA color representation (0 to 255 per channel).
  */
 struct ColorRgba {
     uint8_t r = 0;
@@ -33,37 +37,18 @@ struct ColorRgba {
     constexpr ColorRgba() noexcept = default;
     constexpr ColorRgba(uint8_t r_, uint8_t g_, uint8_t b_, uint8_t a_ = 255) noexcept
         : r(r_), g(g_), b(b_), a(a_) {}
+
     constexpr ColorRgba(uint32_t argb) noexcept
         : r(static_cast<uint8_t>((argb >> 16) & 0xFF)),
-          g(static_cast<uint8_t>((argb >> 8) & 0xFF)),
-          b(static_cast<uint8_t>(argb & 0xFF)),
+          g(static_cast<uint8_t>((argb >> 8)  & 0xFF)),
+          b(static_cast<uint8_t>(argb         & 0xFF)),
           a(static_cast<uint8_t>((argb >> 24) & 0xFF)) {}
-
-    // Transparent interoperability with Blend2D BLRgba32 or any {r, g, b, a} struct
-    template <typename TColor, typename = std::enable_if_t<
-        std::is_class_v<TColor> &&
-        !std::is_same_v<std::decay_t<TColor>, ColorRgba>>>
-    constexpr ColorRgba(const TColor& c) noexcept
-        : r(static_cast<uint8_t>(c.r)),
-          g(static_cast<uint8_t>(c.g)),
-          b(static_cast<uint8_t>(c.b)),
-          a(static_cast<uint8_t>(c.a)) {}
-
-    [[nodiscard]] constexpr uint8_t red() const noexcept { return r; }
-    [[nodiscard]] constexpr uint8_t green() const noexcept { return g; }
-    [[nodiscard]] constexpr uint8_t blue() const noexcept { return b; }
-    [[nodiscard]] constexpr uint8_t alpha() const noexcept { return a; }
-
-    constexpr void setR(uint8_t v) noexcept { r = v; }
-    constexpr void setG(uint8_t v) noexcept { g = v; }
-    constexpr void setB(uint8_t v) noexcept { b = v; }
-    constexpr void setA(uint8_t v) noexcept { a = v; }
 
     [[nodiscard]] constexpr uint32_t toU32() const noexcept {
         return (static_cast<uint32_t>(a) << 24) |
-               (static_cast<uint32_t>(b)  << 16) |
+               (static_cast<uint32_t>(b) << 16) |
                (static_cast<uint32_t>(g) << 8)  |
-               static_cast<uint32_t>(r);
+                static_cast<uint32_t>(r);
     }
 
     constexpr bool operator==(const ColorRgba& o) const noexcept {
@@ -76,21 +61,60 @@ struct ColorRgba {
 
 using Color = ColorRgba;
 
-/**
- * @struct Point2D
- * @brief Universal 2D coordinate on the infinite canvas in physical world millimeters (mm).
- */
-struct Point2D {
-    double x = 0.0;
-    double y = 0.0;
+// =============================================================================
+// 2. STYLUS TELEMETRY & CENTERLINE POINTS
+// =============================================================================
 
-    constexpr Point2D() noexcept = default;
-    constexpr Point2D(double x_, double y_) noexcept : x(x_), y(y_) {}
+/**
+ * @struct StylusInputPoint
+ * @brief Raw hardware sensor packet before physics smoothing.
+ */
+struct StylusInputPoint {
+    double x           = 0.0;   // World X coordinate (mm)
+    double y           = 0.0;   // World Y coordinate (mm)
+    float  pressure    = 1.0f;  // Hardware stylus pressure [0.0, 1.0]
+    double timeSeconds = 0.0;   // Timestamp (seconds)
+    float  speed       = 0.0f;  // Speed (mm/s)
+    float  tiltX       = 0.0f;  // Stylus X tilt angle (radians)
+    float  tiltY       = 0.0f;  // Stylus Y tilt angle (radians)
+
+    constexpr StylusInputPoint() noexcept = default;
+    constexpr StylusInputPoint(double x_, double y_, float pressure_ = 1.0f,
+                               double timeSec_ = 0.0, float speed_ = 0.0f,
+                               float tiltX_ = 0.0f, float tiltY_ = 0.0f) noexcept
+        : x(x_), y(y_), pressure(pressure_),
+          timeSeconds(timeSec_), speed(speed_),
+          tiltX(tiltX_), tiltY(tiltY_) {}
 };
 
 /**
+ * @struct StrokePoint
+ * @brief Physics-modeled centerline point with pre-calculated stroke radius.
+ */
+struct StrokePoint {
+    double x        = 0.0;    // Smoothed world X (mm)
+    double y        = 0.0;    // Smoothed world Y (mm)
+    float  r        = 0.25f;  // Evaluated stroke radius / half-thickness (mm)
+    float  pressure = 0.65f;  // Modeled pressure [0.0, 1.0]
+    float  tiltX    = 0.0f;   // Stylus X tilt angle (radians)
+    float  tiltY    = 0.0f;   // Stylus Y tilt angle (radians)
+
+    constexpr StrokePoint() noexcept = default;
+    constexpr StrokePoint(double x_, double y_, float r_ = 0.25f,
+                          float pressure_ = 0.65f, float tiltX_ = 0.0f, float tiltY_ = 0.0f) noexcept
+        : x(x_), y(y_), r(r_), pressure(pressure_), tiltX(tiltX_), tiltY(tiltY_) {}
+
+    // Implicit conversion to Point2D for geometric utilities and collision math
+    constexpr operator Point2D() const noexcept { return Point2D{ x, y }; }
+};
+
+// =============================================================================
+// 3. STROKE STYLES, CAPS & PATTERNS
+// =============================================================================
+
+/**
  * @enum CapType
- * @brief Endcap geometry style for terminal stroke ribbon segments.
+ * @brief Terminal cap geometry for strokes.
  */
 enum class CapType : uint8_t {
     Round = 0,
@@ -100,212 +124,74 @@ enum class CapType : uint8_t {
 
 /**
  * @enum StrokePattern
- * @brief Tessellation pattern along the stroke centerline.
+ * @brief Visual pattern along stroke centerline.
  */
 enum class StrokePattern : uint8_t {
     Solid = 0,
     Dashed,
     Dotted,
-    DashDot,        ///< Alternating dash and dot stroke pattern
+    DashDot,
     TexturedPencil
 };
 
 /**
  * @struct StrokeStyle
- * @brief Core visual and geometric properties applied to a vector stroke or shape outline.
+ * @brief Tool preset and aesthetic configuration for a stroke.
  */
 struct StrokeStyle {
-    float         baseWidth   = 0.5f;                             ///< Base line thickness in world millimeters (mm)
-    CapType       capType     = CapType::Round;                   ///< Terminal segment cap style
-    StrokePattern pattern     = StrokePattern::Solid;             ///< Tessellation pattern (solid, dashed, dotted, dash-dot, textured pencil)
-    ColorRgba     color       = ColorRgba(0x18, 0x1A, 0x20, 0xFF); ///< Pigment color
-    bool          usePressure = true;                             ///< Enable digitizer tip pressure dynamics
-    bool          useTilt     = false;                            ///< Enable stylus tilt shading dynamics
-    bool          useVelocity = false;                            ///< Enable hydrodynamic velocity thinning
+    float         baseWidth   = 0.5f;                             // Base line thickness (mm)
+    CapType       capType     = CapType::Round;                   // Terminal cap style
+    StrokePattern pattern     = StrokePattern::Solid;             // Pattern (solid, dash, dot, pencil)
+    ColorRgba     color       = ColorRgba(0x18, 0x1A, 0x20, 0xFF);// Stroke pigment color
+    bool          usePressure = true;                             // Modulate width by stylus pressure
+    bool          useVelocity = false;                            // Fountain pen hydrodynamic thinning
+    bool          useTilt     = false;                            // Shading spread via stylus tilt
 };
+
+// =============================================================================
+// 4. CLOSED POLYGON INFILL STYLES
+// =============================================================================
 
 /**
  * @enum InfillType
- * @brief Interior fill style for closed polygons (polygons only; ink strokes never fill).
+ * @brief Interior fill pattern for closed vector shapes.
  */
 enum class InfillType : uint8_t {
-    None = 0,         ///< Transparent / no fill
-    Solid,            ///< Fully opaque solid color
-    SemiTransparent,  ///< Translucent color wash
-    LinearGradient,   ///< Two-stop gradient across the bounds diagonal
-    RadialGradient,   ///< Two-stop center-outward gradient
-    HatchDiagonal,    ///< 45-degree parallel drafting lines (///)
-    HatchCross,       ///< Intersecting 45-degree drafting grid (XXX)
-    HatchHorizontal,  ///< Horizontal parallel drafting lines (---)
-    HatchVertical,    ///< Vertical parallel drafting lines (|||)
-    HatchDots         ///< Fine circular dot stipple
+    None = 0,
+    Solid,
+    SemiTransparent,
+    LinearGradient,
+    RadialGradient,
+    HatchDiagonal,
+    HatchCross,
+    HatchHorizontal,
+    HatchVertical,
+    HatchDots
 };
 
 /**
  * @struct InfillStyle
- * @brief Everything the generator needs to paint a polygon interior.
+ * @brief Infill appearance configuration for closed polygons.
  */
 struct InfillStyle {
-    InfillType    type           = InfillType::None;
-    ColorRgba     primaryColor   = ColorRgba(0x00, 0x78, 0xD4, 0x40); ///< Main fill / hatch color
-    ColorRgba     secondaryColor = ColorRgba(0x00, 0xC4, 0xFF, 0x20); ///< Gradient end color
-    double        outlineWidthMm = 1.0;                               ///< Outline thickness (hatch lines = half of this)
-    BoundingBox2D bounds         = BoundingBox2D(0.0, 0.0, 0.0, 0.0); ///< World-space bounds (gradients & hatch density)
+    InfillType type           = InfillType::None;
+    ColorRgba  primaryColor   = ColorRgba(0x00, 0x78, 0xD4, 0x40);
+    ColorRgba  secondaryColor = ColorRgba(0x00, 0xC4, 0xFF, 0x20);
+    double     outlineWidthMm = 1.0;
 };
 
-/**
- * @struct StylusTelemetry
- * @brief Stylus digitizer sensor dynamics (pressure, tilt angles).
- */
-struct StylusTelemetry {
-    float pressure = 1.0f;    ///< Stylus tip contact pressure [0.0, 1.0]
-    float tiltX    = 0.0f;    ///< Stylus tilt angle along X axis in radians
-    float tiltY    = 0.0f;    ///< Stylus tilt angle along Y axis in radians
-
-    constexpr StylusTelemetry() noexcept = default;
-    constexpr StylusTelemetry(float pressure_, float tiltX_ = 0.0f, float tiltY_ = 0.0f) noexcept
-        : pressure(pressure_), tiltX(tiltX_), tiltY(tiltY_) {}
-};
-
-/**
- * @struct StrokePoint
- * @brief Discrete centerline vertex with pre-resolved stroke radius (r).
- */
-struct StrokePoint : public Point2D, public StylusTelemetry {
-    float r = 0.25f;  ///< Pre-calculated stroke radius (half-thickness) in world millimeters (mm)
-
-    constexpr StrokePoint() noexcept = default;
-    constexpr StrokePoint(double x_, double y_, float r_ = 0.25f,
-                          float pressure_ = 0.65f, float tiltX_ = 0.0f, float tiltY_ = 0.0f) noexcept
-        : Point2D(x_, y_), StylusTelemetry(pressure_, tiltX_, tiltY_), r(r_) {}
-};
-
-/**
- * @struct StylusInputPoint
- * @brief Raw hardware digitizer telemetry before physics modeling.
- */
-struct StylusInputPoint : public Point2D, public StylusTelemetry {
-    double timeSeconds = 0.0;  ///< Sampling timestamp in seconds
-    float  speed = 0.0f;       ///< Stylus velocity in mm/s
-
-    constexpr StylusInputPoint() noexcept = default;
-    constexpr StylusInputPoint(double x_, double y_, float pressure_ = 1.0f,
-                               double timeSec_ = 0.0, float speed_ = 0.0f,
-                               float tiltX_ = 0.0f, float tiltY_ = 0.0f) noexcept
-        : Point2D(x_, y_), StylusTelemetry(pressure_, tiltX_, tiltY_),
-          timeSeconds(timeSec_), speed(speed_) {}
-};
+// =============================================================================
+// 5. COLLISION & FINISHED DATA CONTAINERS
+// =============================================================================
 
 /**
  * @struct Segment1D
- * @brief Linear segment between two points with physical thickness (used for collision/eraser capsules).
+ * @brief Linear segment between two points with physical width (capsule collision).
  */
 struct Segment1D {
-    Point2D p0;               ///< Starting point of the segment
-    Point2D p1;               ///< Ending point of the segment
-    float width = 0.5f;       ///< Segment line thickness in world millimeters (mm)
-};
-
-/**
- * @struct InkVertex
- * @brief Direct GPU vertex format for SDL_GPU / OpenGL indexed triangle mesh stroke rendering.
- */
-struct InkVertex {
-    float x = 0.0f;              ///< World X coordinate (mm)
-    float y = 0.0f;              ///< World Y coordinate (mm)
-    float edgeDist = 0.0f;       ///< -1.0 (Left rail) to +1.0 (Right rail), 0.0 (Centerline) for fragment AA
-    float radius = 0.0f;         ///< Stroke radius at vertex (mm)
-    uint32_t color = 0xFF000000; ///< Packed RGBA8 (R in byte 0, G in byte 1, B in byte 2, A in byte 3)
-};
-
-/**
- * @struct InkMesh
- * @brief Batch of GPU-ready vertices and triangle indices.
- */
-struct InkMesh {
-    std::vector<InkVertex> vertices;
-    std::vector<uint32_t>  indices;
-    uint32_t coreIndexCount = 0; ///< Number of indices belonging to the solid core ribbon
-
-    void clear() noexcept {
-        vertices.clear();
-        indices.clear();
-        coreIndexCount = 0;
-    }
-
-    [[nodiscard]] bool empty() const noexcept {
-        return vertices.empty() || indices.empty();
-    }
-
-    void reserve(size_t vCount, size_t iCount) {
-        vertices.reserve(vCount);
-        indices.reserve(iCount);
-    }
-};
-
-/**
- * @brief Packs a ColorRgba color into R8G8B8A8 (ABGR32 little-endian) for GPU vertex color.
- */
-[[nodiscard]] constexpr uint32_t PackGpuColor(ColorRgba c, float opacity = 1.0f) noexcept {
-    uint32_t r = c.r;
-    uint32_t g = c.g;
-    uint32_t b = c.b;
-    uint32_t a = static_cast<uint32_t>(static_cast<float>(c.a) * (opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity)) + 0.5f);
-    return (a << 24) | (b << 16) | (g << 8) | r;
-}
-
-/**
- * @brief Packs a ColorRgba color into premultiplied R8G8B8A8 (ABGR32 little-endian) for GPU capsule instances.
- */
-[[nodiscard]] constexpr uint32_t PackPremultipliedGpuColor(ColorRgba c, float opacity = 1.0f) noexcept {
-    float clampedOpacity = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
-    float alphaNorm = (static_cast<float>(c.a) / 255.0f) * clampedOpacity;
-    uint32_t r = static_cast<uint32_t>(static_cast<float>(c.r) * alphaNorm + 0.5f);
-    uint32_t g = static_cast<uint32_t>(static_cast<float>(c.g) * alphaNorm + 0.5f);
-    uint32_t b = static_cast<uint32_t>(static_cast<float>(c.b) * alphaNorm + 0.5f);
-    uint32_t a = static_cast<uint32_t>(alphaNorm * 255.0f + 0.5f);
-    return (a << 24) | (b << 16) | (g << 8) | r;
-}
-
-/**
- * @struct CapsuleVec2
- * @brief 2D float coordinate pair for GPU instanced capsule attributes.
- */
-struct CapsuleVec2 {
-    float x = 0.0f;
-    float y = 0.0f;
-
-    constexpr CapsuleVec2() noexcept = default;
-    constexpr CapsuleVec2(float x_, float y_) noexcept : x(x_), y(y_) {}
-};
-
-/**
- * @struct CapsuleInstance
- * @brief Instanced data structure for GPU Analytic Segment Signed Distance Field (Capsule SDF) rendering.
- *
- * Each instance represents a line segment between adjacent modeled points P_i and P_{i+1}.
- * Single-point taps (dots) emit a single instance where pointA == pointB.
- */
-struct CapsuleInstance {
-    CapsuleVec2 pointA{};                ///< Start coordinate in world space
-    CapsuleVec2 pointB{};                ///< End coordinate in world space
-    CapsuleVec2 radii{};                 ///< (radiusA, radiusB) for variable-width pressure interpolation
-    uint32_t    colorRgba = 0xFF000000u; ///< Packed 32-bit premultiplied RGBA color
-};
-
-/**
- * @struct FinishedStrokeData
- * @brief Completed inking stroke container encapsulating collision segments, modeled centerline,
- *        GPU capsule instances, outline polygon, and legacy GPU mesh.
- */
-struct FinishedStrokeData {
-    std::vector<Segment1D>       liveSegments;
-    std::vector<StrokePoint>     modeledPoints;
-    std::vector<CapsuleInstance> capsules;
-    InkPath                      outlinePath;
-    InkMesh                      mesh;
-
-    FinishedStrokeData() = default;
+    Point2D p0;
+    Point2D p1;
+    float   width = 0.5f;
 };
 
 } // namespace Folio

@@ -31,6 +31,21 @@ namespace Folio {
 
 class InkPhysicsBridge;
 
+/**
+ * @struct FinishedStrokeData
+ * @brief Completed inking stroke container encapsulating collision segments, modeled centerline,
+ *        GPU capsule instances, outline polygon, and legacy GPU mesh.
+ */
+struct FinishedStrokeData {
+    std::vector<Segment1D>       liveSegments;
+    std::vector<StrokePoint>     modeledPoints;
+    std::vector<CapsuleInstance> capsules;
+    InkPath                      outlinePath;
+    InkMesh                      mesh;
+
+    FinishedStrokeData() = default;
+};
+
 class InkEngine {
 public:
     InkEngine();
