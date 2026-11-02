@@ -93,32 +93,51 @@ set(FOLIO_SKETCH_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/ink_geometry_utils.cpp"
 
     # Vector Geometry & Ribbon Generators
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_polygon.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_stroke.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_ribbon.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_caps.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_patterns.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_infill.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_ribbon_corner.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/vector/ink_generator_polygon.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/vector/ink_generator_stroke.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/vector/ink_generator_ribbon.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/vector/ink_generator_caps.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/vector/ink_generator_patterns.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/vector/ink_generator_infill.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/vector/ink_ribbon_corner.cpp"
 
     # Diagnostics & Debug
     "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/ink_generator_debug.cpp"
 
     # GPU Mesh Builder
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/mesh/ink_mesh_builder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/ink_mesh_builder.cpp"
 )
 
 set(FOLIO_SKETCH_HEADERS
-    # Public API Headers
+    # Umbrella Header
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/folio_sketch.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_path.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_engine.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_config.hpp"
+
+    # Core Foundations & Data Types
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/core/ink_stroke_data.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/core/ink_config.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/core/stroke_collision.hpp"
+
+    # Engine
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/engine/ink_engine.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/engine/stroke_width_evaluator.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/engine/stroke_post_processor.hpp"
+
+    # GPU
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/gpu/ink_mesh.hpp"
+
+    # Vector
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/vector/ink_path.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/vector/ink_generator.hpp"
+
+    # Forwarding Compatibility Headers
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_stroke_data.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_mesh.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_config.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_collision.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_engine.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_width_evaluator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/stroke_post_processor.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_mesh.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_path.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/ink_generator.hpp"
 
     # Internal Headers
@@ -127,8 +146,8 @@ set(FOLIO_SKETCH_HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/ink_geometry_utils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/ink_nib_geometry.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/ink_stroke_filter.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_generator_internal.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/generator/ink_ribbon_corner.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/vector/ink_generator_internal.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/vector/ink_ribbon_corner.hpp"
 )
 
 add_library(FolioSketch STATIC
