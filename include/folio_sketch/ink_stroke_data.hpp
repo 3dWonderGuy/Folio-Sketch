@@ -255,14 +255,55 @@ struct InkMesh {
 }
 
 /**
+ * @brief Packs a ColorRgba color into premultiplied R8G8B8A8 (ABGR32 little-endian) for GPU capsule instances.
+ */
+[[nodiscard]] constexpr uint32_t PackPremultipliedGpuColor(ColorRgba c, float opacity = 1.0f) noexcept {
+    float clampedOpacity = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
+    float alphaNorm = (static_cast<float>(c.a) / 255.0f) * clampedOpacity;
+    uint32_t r = static_cast<uint32_t>(static_cast<float>(c.r) * alphaNorm + 0.5f);
+    uint32_t g = static_cast<uint32_t>(static_cast<float>(c.g) * alphaNorm + 0.5f);
+    uint32_t b = static_cast<uint32_t>(static_cast<float>(c.b) * alphaNorm + 0.5f);
+    uint32_t a = static_cast<uint32_t>(alphaNorm * 255.0f + 0.5f);
+    return (a << 24) | (b << 16) | (g << 8) | r;
+}
+
+/**
+ * @struct CapsuleVec2
+ * @brief 2D float coordinate pair for GPU instanced capsule attributes.
+ */
+struct CapsuleVec2 {
+    float x = 0.0f;
+    float y = 0.0f;
+
+    constexpr CapsuleVec2() noexcept = default;
+    constexpr CapsuleVec2(float x_, float y_) noexcept : x(x_), y(y_) {}
+};
+
+/**
+ * @struct CapsuleInstance
+ * @brief Instanced data structure for GPU Analytic Segment Signed Distance Field (Capsule SDF) rendering.
+ *
+ * Each instance represents a line segment between adjacent modeled points P_i and P_{i+1}.
+ * Single-point taps (dots) emit a single instance where pointA == pointB.
+ */
+struct CapsuleInstance {
+    CapsuleVec2 pointA{};                ///< Start coordinate in world space
+    CapsuleVec2 pointB{};                ///< End coordinate in world space
+    CapsuleVec2 radii{};                 ///< (radiusA, radiusB) for variable-width pressure interpolation
+    uint32_t    colorRgba = 0xFF000000u; ///< Packed 32-bit premultiplied RGBA color
+};
+
+/**
  * @struct FinishedStrokeData
- * @brief Completed inking stroke container encapsulating collision segments, modeled centerline, outline polygon, and GPU mesh.
+ * @brief Completed inking stroke container encapsulating collision segments, modeled centerline,
+ *        GPU capsule instances, outline polygon, and legacy GPU mesh.
  */
 struct FinishedStrokeData {
-    std::vector<Segment1D> liveSegments;
-    std::vector<StrokePoint> modeledPoints;
-    InkPath outlinePath;
-    InkMesh mesh;
+    std::vector<Segment1D>       liveSegments;
+    std::vector<StrokePoint>     modeledPoints;
+    std::vector<CapsuleInstance> capsules;
+    InkPath                      outlinePath;
+    InkMesh                      mesh;
 
     FinishedStrokeData() = default;
 };

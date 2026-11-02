@@ -22,7 +22,7 @@ void StrokeScrubber::LoadRepro114(StrokeStyle& style,
                                   std::vector<RawInputSample>& outRawSamples,
                                   CanvasTransform* optionalViewportToCenter) {
     static const std::vector<StrokePoint> kRepro114Points = {
-#include "../../test/repro114.inc"
+#include "debug/repro114.inc"
     };
 
     m_frozenModeledPoints = kRepro114Points;
@@ -84,13 +84,6 @@ void StrokeScrubber::Retessellate(const StrokeStyle& style, float zoomScale) {
 
     std::vector<StrokePoint> subPoints(slice.begin(), slice.end());
     m_scrubbedOutline = InkEngine::BuildStrokeOutline(subPoints, style.capType, style.pattern);
-    InkEngine::BuildStrokeMesh(
-        slice,
-        style.capType,
-        PackGpuColor(style.color),
-        m_scrubbedMesh,
-        std::max(0.5f, zoomScale),
-        style.pattern);
 }
 
 bool StrokeScrubber::RenderUI(StrokeStyle& style,

@@ -365,6 +365,3 @@ private:
 };
 
 } // namespace Folio
-
-using StrokeCollisionEngine = Folio::StrokeCollisionEngine;
-using StrokeSlicer = Folio::StrokeSlicer;

@@ -1,25 +1,20 @@
 #pragma once
-
 /**
- * @file ink_engine.hpp
- * @brief Universal inking physics, geometry synthesis, and presentation data engine.
+ * =========================================================================================
+ * @file include/folio_sketch/ink_engine.hpp
+ * @brief Core Vector Inking Engine & Stroke Modeler Orchestrator
+ * =========================================================================================
  *
- * ARCHITECTURAL DESIGN:
- * ---------------------
- * InkEngine is the single public facade for all handwriting, dynamic width evaluation,
- * predictive stroke modeling, and outline generation.
- *
- * INTERNAL PIPELINE & HELPERS (ink_engine.cpp):
- * - MakeGoogleInput()       : Translates our Point2D into Google Ink's Input packet (kDown/kMove/kUp).
- * - ToPoint2D()             : Translates Google Ink's smoothed Result into Point2D and computes dynamic thickness.
- * - ProcessGoogleResults()  : Converts smoothed Google results into modeled points and updates live 2D outline.
- * - UpdateGooglePrediction(): Projects Kalman-predicted points ahead of the pen tip to hide display latency.
- * - UpdatePhysicsParams()   : Pushes active m_config physics parameters into Google StrokeModeler.
+ * Single facade orchestrating:
+ * - Stylus input lifecycle (BeginStroke, AppendPoint, FinishStroke, CancelStroke)
+ * - Dynamic line thickness evaluation (pressure gamma, velocity thinning, tilt angle)
+ * - Live GPU Capsule SDF streaming (instantaneous O(N) segment generation)
+ * - Forward Kalman prediction to eliminate perceived glass-to-display latency
+ * - 2D Vector Path outline generation (InkPath) for SVG, PDF, and clipboard export
  */
 
 #include <vector>
 #include <memory>
-#include <cstdint>
 #include <span>
 
 #include "folio_sketch/ink_path.hpp"
@@ -28,64 +23,46 @@
 #include "folio_sketch/ink_config.hpp"
 #include "folio_sketch/ink_mesh.hpp"
 
-// Forward declarations for Google Ink Stroke Modeler
 namespace ink::stroke_model {
-    class StrokeModeler;
     struct Result;
 }
 
 namespace Folio {
 
-/**
- * @class InkEngine
- * @brief Core data and execution engine for vector handwriting and live drawing.
- */
+class InkPhysicsBridge;
+
 class InkEngine {
 public:
     InkEngine();
     ~InkEngine();
 
-    // Non-copyable, non-movable engine service
     InkEngine(const InkEngine&) = delete;
     InkEngine& operator=(const InkEngine&) = delete;
     InkEngine(InkEngine&&) = delete;
     InkEngine& operator=(InkEngine&&) = delete;
 
     // -------------------------------------------------------------------------
-    // 1. INKING LIFECYCLE (Coordinates in physical world millimeters)
+    // 1. INKING LIFECYCLE
     // -------------------------------------------------------------------------
 
     /**
      * @brief Initiates a new live vector stroke gesture.
      *
-     * Working Process:
-     * 1. Resets Google Ink modeler state and transient point accumulation buffers.
-     * 2. Seeds the touchdown input sample (kDown) into the Google Modeler physics pipeline.
-     * 3. Renders an immediate visual fallback dot if the tremor filter buffers initial movement.
-     * 4. Updates forward predictive tip outline if enabled.
-     *
      * @param worldX Initial stylus X position in physical millimeters.
      * @param worldY Initial stylus Y position in physical millimeters.
      * @param pressure Initial contact pressure [0.0, 1.0].
      * @param timeSec Monotonic event timestamp in seconds.
-     * @param style Active stroke style, nib dimensions, cap geometry, pattern, and pigment.
-     * @param zoomScale Current viewport zoom factor (normalizes velocity thinning to screen speed).
-     * @param tiltX Stylus tilt angle along X axis in radians/degrees.
-     * @param tiltY Stylus tilt angle along Y axis in radians/degrees.
+     * @param style Active stroke style, nib dimensions, pattern, and pigment.
+     * @param zoomScale Current viewport zoom factor.
+     * @param tiltX Stylus tilt angle along X axis in radians.
+     * @param tiltY Stylus tilt angle along Y axis in radians.
      */
     void BeginStroke(double worldX, double worldY, float pressure, double timeSec,
                      const StrokeStyle& style, float zoomScale = 1.0f,
                      float tiltX = 0.0f, float tiltY = 0.0f);
 
     /**
-     * @brief Ingests continuous motion telemetry from the stylus or mouse.
-     *
-     * Working Process:
-     * 1. Submits raw input sample (pos, time, pressure) to Google Ink's position and wobble filters.
-     * 2. Solves dynamic line width via pressure gamma mapping and velocity thinning equations.
-     * 3. Applies Exponential Moving Average (EMA) smoothing to eliminate single-frame thickness jitter.
-     * 4. Reconstructs confirmed 2D outline path via InkGenerator.
-     * 5. Solves predictive continuation frames to minimize perceived display latency at the pen tip.
+     * @brief Ingests continuous motion telemetry from stylus or mouse.
      *
      * @param worldX Current stylus X position in millimeters.
      * @param worldY Current stylus Y position in millimeters.
@@ -98,62 +75,41 @@ public:
                      float tiltX = 0.0f, float tiltY = 0.0f);
 
     /**
-     * @brief Finalizes the active stroke gesture upon pointer release.
-     *
-     * Working Process:
-     * 1. Submits a final kUp event to flush lingering spring inertia in Google Modeler.
-     * 2. Handles single-click / tap edge cases (synthesizes a dot if no lateral movement occurred).
-     * 3. Builds the final 2D closed polygon ribbon with end-caps.
-     * 4. Clears transient live buffers and returns the immutable FinishedStrokeData snapshot.
-     *
-     * @return FinishedStrokeData The completed stroke package ready for layer / document commitment.
+     * @brief Finalizes the active stroke gesture upon pointer lift.
+     * @return FinishedStrokeData The completed stroke package ready for layer commitment.
      */
     FinishedStrokeData FinishStroke();
 
     /**
      * @brief Discards the active in-flight stroke without generating output.
-     * Called on palm rejection triggers, modal interruptions, or window blur.
      */
     void CancelStroke();
 
     // -------------------------------------------------------------------------
-    // 2. LAYER INTERACTION & STATE QUERIES
+    // 2. STATE & GEOMETRY ACCESSORS
     // -------------------------------------------------------------------------
 
-    /**
-     * @brief Queries whether an inking gesture is currently in progress.
-     */
-    [[nodiscard]] bool IsStrokeActive() const noexcept { return m_isStrokeActive; }   // True while stylus/pointer is held down and receiving stroke inputs
-    [[nodiscard]] const InkMesh& GetLiveMesh() const noexcept;                        // GPU vertex/index buffer (ribbon mesh + AA skirts) for confirmed stroke segments
-    [[nodiscard]] const InkMesh& GetPredictedMesh() const noexcept;                   // GPU vertex/index buffer for speculative forward prediction mesh
-    [[nodiscard]] const std::vector<StrokePoint>& GetLiveModeledPoints() const noexcept { return m_liveModeledPoints; } // Raw physics-modeled stroke coordinates (x, y, radius, pressure)
-    [[nodiscard]] const std::vector<StrokePoint>& GetPredictedPoints() const noexcept; // Predicted future sample points computed by the Kalman/stroke-end predictor
-    [[nodiscard]] const StrokeStyle& GetActiveStyle() const noexcept { return m_activeStyle; } // Current active pen style settings (color, width, caps, blend mode)
+    [[nodiscard]] bool IsStrokeActive() const noexcept { return m_isStrokeActive; }
+    [[nodiscard]] const std::vector<StrokePoint>& GetLiveModeledPoints() const noexcept { return m_liveModeledPoints; }
+    [[nodiscard]] const std::vector<StrokePoint>& GetPredictedPoints() const noexcept;
+    [[nodiscard]] const std::vector<CapsuleInstance>& GetLiveCapsules() const noexcept;
+    [[nodiscard]] const std::vector<CapsuleInstance>& GetPredictedCapsules() const noexcept;
+    [[nodiscard]] const StrokeStyle& GetActiveStyle() const noexcept { return m_activeStyle; }
 
     // -------------------------------------------------------------------------
-    // 3. CONFIGURATION & OUTLINE COMPUTATION AUTHORITY
+    // 3. CONFIGURATION MANAGEMENT
     // -------------------------------------------------------------------------
 
-    /**
-     * @brief Returns a reference to the active inking configuration.
-     * Note: If modifying Google physics settings directly, call UpdatePhysicsParams() to apply them.
-     */
-    [[nodiscard]] InkingConfig& GetConfig() noexcept;
-
-    /**
-     * @brief Sets configuration and pushes physics parameters to Google Modeler immediately.
-     * @param config Complete inking configuration settings.
-     */
+    [[nodiscard]] InkingConfig& GetConfig() noexcept { return m_config; }
     void SetConfig(const InkingConfig& config);
-
-    /**
-     * @brief Updates Google Modeler parameters from current m_config settings.
-     * Pushes spring-mass constant, drag, loop mitigation, wobble filters, and angle upsampling.
-     */
     void UpdatePhysicsParams();
 
+    // -------------------------------------------------------------------------
+    // 4. CENTRAL AUTHORITIES
+    // -------------------------------------------------------------------------
+
     /**
-     * @brief Centralized stroke outline computing authority.
+     * @brief Centralized stroke outline computing authority (for SVG / PDF / Clipboard).
      */
     static InkPath BuildStrokeOutline(const std::vector<StrokePoint>& points,
                                       CapType capType = CapType::Round,
@@ -163,53 +119,24 @@ public:
     }
 
     /**
-     * @brief Centralized GPU indexed triangle mesh computing authority.
+     * @brief Centralized GPU Capsule SDF segment instance computing authority.
      */
-    static void BuildStrokeMesh(std::span<const StrokePoint> points,
-                                CapType capType,
-                                uint32_t packedColor,
-                                InkMesh& outMesh,
-                                float scalePxPerMm = 3.7795f,
-                                StrokePattern pattern = StrokePattern::Solid) {
-        if (pattern == StrokePattern::Solid) {
-            InkMeshBuilder::BuildSolidMesh(points, capType, packedColor, outMesh, scalePxPerMm);
-        } else {
-            InkMeshBuilder::BuildStyledMesh(points, capType, pattern, packedColor, outMesh, scalePxPerMm);
-        }
+    static void BuildStrokeCapsules(std::span<const StrokePoint> points,
+                                    uint32_t premulColorRgba,
+                                    std::vector<CapsuleInstance>& outCapsules) {
+        CapsuleBuilder::BuildCapsuleInstances(points, premulColorRgba, outCapsules);
     }
 
 private:
-    /**
-     * @brief Converts a confirmed Google Ink smoothed Result into a StrokePoint with resolved radius (r).
-     * Evaluates dynamic thickness via StrokeWidthEvaluator combining pressure curve,
-     * velocity thinning, tilt factor, and internal EMA smoothing.
-     *
-     * @param res Confirmed smoothed result from Google Stroke Modeler.
-     * @param previousWidth Smoothed width from preceding point (-1.0f if starting a stroke).
-     * @return StrokePoint Point with world coordinates and pre-resolved radius (r).
-     */
     StrokePoint ToStrokePoint(const ink::stroke_model::Result& res, float previousWidth = -1.0f) const;
-
-    // Processes confirmed Google Ink results into live modeled points and updates 2D live outline
-    void ProcessGoogleResults(const std::vector<ink::stroke_model::Result>& results);
-
-    // Computes static or dynamic touch-down / tap width based on pressure and tilt
+    void ProcessPhysicsResults(const std::vector<ink::stroke_model::Result>& results);
     [[nodiscard]] float EvaluateTapWidth(float pressure, float tiltX, float tiltY) const noexcept;
 
-    // Sub-stages of FinishStroke
-    void FlushPhysicsOnPenUp();
-    void HandleSingleTapEdgeCase();
-    void ApplyTailTaper(std::vector<StrokePoint>& points) const;
-    [[nodiscard]] std::vector<Segment1D> BuildCollisionSegments(const std::vector<StrokePoint>& points) const;
-
-    // Builds temporary forward-predicted tip mesh to reduce perceived latency
-    void EnsureLiveMesh() const;
+    void EnsureLiveCapsules() const;
     void EnsurePrediction() const;
-
-    // Recomputes cached evaluation config flags from active style & config
     void UpdateEvalConfig() noexcept;
 
-    // Internal Inking State
+    // Gesture State
     bool m_isStrokeActive = false;
     StrokeStyle m_activeStyle;
     InkingConfig m_config;
@@ -217,20 +144,20 @@ private:
     float m_zoomScale = 1.0f;
     float m_smoothedWidth = -1.0f;
 
-    // Point and Vector Geometry Buffers
+    // Geometry & Result Buffers
     std::vector<StylusInputPoint> m_activeStrokePoints;
     std::vector<StrokePoint> m_liveModeledPoints;
-    std::vector<ink::stroke_model::Result> m_googleResultsBuffer;
-    mutable std::vector<ink::stroke_model::Result> m_googlePredictionsBuffer;
+    std::vector<ink::stroke_model::Result> m_physicsResultsBuffer;
+    mutable std::vector<ink::stroke_model::Result> m_predictionResultsBuffer;
     mutable std::vector<StrokePoint> m_predictedPointsBuffer;
 
-    mutable InkMesh m_liveStrokeMesh;
-    mutable InkMesh m_predictedStrokeMesh;
-    mutable bool m_meshDirty = false;
+    mutable std::vector<CapsuleInstance> m_liveCapsules;
+    mutable std::vector<CapsuleInstance> m_predictedCapsules;
+    mutable bool m_capsulesDirty = false;
     mutable bool m_predictionDirty = false;
 
-    // Google Ink Modeler Bridge
-    std::unique_ptr<ink::stroke_model::StrokeModeler> m_googleModeler;
+    // Physics Engine Bridge
+    std::unique_ptr<InkPhysicsBridge> m_physicsBridge;
 };
 
 } // namespace Folio

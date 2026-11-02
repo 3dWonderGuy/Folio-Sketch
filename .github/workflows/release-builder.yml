@@ -67,9 +67,7 @@ jobs:
           cmake -B build-linux -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_STANDARD=20 \
-            -DFOLIO_SKETCH_BUILD_INSPECTOR=ON \
-            -DFOLIO_SKETCH_BUILD_TESTS=OFF \
-            -DFOLIO_SKETCH_ENABLE_THORSVG=OFF
+            -DFOLIO_SKETCH_BUILD_INSPECTOR=ON
 
       - name: Build folio_ink_inspector (Linux)
         run: |
@@ -118,9 +116,7 @@ jobs:
           cmake -B build-win -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_CXX_STANDARD=20 `
-            -DFOLIO_SKETCH_BUILD_INSPECTOR=ON `
-            -DFOLIO_SKETCH_BUILD_TESTS=OFF `
-            -DFOLIO_SKETCH_ENABLE_THORSVG=OFF
+            -DFOLIO_SKETCH_BUILD_INSPECTOR=ON
 
       - name: Build folio_ink_inspector (Windows)
         run: |

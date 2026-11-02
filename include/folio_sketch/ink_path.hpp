@@ -14,10 +14,6 @@
 #include <memory>
 #include <cstdio>
 
-namespace tvg {
-class Shape;
-}
-
 namespace Folio {
 
 /**
@@ -185,55 +181,6 @@ public:
         }
     }
 
-    template <typename TPath>
-    void toBLPath(TPath& dst) const {
-        exportTo(dst);
-    }
-
-    /**
-     * @brief Converts this InkPath to a ThorSVG Shape for vector rendering.
-     *        Templated so <thorvg.h> is only required if the caller explicitly invokes it.
-     */
-    template <typename TShape = tvg::Shape>
-    [[nodiscard]] TShape* toThorVGShape() const {
-        auto* shape = TShape::gen();
-        if (m_verbs.empty()) return shape;
-
-        size_t ptIdx = 0;
-        for (PathVerb verb : m_verbs) {
-            switch (verb) {
-                case PathVerb::MoveTo:
-                    if (ptIdx < m_points.size()) {
-                        shape->moveTo(m_points[ptIdx].x, m_points[ptIdx].y);
-                        ptIdx++;
-                    }
-                    break;
-                case PathVerb::LineTo:
-                    if (ptIdx < m_points.size()) {
-                        shape->lineTo(m_points[ptIdx].x, m_points[ptIdx].y);
-                        ptIdx++;
-                    }
-                    break;
-                case PathVerb::CubicTo:
-                    if (ptIdx + 2 < m_points.size()) {
-                        shape->cubicTo(m_points[ptIdx].x, m_points[ptIdx].y,
-                                       m_points[ptIdx + 1].x, m_points[ptIdx + 1].y,
-                                       m_points[ptIdx + 2].x, m_points[ptIdx + 2].y);
-                        ptIdx += 3;
-                    }
-                    break;
-                case PathVerb::Close:
-                    shape->close();
-                    break;
-            }
-        }
-        return shape;
-    }
-
-    [[nodiscard]] std::string toSvgPathData() const {
-        return toSvgPath();
-    }
-
     /**
      * @brief Exports path commands to standard SVG 'd' attribute string format.
      */
@@ -297,12 +244,3 @@ private:
 };
 
 } // namespace Folio
-
-using InkPath = Folio::InkPath;
-using PathVerb = Folio::PathVerb;
-
-#if !defined(BLEND2D_H) && !defined(BL_PATH_H)
-using BLPath = Folio::InkPath;
-using BLBox = Folio::BoundingBox2D;
-using BLPathView = Folio::InkPath::PathView;
-#endif

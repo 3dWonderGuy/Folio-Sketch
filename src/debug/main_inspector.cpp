@@ -44,6 +44,7 @@
 #include "debug/width_inspector.hpp"
 #include "debug/geometry_inspector.hpp"
 #include "debug/stroke_scrubber.hpp"
+#include "debug/gl_capsule_renderer.hpp"
 
 using namespace Folio;
 using namespace Folio::Debug;
@@ -248,13 +249,7 @@ void DumpStrokeDiagnostics(const char* label,
         << " | Mesh tris: " << (mesh.indices.size() / 3)
         << " (core: " << (mesh.coreIndexCount / 3) << ")\n";
 
-    const auto& tessParams = InkMeshBuilder::GetTessellationParams();
-    out << "TessParams: cornerAngleThresholdRad=" << tessParams.cornerAngleThresholdRad
-        << " (" << (tessParams.cornerAngleThresholdRad * 180.0 / 3.14159265) << " deg)"
-        << " miterMax=" << tessParams.miterMaxClampRatio
-        << " statEnv=" << tessParams.stationaryEnvelopment << "\n";
-
-    auto cleanPts = InkInternal::StrokeFilter::PreFilterPoints(modeledPts, tessParams.stationaryEnvelopment);
+    auto cleanPts = InkInternal::StrokeFilter::PreFilterPoints(modeledPts, true);
     InkInternal::StrokeFilter::RegularizeRadiusSlope(cleanPts);
     auto segs = InkInternal::ComputeSegments(cleanPts);
     out << "CleanPts: " << cleanPts.size() << " | Segs: " << segs.size() << "\n";
@@ -274,7 +269,7 @@ void DumpStrokeDiagnostics(const char* label,
                 << cleanPts[i].x << ", " << cleanPts[i].y << ") r=" << cleanPts[i].r
                 << " segLen=" << segLen << " turnDeg=" << turnDeg
                 << (cross < 0.0 ? " [LEFT-IN]" : (cross > 0.0 ? " [RIGHT-IN]" : ""))
-                << (dot < InkingConfig::kDefaultHairpinCosThreshold ? " [HAIRPIN-SPLIT!]" : "")
+                << (dot < -0.866 ? " [HAIRPIN-SPLIT!]" : "")
                 << "\n";
         }
     }
@@ -456,7 +451,6 @@ int RunHeadlessDiagnostics() {
             pts.push_back(sp);
         }
         InkMesh mesh;
-        InkMeshBuilder::BuildSolidMesh(pts, CapType::Round, 0xFF41A5FFu, mesh, 3.7795f);
         DumpStrokeDiagnostics("User 180-deg U-turn with soft curve at end", rawDummy, pts, mesh, std::cout);
     }
 
@@ -484,8 +478,15 @@ int RunHeadlessDiagnostics() {
             pts.push_back(sp);
         }
         InkMesh mesh;
-        InkMeshBuilder::BuildSolidMesh(pts, CapType::Round, 0xFF41A5FFu, mesh, 3.7795f);
         DumpStrokeDiagnostics("User Cursive Loop Stroke", rawDummy, pts, mesh, std::cout);
+    }
+
+    // Benchmark 1,000-point CapsuleInstance CPU ingestion (< 0.05 ms target)
+    {
+        double capsuleMs = GlCapsuleRenderer::BenchmarkCpuIngestionMs(1000, 50);
+        std::cout << "=== GPU CAPSULE SDF 1,000-POINT CPU BENCHMARK ===\n"
+                  << "1,000-point BuildCapsuleInstances avg CPU time: " << std::fixed << std::setprecision(4)
+                  << capsuleMs << " ms (Target < 0.0500 ms: " << (capsuleMs < 0.05 ? "PASS" : "WARN") << ")\n";
     }
 
     return 0;
@@ -557,6 +558,9 @@ int main(int argc, char* argv[]) {
     GlInkMeshRenderer glMeshRenderer;
     glMeshRenderer.Init();
 
+    GlCapsuleRenderer glCapsuleRenderer;
+    glCapsuleRenderer.Init();
+
     // Core Inking Engine & Diagnostic Inspector Modules
     InkEngine         engine;
     StrokeStyle       strokeStyle;
@@ -577,6 +581,52 @@ int main(int argc, char* argv[]) {
 
     FinishedStrokeData lastFinishedStroke;
     std::vector<RawInputSample> lastRawSamples;
+
+    // Brush Lab state (pen / pencil / highlighter behaviour testing)
+    enum BrushKind { kBrushPen = 0, kBrushPencil = 1, kBrushHighlighter = 2 };
+    int          brushKind = kBrushPen;
+    CapsuleBrush capsuleBrush{};
+    capsuleBrush.unionOverlap = true;
+
+    auto applyBrushPreset = [&](int kind) {
+        brushKind = kind;
+        switch (kind) {
+        case kBrushPencil:
+            strokeStyle.baseWidth   = 5.0f;
+            strokeStyle.capType     = CapType::Round;
+            strokeStyle.pattern     = StrokePattern::TexturedPencil;
+            strokeStyle.color       = ColorRgba(55, 55, 62, 255);
+            strokeStyle.usePressure = true;
+            capsuleBrush = CapsuleBrush{0.85f, 0.65f, 0.6f, true};
+            break;
+        case kBrushHighlighter:
+            strokeStyle.baseWidth   = 26.0f;
+            strokeStyle.capType     = CapType::Square;
+            strokeStyle.pattern     = StrokePattern::Solid;
+            strokeStyle.color       = ColorRgba(255, 235, 59, 255);
+            strokeStyle.usePressure = false;
+            capsuleBrush = CapsuleBrush{0.35f, 0.0f, 0.6f, true};
+            break;
+        default:
+            strokeStyle.baseWidth   = 8.0f;
+            strokeStyle.capType     = CapType::Round;
+            strokeStyle.pattern     = StrokePattern::Solid;
+            strokeStyle.color       = ColorRgba(65, 165, 255, 255);
+            strokeStyle.usePressure = true;
+            capsuleBrush = CapsuleBrush{1.0f, 0.0f, 0.6f, true};
+            break;
+        }
+    };
+
+    // Rebuilds the vector outline and GPU capsules for the last finished stroke.
+    auto rebuildLastStrokeMesh = [&]() {
+        if (lastFinishedStroke.modeledPoints.empty()) return;
+        lastFinishedStroke.outlinePath = InkEngine::BuildStrokeOutline(
+            lastFinishedStroke.modeledPoints, strokeStyle.capType, strokeStyle.pattern);
+        InkEngine::BuildStrokeCapsules(
+            lastFinishedStroke.modeledPoints, PackPremultipliedGpuColor(strokeStyle.color),
+            lastFinishedStroke.capsules);
+    };
 
     bool isPanning = false;
     bool running = true;
@@ -647,16 +697,6 @@ int main(int argc, char* argv[]) {
                         // Pen/Mouse Up -> Finish stroke
                         lastFinishedStroke = engine.FinishStroke();
                         lastRawSamples = rawSensorHud.GetActiveOrLastStroke();
-                        {
-                            std::ofstream dbgFile("/tmp/folio_stroke_debug.txt", std::ios::out | std::ios::trunc);
-                            if (dbgFile.is_open()) {
-                                DumpStrokeDiagnostics("Last User GUI Stroke",
-                                                      lastRawSamples,
-                                                      lastFinishedStroke.modeledPoints,
-                                                      lastFinishedStroke.mesh,
-                                                      dbgFile);
-                            }
-                        }
                         if (strokeScrubber.IsAutoFreezeOnLift() && !lastFinishedStroke.modeledPoints.empty()) {
                             strokeScrubber.FreezeStroke(lastRawSamples,
                                                         lastFinishedStroke.modeledPoints,
@@ -700,10 +740,6 @@ int main(int argc, char* argv[]) {
         std::span<const StrokePoint> activeModeledPts{};
         std::span<const StrokePoint> activePredictedPts{};
         InkPath liveOutlineTemp;
-
-        // =====================================================================
-        // ImGui Diagnostic Control Dock (Left Panel)
-        // =====================================================================
         ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(455.0f, static_cast<float>(winHeight - 24)), ImGuiCond_FirstUseEver);
 
@@ -753,9 +789,41 @@ int main(int argc, char* argv[]) {
                 dirtyFrames = 2;
             }
 
-            // Quick Run / Activate Step Buttons Bar
-            ImGui::SeparatorText("Quick Step Activation");
-            if (ImGui::Button("Run Modeler")) {
+            // Quick view bar: brush + render path selection
+            ImGui::SeparatorText("Brush & View");
+            {
+                const char* brushNames[] = { "Pen", "Pencil", "Highlighter" };
+                for (int b = 0; b < 3; ++b) {
+                    if (b > 0) ImGui::SameLine();
+                    if (ImGui::RadioButton(brushNames[b], brushKind == b)) {
+                        applyBrushPreset(b);
+                        if (strokeScrubber.IsFrozen()) {
+                            strokeScrubber.Retessellate(strokeStyle, viewport.zoom);
+                        } else {
+                            rebuildLastStrokeMesh();
+                        }
+                        dirtyFrames = 2;
+                    }
+                }
+            }
+            if (ImGui::Button("GPU Capsule SDF")) {
+                geometryInspector.SetEnabled(true);
+                geometryInspector.SetViewMode(GeometryViewMode::GpuCapsuleSdf);
+                dirtyFrames = 2;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Mesh + Wireframe")) {
+                geometryInspector.SetEnabled(true);
+                geometryInspector.SetViewMode(GeometryViewMode::SolidPlusWireframe);
+                if (strokeScrubber.IsFrozen()) {
+                    strokeScrubber.Retessellate(strokeStyle, viewport.zoom);
+                } else {
+                    rebuildLastStrokeMesh();
+                }
+                dirtyFrames = 2;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Re-Run Modeler")) {
                 if (!lastRawSamples.empty()) {
                     ReplayRawSamplesThroughEngine(engine, lastRawSamples, strokeStyle, viewport.zoom, lastFinishedStroke);
                     if (strokeScrubber.IsFrozen()) {
@@ -763,35 +831,11 @@ int main(int argc, char* argv[]) {
                     }
                 }
                 modelerInspector.SetShowModeledCenterline(true);
-                modelerInspector.SetShowRawPoints(true);
-                modelerInspector.SetShowKalmanSpine(true);
                 dirtyFrames = 2;
             }
             ImGui::SameLine();
             if (ImGui::Button("Show Widths")) {
                 widthInspector.SetShowRadiusDiscs(true);
-                dirtyFrames = 2;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Run Mesh")) {
-                geometryInspector.SetEnabled(true);
-                geometryInspector.SetViewMode(GeometryViewMode::SolidPlusWireframe);
-                if (strokeScrubber.IsFrozen()) {
-                    strokeScrubber.Retessellate(strokeStyle, viewport.zoom);
-                } else if (!lastFinishedStroke.modeledPoints.empty()) {
-                    lastFinishedStroke.outlinePath = InkEngine::BuildStrokeOutline(
-                        lastFinishedStroke.modeledPoints, strokeStyle.capType, strokeStyle.pattern);
-                    InkEngine::BuildStrokeMesh(
-                        lastFinishedStroke.modeledPoints, strokeStyle.capType,
-                        PackGpuColor(strokeStyle.color), lastFinishedStroke.mesh,
-                        viewport.zoom, strokeStyle.pattern);
-                }
-                dirtyFrames = 2;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Show Wireframe")) {
-                geometryInspector.SetEnabled(true);
-                geometryInspector.SetViewMode(GeometryViewMode::WireframeOnly);
                 dirtyFrames = 2;
             }
 
@@ -801,6 +845,53 @@ int main(int argc, char* argv[]) {
             // Tab-Based Navigation: Stages isolated into clean submenu tabs
             // -----------------------------------------------------------------
             if (ImGui::BeginTabBar("InkingPipelineTabBar", ImGuiTabBarFlags_None)) {
+                // TAB 0: Brush Lab (pen / pencil / highlighter mechanics)
+                if (ImGui::BeginTabItem("Brush Lab")) {
+                    bool brushChanged = false;
+                    ImGui::TextWrapped(
+                        "Pencil: pressure-stable width, paper-tooth grain pinned to canvas space.\n"
+                        "Highlighter: constant width, translucent. With union ON, self-overlap never "
+                        "darkens; turn it OFF to see the naive per-capsule accumulation artifact.");
+
+                    brushChanged |= ImGui::SliderFloat("Brush Width", &strokeStyle.baseWidth, 1.0f, 60.0f, "%.1f");
+                    brushChanged |= ImGui::Checkbox("Use Pressure", &strokeStyle.usePressure);
+                    ImGui::SliderFloat("Stroke Opacity", &capsuleBrush.opacity, 0.05f, 1.0f, "%.2f");
+                    ImGui::SliderFloat("Grain Strength", &capsuleBrush.grain, 0.0f, 1.0f, "%.2f");
+                    ImGui::SliderFloat("Grain Scale (cells/unit)", &capsuleBrush.grainScale, 0.1f, 3.0f, "%.2f");
+                    ImGui::Checkbox("Union Self-Overlap (no double-darkening)", &capsuleBrush.unionOverlap);
+                    if (brushKind == kBrushHighlighter) {
+                        ImGui::TextDisabled("Capsule SDF draws round ends; the Square nib shows in Mesh modes.");
+                    }
+
+                    ImGui::SeparatorText("Self-Overlap Test");
+                    if (ImGui::Button("Inject Scribble Stroke")) {
+                        std::vector<RawInputSample> scribble;
+                        for (int i = 0; i < 260; ++i) {
+                            const float t = static_cast<float>(i) * 0.045f;
+                            RawInputSample s{};
+                            s.x = 520.0f + std::cos(t) * (140.0f + 18.0f * t) * 0.55f + std::sin(t * 2.3f) * 60.0f;
+                            s.y = 420.0f + std::sin(t * 1.15f) * 150.0f;
+                            s.pressure = 0.35f + 0.5f * (0.5f + 0.5f * std::sin(t * 0.8f));
+                            s.tiltRad = 0.0f;
+                            s.timestampSec = static_cast<double>(i) * 0.008;
+                            scribble.push_back(s);
+                        }
+                        lastRawSamples = scribble;
+                        rawSensorHud.SetStrokeSamples(lastRawSamples);
+                        strokeScrubber.Unfreeze();
+                        ReplayRawSamplesThroughEngine(engine, lastRawSamples, strokeStyle, viewport.zoom, lastFinishedStroke);
+                        dirtyFrames = 2;
+                    }
+
+                    if (brushChanged) {
+                        if (!lastRawSamples.empty() && !engine.IsStrokeActive()) {
+                            ReplayRawSamplesThroughEngine(engine, lastRawSamples, strokeStyle, viewport.zoom, lastFinishedStroke);
+                        }
+                        dirtyFrames = 2;
+                    }
+                    ImGui::EndTabItem();
+                }
+
                 // TAB 1: Raw Sensor & Telemetry
                 if (ImGui::BeginTabItem("1. Raw Sensor")) {
                     if (rawSensorHud.RenderControls(strokeStyle.baseWidth * 0.5f)) {
@@ -853,12 +944,7 @@ int main(int argc, char* argv[]) {
                         } else if (!lastFinishedStroke.modeledPoints.empty()) {
                             WidthInspector::ReevaluateRadii(lastFinishedStroke.modeledPoints,
                                                             config, strokeStyle, viewport.zoom);
-                            lastFinishedStroke.outlinePath = InkEngine::BuildStrokeOutline(
-                                lastFinishedStroke.modeledPoints, strokeStyle.capType, strokeStyle.pattern);
-                            InkEngine::BuildStrokeMesh(
-                                lastFinishedStroke.modeledPoints, strokeStyle.capType,
-                                PackGpuColor(strokeStyle.color), lastFinishedStroke.mesh,
-                                viewport.zoom, strokeStyle.pattern);
+                            rebuildLastStrokeMesh();
                         }
                         dirtyFrames = 2;
                     }
@@ -872,12 +958,7 @@ int main(int argc, char* argv[]) {
                         } else if (!lastFinishedStroke.modeledPoints.empty()) {
                             WidthInspector::ReevaluateRadii(lastFinishedStroke.modeledPoints,
                                                             config, strokeStyle, viewport.zoom);
-                            lastFinishedStroke.outlinePath = InkEngine::BuildStrokeOutline(
-                                lastFinishedStroke.modeledPoints, strokeStyle.capType, strokeStyle.pattern);
-                            InkEngine::BuildStrokeMesh(
-                                lastFinishedStroke.modeledPoints, strokeStyle.capType,
-                                PackGpuColor(strokeStyle.color), lastFinishedStroke.mesh,
-                                viewport.zoom, strokeStyle.pattern);
+                            rebuildLastStrokeMesh();
                         }
                         dirtyFrames = 2;
                     }
@@ -889,13 +970,8 @@ int main(int argc, char* argv[]) {
                     if (geometryInspector.RenderUI(config, strokeStyle)) {
                         if (strokeScrubber.IsFrozen()) {
                             strokeScrubber.Retessellate(strokeStyle, viewport.zoom);
-                        } else if (!lastFinishedStroke.modeledPoints.empty()) {
-                            lastFinishedStroke.outlinePath = InkEngine::BuildStrokeOutline(
-                                lastFinishedStroke.modeledPoints, strokeStyle.capType, strokeStyle.pattern);
-                            InkEngine::BuildStrokeMesh(
-                                lastFinishedStroke.modeledPoints, strokeStyle.capType,
-                                PackGpuColor(strokeStyle.color), lastFinishedStroke.mesh,
-                                viewport.zoom, strokeStyle.pattern);
+                        } else {
+                            rebuildLastStrokeMesh();
                         }
                         dirtyFrames = 2;
                     }
@@ -926,7 +1002,6 @@ int main(int argc, char* argv[]) {
 
         // Resolve active geometry to display and analyze
         if (engine.IsStrokeActive()) {
-            activeMesh = &engine.GetLiveMesh();
             activeModeledPts = engine.GetLiveModeledPoints();
             activePredictedPts = engine.GetPredictedPoints();
             if (geometryInspector.GetViewMode() == GeometryViewMode::CpuOutlinePolygon) {
@@ -948,6 +1023,16 @@ int main(int argc, char* argv[]) {
             geometryInspector.AnalyzeMesh(*activeMesh);
         }
 
+        // Upload active stroke to GPU Capsule SDF renderer for live telemetry & rendering
+        if (!activeModeledPts.empty()) {
+            glCapsuleRenderer.UploadStroke(activeModeledPts, PackPremultipliedGpuColor(strokeStyle.color));
+            geometryInspector.SetCapsuleTelemetry(
+                glCapsuleRenderer.GetInstanceCount(),
+                glCapsuleRenderer.GetLastCpuIngestionTimeMs());
+        } else {
+            geometryInspector.SetCapsuleTelemetry(0, 0.0);
+        }
+
         // =====================================================================
         // Canvas Overlays on Background ImDrawList
         // =====================================================================
@@ -962,6 +1047,10 @@ int main(int argc, char* argv[]) {
                 activeOutline ? *activeOutline : kEmptyPath,
                 *activeMesh,
                 viewport);
+        }
+
+        if (geometryInspector.ShouldShowCapsuleBoundingQuads()) {
+            glCapsuleRenderer.RenderBoundingQuadsWireframe(bgDrawList, viewport);
         }
 
         // Width Inspector hollow radius discs overlay (Step 3)
@@ -982,24 +1071,29 @@ int main(int argc, char* argv[]) {
         rawSensorHud.Render(bgDrawList, viewport);
 
         // =====================================================================
-        // OpenGL Render Pass (Background Clear -> Solid GPU InkMesh -> ImGui)
+        // OpenGL Render Pass (Background Clear -> Solid GPU InkMesh / Capsule SDF -> ImGui)
         // =====================================================================
         ImGui::Render();
         glViewport(0, 0, fbWidth, fbHeight);
         glClearColor(0.09f, 0.10f, 0.12f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-        if (activeMesh && geometryInspector.ShouldRenderSolidGpuMesh()) {
-            glMeshRenderer.RenderMesh(*activeMesh, viewport, winWidth, winHeight);
-            if (engine.IsStrokeActive() && config.google_enable_prediction) {
-                glMeshRenderer.RenderMesh(engine.GetPredictedMesh(), viewport, winWidth, winHeight);
+        if (geometryInspector.ShouldRenderCapsuleSdf() && !activeModeledPts.empty()) {
+            glCapsuleRenderer.Render(viewport, winWidth, winHeight, capsuleBrush);
+            if (engine.IsStrokeActive() && config.google_enable_prediction && !activePredictedPts.empty()) {
+                glCapsuleRenderer.RenderStroke(activePredictedPts,
+                                               PackPremultipliedGpuColor(strokeStyle.color),
+                                               viewport, winWidth, winHeight, capsuleBrush);
             }
+        } else if (activeMesh && geometryInspector.ShouldRenderSolidGpuMesh()) {
+            glMeshRenderer.RenderMesh(*activeMesh, viewport, winWidth, winHeight);
         }
 
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         SDL_GL_SwapWindow(window);
     }
 
+    glCapsuleRenderer.Shutdown();
     glMeshRenderer.Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL3_Shutdown();

@@ -23,11 +23,12 @@ namespace Folio::Debug {
  */
 enum class GeometryViewMode : int {
     DiscsOnly           = 0, ///< Mode 0: Overlapping evaluated circles; zero polygon/mesh logic
-    CpuOutlinePolygon   = 1, ///< Mode 1: CPU Outline Polygon (ThorVG / BLPath boundary contour)
+    CpuOutlinePolygon   = 1, ///< Mode 1: CPU Outline Polygon (InkPath boundary contour)
     SolidGpuMesh        = 2, ///< Mode 2: Solid GPU Mesh (Standard filled InkMesh)
     WireframeOnly       = 3, ///< Mode 3: Wireframe Only (Triangle edges rendered in neon green)
     SolidPlusWireframe  = 4, ///< Mode 4: Solid + Wireframe Overlay
-    MiterNormalNeedles  = 5  ///< Mode 5: Miter & Normal Needles (incoming, outgoing, clamped bisectors)
+    MiterNormalNeedles  = 5, ///< Mode 5: Miter & Normal Needles (incoming, outgoing, clamped bisectors)
+    GpuCapsuleSdf       = 6  ///< Mode 6: GPU Capsule SDF (Instanced Analytic Segment SDF)
 };
 
 /**
@@ -79,11 +80,10 @@ public:
     /// Master switch: when false no mesh/outline/wireframe/needle rendering is performed.
     [[nodiscard]] bool IsEnabled() const noexcept { return m_enabled; }
     void SetEnabled(bool v) noexcept { m_enabled = v; }
-    void ResetView() noexcept { m_enabled = false; m_viewMode = GeometryViewMode::SolidPlusWireframe; }
+    void ResetView() noexcept { m_enabled = false; m_viewMode = GeometryViewMode::GpuCapsuleSdf; }
 
     [[nodiscard]] GeometryViewMode GetViewMode() const noexcept { return m_viewMode; }
     void SetViewMode(GeometryViewMode mode) noexcept { m_viewMode = mode; }
-
     [[nodiscard]] bool ShouldRenderSolidGpuMesh() const noexcept {
         if (!m_enabled) return false;
         return m_viewMode == GeometryViewMode::SolidGpuMesh ||
@@ -91,20 +91,33 @@ public:
                (m_viewMode == GeometryViewMode::MiterNormalNeedles && m_showMeshBehindNeedles);
     }
 
+    [[nodiscard]] bool ShouldRenderCapsuleSdf() const noexcept {
+        return m_enabled && m_viewMode == GeometryViewMode::GpuCapsuleSdf;
+    }
+
+    [[nodiscard]] bool ShouldShowCapsuleBoundingQuads() const noexcept {
+        return m_enabled && m_viewMode == GeometryViewMode::GpuCapsuleSdf && m_showCapsuleBoundingQuads;
+    }
+
+    void SetCapsuleTelemetry(size_t instanceCount, double cpuIngestionMs) noexcept {
+        m_capsuleInstanceCount = instanceCount;
+        m_capsuleCpuIngestionMs = cpuIngestionMs;
+    }
+
     [[nodiscard]] const MeshDefectStats& GetDefectStats() const noexcept { return m_stats; }
 
-    /**
-     * @brief Synchronizes current InkingConfig geometry fields into InkMeshBuilder::SetTessellationParams.
-     */
-    static void SyncMeshBuilderParams(const InkingConfig& config) noexcept;
-
 private:
-    bool m_enabled = false;
-    GeometryViewMode m_viewMode = GeometryViewMode::SolidPlusWireframe;
+    bool m_enabled = true;
+    GeometryViewMode m_viewMode = GeometryViewMode::GpuCapsuleSdf;
     MeshDefectStats m_stats{};
     bool m_highlightInvertedTriangles = true;
     bool m_showSkirtWireframe = true;
     bool m_showMeshBehindNeedles = true;
+    bool m_showCapsuleBoundingQuads = false;
+    size_t m_capsuleInstanceCount = 0;
+    double m_capsuleCpuIngestionMs = 0.0;
+    double m_benchmark1000PtCapsuleMs = -1.0;
+    double m_benchmark1000PtMeshMs = -1.0;
 };
 
 } // namespace Folio::Debug

@@ -4,10 +4,6 @@
 #include <iomanip>
 #include <cmath>
 
-#ifdef FOLIO_ENABLE_THORSVG
-#include <thorvg.h>
-#endif
-
 namespace Folio {
 
 namespace {

@@ -17,15 +17,9 @@
 
 namespace Folio {
 
-enum class SplineMode {
-    QuadraticMidpoint,
-    CentripetalCatmullRom,
-    LinearPolylines
-};
-
 struct InkingConfig {
     // -------------------------------------------------------------
-    // 1. PRESSURE CALIBRATION
+    // 1. PRESSURE CALIBRATION (Pressure Curve Mapping)
     // -------------------------------------------------------------
     bool enablePressureCurve = true;
     float pressureGamma = 1.0f;
@@ -86,27 +80,14 @@ struct InkingConfig {
     float tailTaperPower = 1.0f;               // Taper easing (1.0 = linear, 2.0 = smooth quadratic ease-out)
 
     // -------------------------------------------------------------
-    // 7. POST-PROCESSING & SIMPLIFICATION (Pen-Up Commit)
+    // 7. POINT CONDITIONING & SIMPLIFICATION (Pen-Up Commit)
     // -------------------------------------------------------------
+    bool stationaryEnvelopment = true;            // Merge consecutive points where ds <= |dr| (submerged disks)
     bool enablePostProcessSimplification = false;
-    float simplificationToleranceMm = 0.015f; // Ramer-Douglas-Peucker distance threshold (mm)
-    float simplificationMaxTurnDeg = 4.0f;    // Max direction deviation a dropped span may have (keeps curves round)
-    float simplificationRadiusTolerance = 0.08f; // Max relative radius error when dropping points (keeps width profile)
-    float minTurnAngleForJointCapDeg = 3.0f;  // Minimum turn angle (degrees) to emit a joint cap disk
-
-    // -------------------------------------------------------------
-    // 8. MESH TESSELLATION & HAIRPIN TURNS
-    // -------------------------------------------------------------
-    static constexpr float kDefaultHairpinCosThreshold = -0.866f;        // Acute turnaround threshold (> 150 deg reversal triggers seamless rounded cap overlap)
-    static constexpr float kDefaultHairpinMinSegmentRadiusRatio = 0.15f; // Min segment length (len / r) to avoid micro-noise
-
-    float hairpinCosThreshold = kDefaultHairpinCosThreshold;
-    float hairpinMinSegmentRadiusRatio = kDefaultHairpinMinSegmentRadiusRatio;
-
-    float cornerAngleThresholdRad = 0.35f;       // Corner bevel threshold in radians (default: ~20 deg / 0.35 rad)
-    float miterMinClampRatio      = 0.0f;        // Min miter clamping ratio (0.0 .. 1.0x)
-    float miterMaxClampRatio      = 1.25f;       // Max miter clamping ratio (1.0 .. 2.5x)
-    bool  stationaryEnvelopment   = true;        // Merge consecutive points where ds <= |dr|
+    float simplificationToleranceMm = 0.015f;     // Ramer-Douglas-Peucker distance threshold (mm)
+    float simplificationMaxTurnDeg = 4.0f;        // Max direction deviation a dropped span may have (keeps curves round)
+    float simplificationRadiusTolerance = 0.08f;  // Max relative radius error when dropping points (keeps width profile)
+    float minTurnAngleForJointCapDeg = 3.0f;      // Minimum turn angle (degrees) to emit a joint cap disk
 };
 
 using InkingTuningConfig = InkingConfig;

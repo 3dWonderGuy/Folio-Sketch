@@ -132,22 +132,6 @@ public:
                                                 double maxArea = 1000000.0);
 
     /**
-     * @brief Incrementally appends newly modeled stroke segments [startIdx - 1 .. pts.size() - 1]
-     *        onto an existing live InkPath in O(1) time per frame (eliminates O(N^2) live inking lag).
-     *
-     * @param path     Target InkPath being grown incrementally during live inking.
-     * @param pts      Full modeled point buffer (must have no consecutive duplicates < 1e-4 mm).
-     * @param startIdx Index of the first newly appended point in pts.
-     * @param capType  Endcap / nib style.
-     * @param pattern  Active stroke pattern (Solid or TexturedPencil).
-     */
-    static void AppendRibbonSegments(InkPath& path,
-                                     const std::vector<StrokePoint>& pts,
-                                     size_t startIdx,
-                                     CapType capType = CapType::Round,
-                                     StrokePattern pattern = StrokePattern::Solid);
-
-    /**
      * @brief Universal cap tracer: generates a full closed cap polygon for a single-point tap.
      *
      * @param pt Centerline point with radius (r).

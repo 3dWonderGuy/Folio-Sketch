@@ -1,6 +1,8 @@
 #include "debug/geometry_inspector.hpp"
+#include "debug/gl_capsule_renderer.hpp"
 #include "geometry/ink_stroke_filter.hpp"
 #include "geometry/ink_geometry_utils.hpp"
+#include <chrono>
 #include <cmath>
 #include <algorithm>
 
@@ -10,19 +12,7 @@
 
 namespace Folio::Debug {
 
-GeometryInspector::GeometryInspector() {
-    InkingConfig defaultCfg{};
-    SyncMeshBuilderParams(defaultCfg);
-}
-
-void GeometryInspector::SyncMeshBuilderParams(const InkingConfig& config) noexcept {
-    MeshTessellationParams params{};
-    params.cornerAngleThresholdRad = config.cornerAngleThresholdRad;
-    params.miterMinClampRatio      = config.miterMinClampRatio;
-    params.miterMaxClampRatio      = config.miterMaxClampRatio;
-    params.stationaryEnvelopment   = config.stationaryEnvelopment;
-    InkMeshBuilder::SetTessellationParams(params);
-}
+GeometryInspector::GeometryInspector() = default;
 
 void GeometryInspector::AnalyzeMesh(const InkMesh& mesh) {
     m_stats = MeshDefectStats{};
@@ -81,11 +71,12 @@ bool GeometryInspector::RenderUI(InkingConfig& config, StrokeStyle& style) {
     int modeInt = static_cast<int>(m_viewMode);
     const char* modeItems[] = {
         "Mode 0: Discs Only (Evaluated Circles)",
-        "Mode 1: CPU Outline Polygon (ThorVG / BLPath)",
+        "Mode 1: CPU Outline Polygon (InkPath)",
         "Mode 2: Solid GPU Mesh (Filled InkMesh)",
         "Mode 3: Wireframe Only (Neon Green Edges)",
         "Mode 4: Solid + Wireframe Overlay",
-        "Mode 5: Miter & Normal Needles"
+        "Mode 5: Miter & Normal Needles",
+        "Mode 6: GPU Capsule SDF (Analytic Segment SDF)"
     };
     if (ImGui::Combo("View Mode", &modeInt, modeItems, IM_ARRAYSIZE(modeItems))) {
         m_viewMode = static_cast<GeometryViewMode>(modeInt);
@@ -97,6 +88,8 @@ bool GeometryInspector::RenderUI(InkingConfig& config, StrokeStyle& style) {
         ImGui::Checkbox("Highlight Inverted Tris", &m_highlightInvertedTriangles);
     } else if (m_viewMode == GeometryViewMode::MiterNormalNeedles) {
         ImGui::Checkbox("Render Solid GPU Mesh Behind Needles", &m_showMeshBehindNeedles);
+    } else if (m_viewMode == GeometryViewMode::GpuCapsuleSdf) {
+        ImGui::Checkbox("Show Capsule Bounding Quads Wireframe", &m_showCapsuleBoundingQuads);
     }
 
     ImGui::SeparatorText("Nib Cap & Pattern");
@@ -114,31 +107,27 @@ bool GeometryInspector::RenderUI(InkingConfig& config, StrokeStyle& style) {
         geomDirty = true;
     }
 
-    ImGui::SeparatorText("Live Geometry Sliders");
-    constexpr float kRadToDeg = 180.0f / static_cast<float>(M_PI);
-    constexpr float kDegToRad = static_cast<float>(M_PI) / 180.0f;
-
-    float cornerDeg = std::clamp(config.cornerAngleThresholdRad * kRadToDeg, 10.0f, 120.0f);
-    if (ImGui::SliderFloat("Corner Angle Threshold", &cornerDeg, 10.0f, 120.0f, "%.1f deg")) {
-        config.cornerAngleThresholdRad = cornerDeg * kDegToRad;
-        SyncMeshBuilderParams(config);
-        geomDirty = true;
-    }
-
-    if (ImGui::SliderFloat("Miter Min Clamp Ratio", &config.miterMinClampRatio, 0.0f, 1.0f, "%.2fx")) {
-        SyncMeshBuilderParams(config);
-        geomDirty = true;
-    }
-    if (ImGui::SliderFloat("Miter Max Clamp Ratio", &config.miterMaxClampRatio, 1.0f, 2.5f, "%.2fx")) {
-        SyncMeshBuilderParams(config);
-        geomDirty = true;
-    }
+    ImGui::SeparatorText("Point Conditioning");
     if (ImGui::Checkbox("Stationary Envelopment (ds <= |dr|)", &config.stationaryEnvelopment)) {
-        SyncMeshBuilderParams(config);
         geomDirty = true;
     }
 
-    ImGui::SeparatorText("Real-Time Telemetry & Defect Detection");
+    ImGui::SeparatorText("GPU Capsule SDF vs Legacy Mesh Benchmark");
+    ImGui::Text("Capsule Instances: %zu (Quads: %zu, Tris: %zu)  |  Live CPU Upload: %.4f ms",
+                m_capsuleInstanceCount, m_capsuleInstanceCount, m_capsuleInstanceCount * 2, m_capsuleCpuIngestionMs);
+    if (ImGui::Button("Run 1,000-Point CPU Benchmark")) {
+        m_benchmark1000PtCapsuleMs = GlCapsuleRenderer::BenchmarkCpuIngestionMs(1000, 50);
+        m_benchmark1000PtMeshMs = 0.0;
+    }
+    if (m_benchmark1000PtCapsuleMs >= 0.0) {
+        ImVec4 col = (m_benchmark1000PtCapsuleMs < 0.05)
+                         ? ImVec4(0.30f, 0.95f, 0.45f, 1.0f)
+                         : ImVec4(1.0f, 0.78f, 0.25f, 1.0f);
+        ImGui::TextColored(col, "1,000-pt Capsule SDF CPU Time: %.4f ms (Target: < 0.0500 ms)",
+                           m_benchmark1000PtCapsuleMs);
+    }
+
+    ImGui::SeparatorText("Real-Time Telemetry & Defect Detection (Legacy Mesh)");
     ImGui::Text("Total Vertices: %zu  |  Total Indices: %zu  |  Triangles: %zu",
                 m_stats.vertexCount, m_stats.indexCount, m_stats.triangleCount);
 
@@ -188,7 +177,7 @@ void GeometryInspector::RenderCanvasOverlays(ImDrawList* drawList,
     }
 
     // -------------------------------------------------------------------------
-    // Mode 1: CPU Outline Polygon (ThorVG / BLPath boundary contour)
+    // Mode 1: CPU Outline Polygon (InkPath boundary contour)
     // -------------------------------------------------------------------------
     if (m_viewMode == GeometryViewMode::CpuOutlinePolygon) {
         const auto& verbs = outlinePath.verbs();
@@ -298,9 +287,8 @@ void GeometryInspector::RenderCanvasOverlays(ImDrawList* drawList,
     if (m_viewMode == GeometryViewMode::MiterNormalNeedles) {
         if (points.size() < 2) return;
 
-        const auto& tessParams = InkMeshBuilder::GetTessellationParams();
         std::vector<StrokePoint> cleanPts = InkInternal::StrokeFilter::PreFilterPoints(
-            points, tessParams.stationaryEnvelopment);
+            points, true);
         InkInternal::StrokeFilter::RegularizeRadiusSlope(cleanPts);
         if (cleanPts.size() < 2) return;
 
@@ -320,8 +308,8 @@ void GeometryInspector::RenderCanvasOverlays(ImDrawList* drawList,
             drawList->AddLine(p0, p1, spineCol, 1.0f);
         }
 
-        const double minClamp = std::clamp(static_cast<double>(tessParams.miterMinClampRatio), 0.0, 1.0);
-        const double maxClamp = std::clamp(static_cast<double>(tessParams.miterMaxClampRatio), 1.0, 2.5);
+        const double minClamp = 0.0;
+        const double maxClamp = 1.25;
 
         // Start vertex P_0 outgoing normal needle
         {
