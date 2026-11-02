@@ -1,21 +1,21 @@
 #pragma once
 /**
  * =========================================================================================
- * @file core/ink_engine/stroke_collision.hpp
- * @brief High-Performance Computational Geometry & Slicing for Vector Ink Strokes
+ * @file folio_sketch/core/stroke_collision.hpp
+ * @brief High-Performance Computational Geometry & Precision Slicing for Ink Strokes
  * =========================================================================================
  *
- * ARCHITECTURAL DESIGN & ALGORITHMS:
- * ----------------------------------
- * Implements two-tier collision detection and precision stroke slicing:
- *   1. Two-Tier Narrowphase Hit Testing:
- *      - Tier 1: Stroke-level AABB broadphase culling.
- *      - Tier 2: On-the-fly transient segment mini-AABB evaluation in CPU registers,
- *                followed by exact Euclidean point-to-segment distance calculation.
- *   2. Dan Sunday's Segment-to-Segment Minimum Distance Algorithm (Swept Capsule):
- *      - Evaluates swept stylus trajectories without tunneling at fast stroke speeds.
- *   3. Quadratic Circle-Segment Intersection Solver (StrokeSlicer):
- *      - Slices stroke segments against eraser circle kernels with sub-segment splitting.
+ * Provides two primary algorithmic facilities:
+ *
+ * 1. StrokeCollisionEngine:
+ *    - Point / Tap hit-testing against stroke segments.
+ *    - Two-tier static circle hit-testing (mini-AABB fast cull + exact point-to-segment distance).
+ *    - Continuous swept-capsule collision testing (Dan Sunday's segment-to-segment algorithm)
+ *      to guarantee zero tunneling / skipping regardless of fast pen/mouse motion.
+ *
+ * 2. StrokeSlicer:
+ *    - Analytic quadratic circle-segment intersection solver for precision vector erasers.
+ *    - Slices stroke segments into surviving sub-strokes when punched through by an eraser.
  */
 
 #include <vector>
@@ -24,23 +24,53 @@
 
 #include "folio_sketch/core/ink_stroke_data.hpp"
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
 namespace Folio {
+
+// =============================================================================
+// 1. STROKE COLLISION ENGINE
+// =============================================================================
 
 class StrokeCollisionEngine {
 public:
+    /**
+     * @struct SegmentHit
+     * @brief Detailed collision hit record containing segment index, parametric t, and distance.
+     */
     struct SegmentHit {
-        bool hit = false;
-        size_t segmentIndex = 0;
-        float t = 0.0f;
-        double distSq = 0.0;
+        bool   hit          = false; // True if an intersection occurred
+        size_t segmentIndex = 0;     // Index of the closest hit segment
+        float  t            = 0.0f;  // Parametric position along the segment [0.0, 1.0]
+        double distSq       = 0.0;   // Squared Euclidean distance from query point to segment
     };
 
     /**
-     * @brief Evaluates whether a query circle intersects any segment of a stroke.
+     * @brief Point hit test for single-point strokes (e.g. stationary tap dots, periods).
+     * @param p Stroke point center coordinate.
+     * @param width Stroke diameter in world millimeters (mm).
+     * @param qx Query circle center X (mm).
+     * @param qy Query circle center Y (mm).
+     * @param queryRadius Query circle radius (mm).
+     * @return True if the query circle touches or encloses the point dot.
+     */
+    [[nodiscard]] static inline bool HitTestPoint(
+        const Point2D& p, float width,
+        double qx, double qy, double queryRadius) noexcept
+    {
+        const double maxR = std::max(0.2, static_cast<double>(width) * 0.5 + queryRadius);
+        const double dx = p.x - qx;
+        const double dy = p.y - qy;
+        return (dx * dx + dy * dy) <= (maxR * maxR);
+    }
+
+    /**
+     * @brief Evaluates whether a static query circle intersects any segment of a stroke.
+     * Uses two-tier testing: transient register mini-AABB culling followed by exact distance.
+     *
+     * @param segments Vector of stroke segments.
+     * @param qx Query circle center X (mm).
+     * @param qy Query circle center Y (mm).
+     * @param queryRadius Query circle radius (mm).
+     * @return SegmentHit record containing the closest segment hit data.
      */
     [[nodiscard]] static SegmentHit HitTestStroke(
         const std::vector<Segment1D>& segments,
@@ -53,6 +83,7 @@ public:
             const auto& seg = segments[i];
             float t = 0.0f;
             double distSq = 0.0;
+
             if (HitTestSegment(seg.p0, seg.p1, seg.width, qx, qy, queryRadius, t, distSq)) {
                 if (distSq < bestHit.distSq) {
                     bestHit.hit = true;
@@ -67,26 +98,20 @@ public:
     }
 
     /**
-     * @brief Point hit test for single-point strokes (e.g. period / tap dots).
-     */
-    [[nodiscard]] static inline bool HitTestPoint(
-        const Point2D& p, float width,
-        double qx, double qy, double queryRadius) noexcept
-    {
-        const double maxR = std::max(0.2, static_cast<double>(width) * 0.5 + queryRadius);
-        const double dx = p.x - qx;
-        const double dy = p.y - qy;
-        return (dx * dx + dy * dy) <= (maxR * maxR);
-    }
-
-    /**
      * @brief Continuous swept-capsule collision test against all segments of a stroke.
-     * Detects hits regardless of mouse movement speed (zero tunneling/skipping).
+     * Guarantees zero tunneling/skipping even during high-velocity pen sweeps.
+     *
+     * @param segments Stroke segments.
+     * @param w0 Query swept segment start coordinate (mm).
+     * @param w1 Query swept segment end coordinate (mm).
+     * @param queryRadius Query swept radius (mm).
+     * @return True if the swept capsule intersects any segment of the stroke.
      */
     [[nodiscard]] static inline bool HitTestStrokeSwept(
         const std::vector<Segment1D>& segments,
         const Point2D& w0, const Point2D& w1, double queryRadius) noexcept
     {
+        // Compute bounding box for the query sweep trajectory
         const double qMinX = std::min(w0.x, w1.x);
         const double qMaxX = std::max(w0.x, w1.x);
         const double qMinY = std::min(w0.y, w1.y);
@@ -94,6 +119,8 @@ public:
 
         for (const auto& seg : segments) {
             const double maxR = std::max(0.0, queryRadius + static_cast<double>(seg.width) * 0.5);
+
+            // Fast-cull broadphase AABB overlap test
             const double segMinX = std::min(seg.p0.x, seg.p1.x) - maxR;
             const double segMaxX = std::max(seg.p0.x, seg.p1.x) + maxR;
             const double segMinY = std::min(seg.p0.y, seg.p1.y) - maxR;
@@ -103,6 +130,7 @@ public:
                 continue;
             }
 
+            // Narrowphase: Dan Sunday's segment-to-segment minimum distance
             const double distSq = SegmentSegmentDistanceSq(seg.p0, seg.p1, w0, w1);
             if (distSq <= maxR * maxR) {
                 return true;
@@ -113,7 +141,7 @@ public:
 
 private:
     /**
-     * @brief Computes point-to-line-segment distance with transient register-only mini-AABB rejection.
+     * @brief Computes point-to-line-segment distance with transient register mini-AABB rejection.
      */
     [[nodiscard]] static inline bool HitTestSegment(
         const Point2D& p0, const Point2D& p1, float width,
@@ -122,18 +150,18 @@ private:
     {
         const double maxR = std::max(0.0, static_cast<double>(width) * 0.5 + queryRadius);
 
-        // 1. Transient segment mini-AABB in CPU registers (zero memory allocation)
+        // Step 1: Transient segment mini-AABB in CPU registers (zero heap allocations)
         const double segMinX = std::min(p0.x, p1.x) - maxR;
         const double segMaxX = std::max(p0.x, p1.x) + maxR;
         const double segMinY = std::min(p0.y, p1.y) - maxR;
         const double segMaxY = std::max(p0.y, p1.y) + maxR;
 
-        // Fast-out: culls out 90%+ of segments with simple register comparisons
+        // Fast-out: culls 90%+ of non-intersecting segments with simple scalar comparisons
         if (qx < segMinX || qx > segMaxX || qy < segMinY || qy > segMaxY) {
             return false;
         }
 
-        // 2. Exact Euclidean Point-to-Segment Math
+        // Step 2: Exact Euclidean Point-to-Segment Projection
         const double vx = p1.x - p0.x;
         const double vy = p1.y - p0.y;
         const double wx = qx - p0.x;
@@ -164,8 +192,8 @@ private:
     }
 
     /**
-     * @brief Computes minimum distance squared between two line segments in 2D space.
-     * Implements Dan Sunday's robust segment-to-segment algorithm with zero heap allocation.
+     * @brief Computes minimum squared distance between two line segments in 2D space.
+     * Implements Dan Sunday's segment-to-segment algorithm with zero heap allocations.
      */
     [[nodiscard]] static inline double SegmentSegmentDistanceSq(
         const Point2D& p0, const Point2D& p1,
@@ -184,7 +212,7 @@ private:
         const double d = ux * wx + uy * wy;
         const double e = vx * wx + vy * wy;
 
-        // Handle degenerate segment cases (points) to eliminate division-by-zero
+        // Handle degenerate point-like segments to prevent division by zero
         if (a < 1e-9 && c < 1e-9) {
             return wx * wx + wy * wy;
         }
@@ -232,19 +260,26 @@ private:
     }
 };
 
+// =============================================================================
+// 2. VECTOR STROKE SLICER (Point-Based Eraser Engine)
+// =============================================================================
+
 /**
+ * @class StrokeSlicer
  * @brief High-precision vector stroke slicer for point-based eraser tools.
  */
 class StrokeSlicer {
 public:
     /**
      * @brief Slices a chain of segments against a circular eraser kernel.
+     * Sub-segments intersecting the eraser boundary are cleanly subdivided.
+     *
      * @param segments Original stroke segments.
-     * @param ex Eraser center X.
-     * @param ey Eraser center Y.
-     * @param eraserRadius Eraser radius.
-     * @param outSubStrokes Destination list of surviving segment chains.
-     * @return true if the stroke was modified or split.
+     * @param ex Eraser center X coordinate (mm).
+     * @param ey Eraser center Y coordinate (mm).
+     * @param eraserRadius Eraser radius (mm).
+     * @param outSubStrokes Destination vector of surviving contiguous segment chains.
+     * @return True if the stroke was modified, trimmed, or split.
      */
     static bool SliceSegments(
         const std::vector<Segment1D>& segments,
@@ -282,7 +317,7 @@ public:
             const double dy1 = seg.p1.y - ey;
             const bool p1In = (dx1 * dx1 + dy1 * dy1) < effRSq;
 
-            // Solve quadratic intersection: || (p0 + t * V) - E ||^2 = effRSq
+            // Solve quadratic circle-segment intersection: || (p0 + t * V) - E ||^2 = effRSq
             const double vx = seg.p1.x - seg.p0.x;
             const double vy = seg.p1.y - seg.p0.y;
             const double wx = seg.p0.x - ex;
@@ -292,7 +327,8 @@ public:
             const double b = 2.0 * (wx * vx + wy * vy);
             const double c = (wx * wx + wy * wy) - effRSq;
 
-            double t1 = -1.0, t2 = -1.0;
+            double t1 = -1.0;
+            double t2 = -1.0;
             bool hasIntersection = false;
 
             if (a > 1e-9) {
@@ -306,43 +342,47 @@ public:
                 }
             }
 
+            // Case A: Both endpoints lie outside the eraser kernel
             if (!p0In && !p1In) {
-                // Both endpoints outside eraser
-                double tIn = hasIntersection ? std::max(0.0, t1) : 0.0;
+                double tIn  = hasIntersection ? std::max(0.0, t1) : 0.0;
                 double tOut = hasIntersection ? std::min(1.0, t2) : 0.0;
+
                 if (hasIntersection && tOut > tIn + 1e-5) {
                     // Segment punches entirely through the eraser: splits into 2 pieces!
                     modified = true;
                     Point2D cutIn  = LerpPoint(seg.p0, seg.p1, tIn);
                     Point2D cutOut = LerpPoint(seg.p0, seg.p1, tOut);
 
-                    // First part terminates current sub-stroke
+                    // First piece terminates the current sub-stroke chain
                     PushSegmentIfNonDegenerate(seg.p0, cutIn, seg.width);
                     PushChainIfValid();
 
-                    // Second part begins new sub-stroke
+                    // Second piece begins the next sub-stroke chain
                     PushSegmentIfNonDegenerate(cutOut, seg.p1, seg.width);
                 } else {
-                    // Segment completely outside
+                    // Segment completely misses eraser: retain intact
                     currentChain.push_back(seg);
                 }
-            } else if (!p0In && p1In) {
-                // Enters eraser: cut at t1 and finish current sub-stroke
+            }
+            // Case B: Segment enters the eraser (p0 outside, p1 inside)
+            else if (!p0In && p1In) {
                 modified = true;
                 double tCut = hasIntersection ? std::clamp(t1, 0.0, 1.0) : 0.5;
                 Point2D cutPt = LerpPoint(seg.p0, seg.p1, tCut);
 
                 PushSegmentIfNonDegenerate(seg.p0, cutPt, seg.width);
                 PushChainIfValid();
-            } else if (p0In && !p1In) {
-                // Exits eraser: cut at t2 and start new sub-stroke
+            }
+            // Case C: Segment exits the eraser (p0 inside, p1 outside)
+            else if (p0In && !p1In) {
                 modified = true;
                 double tCut = hasIntersection ? std::clamp(t2, 0.0, 1.0) : 0.5;
                 Point2D cutPt = LerpPoint(seg.p0, seg.p1, tCut);
 
                 PushSegmentIfNonDegenerate(cutPt, seg.p1, seg.width);
-            } else {
-                // Both endpoints inside: entirely deleted
+            }
+            // Case D: Both endpoints inside eraser kernel (completely erased)
+            else {
                 modified = true;
                 PushChainIfValid();
             }
@@ -354,7 +394,7 @@ public:
 
 private:
     /**
-     * @brief Linearly interpolates two centerline points.
+     * @brief Linearly interpolates between two 2D points.
      */
     [[nodiscard]] static inline Point2D LerpPoint(const Point2D& p0, const Point2D& p1, double t) noexcept {
         return Point2D{
