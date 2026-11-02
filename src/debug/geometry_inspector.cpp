@@ -108,7 +108,7 @@ bool GeometryInspector::RenderUI(InkingConfig& config, StrokeStyle& style) {
     }
 
     ImGui::SeparatorText("Point Conditioning");
-    if (ImGui::Checkbox("Stationary Envelopment (ds <= |dr|)", &config.stationaryEnvelopment)) {
+    if (ImGui::Checkbox("Stationary Envelopment (ds <= |dr|)", &config.postProcessing.stationaryEnvelopment)) {
         geomDirty = true;
     }
 

@@ -43,12 +43,12 @@ void InkStrokeFinisher::ApplyTailTaper(
     const StrokeStyle& style,
     std::vector<StrokePoint>& inoutModeledPoints)
 {
-    if (config.tailTaperLengthMm <= 0.0f || inoutModeledPoints.size() < 2) return;
+    if (config.dynamics.tailTaperLengthMm <= 0.0f || inoutModeledPoints.size() < 2) return;
 
-    float minRadius = style.baseWidth * std::min(config.minWidthMultiplier, config.maxWidthMultiplier) * 0.5f;
+    float minRadius = style.baseWidth * std::min(config.dynamics.minWidthMultiplier, config.dynamics.maxWidthMultiplier) * 0.5f;
     minRadius = std::max(0.001f, minRadius);
-    const double taperTargetLen = static_cast<double>(config.tailTaperLengthMm);
-    const float taperPower = (config.tailTaperPower > 0.01f) ? config.tailTaperPower : 1.0f;
+    const double taperTargetLen = static_cast<double>(config.dynamics.tailTaperLengthMm);
+    const float taperPower = (config.dynamics.tailTaperPower > 0.01f) ? config.dynamics.tailTaperPower : 1.0f;
 
     const size_t ptCount = inoutModeledPoints.size();
     double d = 0.0;

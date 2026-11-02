@@ -47,7 +47,7 @@ public:
 
         if (isPencil) {
             // Graphite pencil lead stays rigid under pressure (only ±12% width variance)
-            if (config.usePressure && pressure >= 0.0f) {
+            if (config.dynamics.usePressure && pressure >= 0.0f) {
                 effBaseWidth = baseWidth * (0.90f + 0.12f * std::clamp(pressure, 0.0f, 1.0f));
             }
             effPressure = -1.0f; // bypass non-linear pressure gamma scaling
@@ -58,7 +58,7 @@ public:
         float velocityFactor = ComputeVelocityThinning(effSpeed, zoomScale, config);
         float tiltFactor = ComputeTiltModulation(tiltRad, config);
         float targetWidth = pressureWidth * velocityFactor * tiltFactor;
-        return ApplySmoothingEMA(previousWidth, targetWidth, config.dynamicWidthSmoothing);
+        return ApplySmoothingEMA(previousWidth, targetWidth, config.dynamics.widthSmoothingEma);
     }
 
     /**
@@ -69,7 +69,7 @@ public:
                                                      float previousWidth, float zoomScale,
                                                      const InkingConfig& config,
                                                      bool isPencil = false) noexcept {
-        float tiltRad = (config.useTilt && (tiltX != 0.0f || tiltY != 0.0f)) ? std::hypot(tiltX, tiltY) : 0.0f;
+        float tiltRad = (config.dynamics.useTilt && (tiltX != 0.0f || tiltY != 0.0f)) ? std::hypot(tiltX, tiltY) : 0.0f;
         return CalculateDynamicWidthWithTiltRad(baseWidth, pressure, speed, tiltRad,
                                                 previousWidth, zoomScale, config, isPencil);
     }
@@ -89,30 +89,30 @@ private:
      * @brief Maps raw hardware stylus pressure through deadzone, saturation, and power-law gamma curve.
      * @param rawPressure Hardware stylus pressure reported by digitizer [0.0, 1.0].
      * @param config Active inking configuration.
-     * @return Curved response multiplier in [config.minRelativeThicknessFraction, 1.0].
+     * @return Curved response multiplier in [config.calibration.minRelativeThicknessFraction, 1.0].
      */
     [[nodiscard]] static float ApplyPressureCurve(float rawPressure, const InkingConfig& config) noexcept {
-        if (!config.enablePressureCurve) {
+        if (!config.calibration.enablePressureCurve) {
             return 1.0f;
         }
-        if (std::isnan(rawPressure) || rawPressure <= config.pressureDeadzoneMin) {
-            return config.minRelativeThicknessFraction;
+        if (std::isnan(rawPressure) || rawPressure <= config.calibration.pressureDeadzoneMin) {
+            return config.calibration.minRelativeThicknessFraction;
         }
-        if (rawPressure >= config.pressureSaturationMax) {
+        if (rawPressure >= config.calibration.pressureSaturationMax) {
             return 1.0f;
         }
 
-        float denom = config.pressureSaturationMax - config.pressureDeadzoneMin;
+        float denom = config.calibration.pressureSaturationMax - config.calibration.pressureDeadzoneMin;
         if (denom <= 1e-6f) {
             return 1.0f;
         }
 
-        float norm = std::clamp((rawPressure - config.pressureDeadzoneMin) / denom, 0.0f, 1.0f);
-        float curved = (config.pressureGamma <= 0.0f || config.pressureGamma == 1.0f)
+        float norm = std::clamp((rawPressure - config.calibration.pressureDeadzoneMin) / denom, 0.0f, 1.0f);
+        float curved = (config.calibration.pressureGamma <= 0.0f || config.calibration.pressureGamma == 1.0f)
                            ? norm
-                           : std::pow(norm, config.pressureGamma);
-        return config.minRelativeThicknessFraction +
-               (1.0f - config.minRelativeThicknessFraction) *
+                           : std::pow(norm, config.calibration.pressureGamma);
+        return config.calibration.minRelativeThicknessFraction +
+               (1.0f - config.calibration.minRelativeThicknessFraction) *
                    std::clamp(curved, 0.0f, 1.0f);
     }
 
@@ -125,13 +125,13 @@ private:
      */
     [[nodiscard]] static float ScaleWidthByPressure(float baseWidth, float rawPressure,
                                                     const InkingConfig& config) noexcept {
-        if (!config.usePressure || rawPressure < 0.0f) {
+        if (!config.dynamics.usePressure || rawPressure < 0.0f) {
             return baseWidth;
         }
 
         float pressureCurved = ApplyPressureCurve(rawPressure, config);
-        float minFrac = std::min(config.minWidthMultiplier, config.maxWidthMultiplier);
-        float maxFrac = std::max(config.minWidthMultiplier, config.maxWidthMultiplier);
+        float minFrac = std::min(config.dynamics.minWidthMultiplier, config.dynamics.maxWidthMultiplier);
+        float maxFrac = std::max(config.dynamics.minWidthMultiplier, config.dynamics.maxWidthMultiplier);
         float widthMultiplier = minFrac + pressureCurved * (maxFrac - minFrac);
         return baseWidth * std::clamp(widthMultiplier, minFrac, maxFrac);
     }
@@ -141,19 +141,19 @@ private:
      * @param speedMmPerSec Euclidean pen speed in millimeters per second.
      * @param zoomScale Active canvas viewport zoom scale.
      * @param config Active inking configuration.
-     * @return Thinning factor in [config.minWidthMultiplier, 1.0].
+     * @return Thinning factor in [config.dynamics.minWidthMultiplier, 1.0].
      */
     [[nodiscard]] static float ComputeVelocityThinning(float speedMmPerSec, float zoomScale,
                                                        const InkingConfig& config) noexcept {
-        if (!config.useVelocity || speedMmPerSec <= 0.0f) {
+        if (!config.dynamics.useVelocity || speedMmPerSec <= 0.0f) {
             return 1.0f;
         }
 
         float speed = speedMmPerSec * zoomScale;
-        float maxSpeed = std::max(1.0f, config.velocityThinningMaxSpeed);
+        float maxSpeed = std::max(1.0f, config.dynamics.velocityThinningMaxSpeed);
         float normalizedSpeed = std::clamp(
             speed / maxSpeed, 0.0f, 1.0f);
-        float minThin = std::clamp(config.minWidthMultiplier, 0.01f, 1.0f);
+        float minThin = std::clamp(config.dynamics.minWidthMultiplier, 0.01f, 1.0f);
         return 1.0f - normalizedSpeed * (1.0f - minThin);
     }
 
@@ -165,22 +165,22 @@ private:
      */
     [[nodiscard]] static float ComputeTiltModulation(float tiltRad,
                                                      const InkingConfig& config) noexcept {
-        if (!config.useTilt || tiltRad <= config.tiltDeadzoneRad) {
+        if (!config.dynamics.useTilt || tiltRad <= config.dynamics.tiltDeadzoneRad) {
             return 1.0f;
         }
-        if (tiltRad >= config.tiltMaxAngleRad) {
-            return config.maxTiltWidthMultiplier;
+        if (tiltRad >= config.dynamics.tiltMaxAngleRad) {
+            return config.dynamics.maxTiltWidthMultiplier;
         }
 
-        float range = config.tiltMaxAngleRad - config.tiltDeadzoneRad;
+        float range = config.dynamics.tiltMaxAngleRad - config.dynamics.tiltDeadzoneRad;
         if (range <= 1e-5f) {
-            return config.maxTiltWidthMultiplier;
+            return config.dynamics.maxTiltWidthMultiplier;
         }
 
-        float t = std::clamp((tiltRad - config.tiltDeadzoneRad) / range, 0.0f, 1.0f);
+        float t = std::clamp((tiltRad - config.dynamics.tiltDeadzoneRad) / range, 0.0f, 1.0f);
         // Smoothstep interpolation (Hermite polynomial) for natural shading onset
         float smoothT = t * t * (3.0f - 2.0f * t);
-        return 1.0f + smoothT * (config.maxTiltWidthMultiplier - 1.0f);
+        return 1.0f + smoothT * (config.dynamics.maxTiltWidthMultiplier - 1.0f);
     }
 
     /**
@@ -192,7 +192,7 @@ private:
      */
     [[nodiscard]] static float ComputeTiltModulation(float tiltX, float tiltY,
                                                      const InkingConfig& config) noexcept {
-        if (!config.useTilt || (tiltX == 0.0f && tiltY == 0.0f)) {
+        if (!config.dynamics.useTilt || (tiltX == 0.0f && tiltY == 0.0f)) {
             return 1.0f;
         }
         return ComputeTiltModulation(std::hypot(tiltX, tiltY), config);

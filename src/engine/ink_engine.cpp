@@ -80,7 +80,7 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
         ProcessPhysicsResults(m_physicsResultsBuffer);
     }
 
-    if (m_config.google_enable_prediction) {
+    if (m_config.prediction.enable) {
         m_predictionDirty = true;
     }
 }
@@ -96,7 +96,7 @@ void InkEngine::AppendPoint(double worldX, double worldY, float pressure, double
         ProcessPhysicsResults(m_physicsResultsBuffer);
     }
 
-    if (m_config.google_enable_prediction) {
+    if (m_config.prediction.enable) {
         m_predictionDirty = true;
     }
 }
@@ -128,12 +128,12 @@ FinishedStrokeData InkEngine::FinishStroke() {
     InkStrokeFinisher::ApplyTailTaper(m_config, m_activeStyle, m_liveModeledPoints);
 
     // Stage 4: Post-processing simplification (decimates redundant collinear vertices)
-    if (m_config.enablePostProcessSimplification && m_liveModeledPoints.size() > 2) {
+    if (m_config.postProcessing.enableSimplification && m_liveModeledPoints.size() > 2) {
         m_liveModeledPoints = StrokePostProcessor::Simplify(
             m_liveModeledPoints,
-            m_config.simplificationToleranceMm,
-            m_config.simplificationMaxTurnDeg,
-            m_config.simplificationRadiusTolerance);
+            m_config.postProcessing.simplificationToleranceMm,
+            m_config.postProcessing.simplificationMaxTurnDeg,
+            m_config.postProcessing.simplificationRadiusTolerance);
     }
 
     // Stage 5: Package finished stroke data
@@ -206,7 +206,7 @@ void InkEngine::EnsurePrediction() const {
     m_predictedCapsules.clear();
     m_predictedPointsBuffer.clear();
 
-    if (!m_config.google_enable_prediction || m_liveModeledPoints.empty() || !m_physicsBridge) {
+    if (!m_config.prediction.enable || m_liveModeledPoints.empty() || !m_physicsBridge) {
         return;
     }
 
@@ -236,7 +236,7 @@ void InkEngine::EnsurePrediction() const {
 
 float InkEngine::EvaluateTapWidth(float pressure, float tiltX, float tiltY) const noexcept {
     const bool isPencil = (m_activeStyle.pattern == StrokePattern::TexturedPencil);
-    float pForEval = m_evalConfig.usePressure ? pressure : -1.0f;
+    float pForEval = m_evalConfig.dynamics.usePressure ? pressure : -1.0f;
     return StrokeWidthEvaluator::CalculateDynamicWidth(
         m_activeStyle.baseWidth, pForEval, 0.0f, tiltX, tiltY, -1.0f, m_zoomScale, m_evalConfig, isPencil);
 }
@@ -255,8 +255,8 @@ StrokePoint InkEngine::ToStrokePoint(const sm::Result& res, float previousWidth)
     float effectivePressure = (res.pressure >= 0.0f) ? res.pressure : 0.65f;
 
     const bool isPencil = (m_activeStyle.pattern == StrokePattern::TexturedPencil);
-    float pForEval = m_evalConfig.usePressure ? effectivePressure : -1.0f;
-    float vForEval = m_evalConfig.useVelocity ? speed : 0.0f;
+    float pForEval = m_evalConfig.dynamics.usePressure ? effectivePressure : -1.0f;
+    float vForEval = m_evalConfig.dynamics.useVelocity ? speed : 0.0f;
 
     float dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidthWithTiltRad(
         m_activeStyle.baseWidth, pForEval, vForEval, tiltRad,
@@ -299,9 +299,9 @@ void InkEngine::SetConfig(const InkingConfig& config) {
 
 void InkEngine::UpdateEvalConfig() noexcept {
     m_evalConfig = m_config;
-    m_evalConfig.usePressure = m_config.usePressure && m_activeStyle.usePressure;
-    m_evalConfig.useVelocity = m_config.useVelocity && m_activeStyle.useVelocity;
-    m_evalConfig.useTilt     = m_config.useTilt || m_activeStyle.useTilt;
+    m_evalConfig.dynamics.usePressure = m_config.dynamics.usePressure && m_activeStyle.usePressure;
+    m_evalConfig.dynamics.useVelocity = m_config.dynamics.useVelocity && m_activeStyle.useVelocity;
+    m_evalConfig.dynamics.useTilt     = m_config.dynamics.useTilt || m_activeStyle.useTilt;
 }
 
 void InkEngine::UpdatePhysicsParams() {

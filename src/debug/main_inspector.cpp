@@ -1080,7 +1080,7 @@ int main(int argc, char* argv[]) {
 
         if (geometryInspector.ShouldRenderCapsuleSdf() && !activeModeledPts.empty()) {
             glCapsuleRenderer.Render(viewport, winWidth, winHeight, capsuleBrush);
-            if (engine.IsStrokeActive() && config.google_enable_prediction && !activePredictedPts.empty()) {
+            if (engine.IsStrokeActive() && config.prediction.enable && !activePredictedPts.empty()) {
                 glCapsuleRenderer.RenderStroke(activePredictedPts,
                                                PackPremultipliedGpuColor(strokeStyle.color),
                                                viewport, winWidth, winHeight, capsuleBrush);

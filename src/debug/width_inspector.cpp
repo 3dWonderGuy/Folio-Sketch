@@ -12,30 +12,30 @@ bool WidthInspector::RenderUI(InkingConfig& config,
     bool widthDirty = false;
 
     ImGui::SeparatorText("Dynamic Inputs");
-    if (ImGui::Checkbox("usePressure", &config.usePressure)) {
-        style.usePressure = config.usePressure;
+    if (ImGui::Checkbox("usePressure", &config.dynamics.usePressure)) {
+        style.usePressure = config.dynamics.usePressure;
         widthDirty = true;
     }
     ImGui::SameLine();
-    if (ImGui::Checkbox("useVelocity", &config.useVelocity)) {
-        style.useVelocity = config.useVelocity;
+    if (ImGui::Checkbox("useVelocity", &config.dynamics.useVelocity)) {
+        style.useVelocity = config.dynamics.useVelocity;
         widthDirty = true;
     }
     ImGui::SameLine();
-    if (ImGui::Checkbox("useTilt", &config.useTilt)) {
-        style.useTilt = config.useTilt;
+    if (ImGui::Checkbox("useTilt", &config.dynamics.useTilt)) {
+        style.useTilt = config.dynamics.useTilt;
         widthDirty = true;
     }
 
     ImGui::SeparatorText("Thickness & Ratio Bounds");
     widthDirty |= ImGui::SliderFloat("baseWidth", &style.baseWidth, 0.5f, 40.0f, "%.2f");
-    widthDirty |= ImGui::SliderFloat("minWidthRatio", &config.minWidthMultiplier, 0.05f, 1.0f, "%.2f");
-    widthDirty |= ImGui::SliderFloat("maxWidthRatio", &config.maxWidthMultiplier, 0.5f, 3.0f, "%.2f");
-    widthDirty |= ImGui::SliderFloat("velocityMaxClamp", &config.velocityThinningMaxSpeed, 50.0f, 3500.0f, "%.0f");
-    widthDirty |= ImGui::SliderFloat("EMA Smoothing Factor", &config.dynamicWidthSmoothing, 0.01f, 1.0f, "%.2f");
-    widthDirty |= ImGui::SliderFloat("Pressure Gamma", &config.pressureGamma, 0.25f, 3.0f, "%.2f");
-    widthDirty |= ImGui::SliderFloat("Pressure Deadzone", &config.pressureDeadzoneMin, 0.0f, 0.25f, "%.3f");
-    widthDirty |= ImGui::SliderFloat("Pressure Saturation", &config.pressureSaturationMax, 0.50f, 1.0f, "%.3f");
+    widthDirty |= ImGui::SliderFloat("minWidthRatio", &config.dynamics.minWidthMultiplier, 0.05f, 1.0f, "%.2f");
+    widthDirty |= ImGui::SliderFloat("maxWidthRatio", &config.dynamics.maxWidthMultiplier, 0.5f, 3.0f, "%.2f");
+    widthDirty |= ImGui::SliderFloat("velocityMaxClamp", &config.dynamics.velocityThinningMaxSpeed, 50.0f, 3500.0f, "%.0f");
+    widthDirty |= ImGui::SliderFloat("EMA Smoothing Factor", &config.dynamics.widthSmoothingEma, 0.01f, 1.0f, "%.2f");
+    widthDirty |= ImGui::SliderFloat("Pressure Gamma", &config.calibration.pressureGamma, 0.25f, 3.0f, "%.2f");
+    widthDirty |= ImGui::SliderFloat("Pressure Deadzone", &config.calibration.pressureDeadzoneMin, 0.0f, 0.25f, "%.3f");
+    widthDirty |= ImGui::SliderFloat("Pressure Saturation", &config.calibration.pressureSaturationMax, 0.50f, 1.0f, "%.3f");
 
     ImGui::SeparatorText("Width Overlays & Curve Plot");
     ImGui::Checkbox("Show Hollow Radius Discs (r_i)", &m_showRadiusDiscs);
@@ -127,9 +127,9 @@ void WidthInspector::ReevaluateRadii(std::vector<StrokePoint>& points,
                                                      points[i].y - points[i - 1].y));
             speed = ds / kDefaultDtSec;
         }
-        float pForEval = config.usePressure ? points[i].pressure : -1.0f;
-        float vForEval = config.useVelocity ? speed : 0.0f;
-        float tiltRad = config.useTilt ? std::hypot(points[i].tiltX, points[i].tiltY) : 0.0f;
+        float pForEval = config.dynamics.usePressure ? points[i].pressure : -1.0f;
+        float vForEval = config.dynamics.useVelocity ? speed : 0.0f;
+        float tiltRad = config.dynamics.useTilt ? std::hypot(points[i].tiltX, points[i].tiltY) : 0.0f;
 
         float width = StrokeWidthEvaluator::CalculateDynamicWidthWithTiltRad(
             style.baseWidth, pForEval, vForEval, tiltRad,

@@ -12,65 +12,65 @@ bool ModelerInspector::RenderUI(InkingConfig& config) {
     bool physicsDirty = false;
 
     ImGui::SeparatorText("Position Modeler (Spring-Mass-Damper)");
-    physicsDirty |= ImGui::SliderFloat("spring_constant", &config.google_spring_mass_constant,
+    physicsDirty |= ImGui::SliderFloat("spring_constant", &config.physics.springMassConstant,
                                        0.00005f, 0.00500f, "%.5f");
-    physicsDirty |= ImGui::SliderFloat("drag_coefficient", &config.google_drag_constant,
+    physicsDirty |= ImGui::SliderFloat("drag_coefficient", &config.physics.dragConstant,
                                        10.0f, 200.0f, "%.1f");
 
     ImGui::SeparatorText("Wobble Smoother (Tremor Filter)");
-    physicsDirty |= ImGui::Checkbox("Wobble is_enabled", &config.google_wobble_enable);
-    if (config.google_wobble_enable) {
-        physicsDirty |= ImGui::SliderFloat("Wobble timeout (s)", &config.google_wobble_timeout_s,
+    physicsDirty |= ImGui::Checkbox("Wobble is_enabled", &config.filters.enableWobble);
+    if (config.filters.enableWobble) {
+        physicsDirty |= ImGui::SliderFloat("Wobble timeout (s)", &config.filters.wobbleTimeoutSec,
                                            0.005f, 0.500f, "%.3f s");
-        physicsDirty |= ImGui::SliderFloat("Wobble speed_floor", &config.google_wobble_speed_floor,
+        physicsDirty |= ImGui::SliderFloat("Wobble speed_floor", &config.filters.wobbleSpeedFloor,
                                            0.0f, 100.0f, "%.2f");
-        physicsDirty |= ImGui::SliderFloat("Wobble speed_ceiling", &config.google_wobble_speed_ceiling,
+        physicsDirty |= ImGui::SliderFloat("Wobble speed_ceiling", &config.filters.wobbleSpeedCeiling,
                                            0.1f, 200.0f, "%.2f");
-        if (config.google_wobble_speed_ceiling < config.google_wobble_speed_floor) {
-            config.google_wobble_speed_ceiling = config.google_wobble_speed_floor + 0.1f;
+        if (config.filters.wobbleSpeedCeiling < config.filters.wobbleSpeedFloor) {
+            config.filters.wobbleSpeedCeiling = config.filters.wobbleSpeedFloor + 0.1f;
         }
         ImGui::TextDisabled("Smoothing factor = 100%% at <= floor, tapering to 0%% at >= ceiling.");
     }
 
     ImGui::SeparatorText("Loop Contraction & Projection");
-    if (ImGui::Checkbox("Loop Contraction Mitigation is_enabled", &config.google_loop_mitigation_enable)) {
-        if (config.google_loop_mitigation_enable) {
+    if (ImGui::Checkbox("Loop Contraction Mitigation is_enabled", &config.filters.enableLoopMitigation)) {
+        if (config.filters.enableLoopMitigation) {
             // Google StrokeModeler validation requires normal projection when loop mitigation is enabled
-            config.google_use_stroke_normal_projection = true;
+            config.physics.useStrokeNormalProjection = true;
         }
         physicsDirty = true;
     }
-    if (config.google_loop_mitigation_enable) {
-        physicsDirty |= ImGui::SliderFloat("Loop speed_lower (px/s)", &config.google_loop_speed_lower_bound,
+    if (config.filters.enableLoopMitigation) {
+        physicsDirty |= ImGui::SliderFloat("Loop speed_lower (px/s)", &config.filters.loopSpeedLowerBound,
                                            0.0f, 2000.0f, "%.0f px/s");
-        physicsDirty |= ImGui::SliderFloat("Loop speed_upper (px/s)", &config.google_loop_speed_upper_bound,
+        physicsDirty |= ImGui::SliderFloat("Loop speed_upper (px/s)", &config.filters.loopSpeedUpperBound,
                                            100.0f, 5000.0f, "%.0f px/s");
-        physicsDirty |= ImGui::SliderFloat("Strength at high speed", &config.google_loop_strength_at_upper_speed,
+        physicsDirty |= ImGui::SliderFloat("Strength at high speed", &config.filters.loopStrengthAtUpperSpeed,
                                            0.0f, 1.0f, "%.2f (0=raw, 1=spring)");
         ImGui::TextDisabled("Lower value pulls high-speed corners closer to raw points.");
     }
-    if (ImGui::Checkbox("use_stroke_normal_projection", &config.google_use_stroke_normal_projection)) {
-        if (!config.google_use_stroke_normal_projection && config.google_loop_mitigation_enable) {
-            config.google_loop_mitigation_enable = false;
+    if (ImGui::Checkbox("use_stroke_normal_projection", &config.physics.useStrokeNormalProjection)) {
+        if (!config.physics.useStrokeNormalProjection && config.filters.enableLoopMitigation) {
+            config.filters.enableLoopMitigation = false;
         }
         physicsDirty = true;
     }
 
     ImGui::SeparatorText("Kalman Prediction");
-    physicsDirty |= ImGui::Checkbox("google_enable_prediction", &config.google_enable_prediction);
-    if (config.google_enable_prediction) {
-        physicsDirty |= ImGui::SliderFloat("Prediction Duration (ms)", &config.google_prediction_duration_ms,
+    physicsDirty |= ImGui::Checkbox("google_enable_prediction", &config.prediction.enable);
+    if (config.prediction.enable) {
+        physicsDirty |= ImGui::SliderFloat("Prediction Duration (ms)", &config.prediction.durationMs,
                                            0.0f, 50.0f, "%.1f ms");
     }
 
     ImGui::SeparatorText("Angle Upsampling");
-    physicsDirty |= ImGui::Checkbox("Enable Angle Upsampling", &config.google_enable_angle_upsampling);
-    if (config.google_enable_angle_upsampling) {
+    physicsDirty |= ImGui::Checkbox("Enable Angle Upsampling", &config.physics.enableAngleUpsampling);
+    if (config.physics.enableAngleUpsampling) {
         constexpr float kRadToDeg = 180.0f / static_cast<float>(M_PI);
         constexpr float kDegToRad = static_cast<float>(M_PI) / 180.0f;
-        float angleDeg = std::clamp(config.google_max_estimated_angle_rad * kRadToDeg, 2.0f, 30.0f);
+        float angleDeg = std::clamp(config.physics.maxEstimatedAngleRad * kRadToDeg, 2.0f, 30.0f);
         if (ImGui::SliderFloat("max_estimated_angle_to_traverse_per_input", &angleDeg, 2.0f, 30.0f, "%.1f deg")) {
-            config.google_max_estimated_angle_rad = angleDeg * kDegToRad;
+            config.physics.maxEstimatedAngleRad = angleDeg * kDegToRad;
             physicsDirty = true;
         }
     }

@@ -61,49 +61,49 @@ void InkPhysicsBridge::UpdateConfig(const InkingConfig& config) {
     sm::StrokeModelParams params;
 
     // 1. Position Modeler (Spring-Mass-Damper ODE)
-    params.position_modeler_params.spring_mass_constant = std::max(1e-6f, config.google_spring_mass_constant);
-    params.position_modeler_params.drag_constant        = std::max(1.0f, config.google_drag_constant);
+    params.position_modeler_params.spring_mass_constant = std::max(1e-6f, config.physics.springMassConstant);
+    params.position_modeler_params.drag_constant        = std::max(1.0f, config.physics.dragConstant);
 
     // 2. Loop Contraction Mitigation
     auto& loopParams = params.position_modeler_params.loop_contraction_mitigation_params;
-    loopParams.is_enabled = config.google_loop_mitigation_enable;
+    loopParams.is_enabled = config.filters.enableLoopMitigation;
     if (loopParams.is_enabled) {
-        loopParams.speed_lower_bound = std::max(0.0f, config.google_loop_speed_lower_bound);
-        loopParams.speed_upper_bound = std::max(loopParams.speed_lower_bound, config.google_loop_speed_upper_bound);
+        loopParams.speed_lower_bound = std::max(0.0f, config.filters.loopSpeedLowerBound);
+        loopParams.speed_upper_bound = std::max(loopParams.speed_lower_bound, config.filters.loopSpeedUpperBound);
         loopParams.interpolation_strength_at_speed_lower_bound =
-            std::clamp(config.google_loop_strength_at_lower_speed, 0.0f, 1.0f);
+            std::clamp(config.filters.loopStrengthAtLowerSpeed, 0.0f, 1.0f);
         loopParams.interpolation_strength_at_speed_upper_bound =
-            std::clamp(config.google_loop_strength_at_upper_speed, 0.0f,
+            std::clamp(config.filters.loopStrengthAtUpperSpeed, 0.0f,
                        loopParams.interpolation_strength_at_speed_lower_bound);
-        loopParams.min_speed_sampling_window = sm::Duration(std::max(0.0f, config.google_loop_min_speed_window_s));
+        loopParams.min_speed_sampling_window = sm::Duration(std::max(0.0f, config.filters.loopMinSpeedWindowSec));
     }
 
     // 3. Stylus State Modeler
     params.stylus_state_modeler_params.use_stroke_normal_projection =
-        config.google_use_stroke_normal_projection || config.google_loop_mitigation_enable;
+        config.physics.useStrokeNormalProjection || config.filters.enableLoopMitigation;
 
     // 4. Wobble Smoother (Tremor / Noise Filter)
-    params.wobble_smoother_params.is_enabled    = config.google_wobble_enable;
-    params.wobble_smoother_params.timeout       = sm::Duration(std::max(0.0f, config.google_wobble_timeout_s));
-    params.wobble_smoother_params.speed_floor   = std::max(0.0f, config.google_wobble_speed_floor);
+    params.wobble_smoother_params.is_enabled    = config.filters.enableWobble;
+    params.wobble_smoother_params.timeout       = sm::Duration(std::max(0.0f, config.filters.wobbleTimeoutSec));
+    params.wobble_smoother_params.speed_floor   = std::max(0.0f, config.filters.wobbleSpeedFloor);
     params.wobble_smoother_params.speed_ceiling = std::max(params.wobble_smoother_params.speed_floor,
-                                                           config.google_wobble_speed_ceiling);
+                                                           config.filters.wobbleSpeedCeiling);
 
     // 5. Sampling Parameters & Angular Upsampling
-    params.sampling_params.min_output_rate = std::max(10.0, static_cast<double>(config.google_min_output_rate));
+    params.sampling_params.min_output_rate = std::max(10.0, static_cast<double>(config.physics.minOutputRateHz));
     params.sampling_params.end_of_stroke_stopping_distance =
-        std::max(0.0001f, config.google_end_of_stroke_stopping_distance);
+        std::max(0.0001f, config.physics.endOfStrokeStoppingDistanceMm);
     params.sampling_params.end_of_stroke_max_iterations =
-        std::clamp(config.google_end_of_stroke_max_iterations, 1, 1000);
+        std::clamp(config.physics.endOfStrokeMaxIterations, 1, 1000);
     params.sampling_params.max_estimated_angle_to_traverse_per_input =
-        config.google_enable_angle_upsampling
-            ? std::clamp(static_cast<double>(config.google_max_estimated_angle_rad), 0.005, 3.10)
+        config.physics.enableAngleUpsampling
+            ? std::clamp(static_cast<double>(config.physics.maxEstimatedAngleRad), 0.005, 3.10)
             : -1.0;
 
     // 6. Forward Predictor Configuration (Kalman lookahead vs StrokeEnd vs Disabled)
-    if (!config.google_enable_prediction) {
+    if (!config.prediction.enable) {
         params.prediction_params = sm::DisabledPredictorParams{};
-    } else if (config.google_prediction_duration_ms > 0.0f) {
+    } else if (config.prediction.durationMs > 0.0f) {
         sm::KalmanPredictorParams kalman;
         kalman.process_noise = 0.067;
         kalman.measurement_noise = 0.1;
@@ -112,7 +112,7 @@ void InkPhysicsBridge::UpdateConfig(const InkingConfig& config) {
         kalman.min_catchup_velocity = 0.01f;
         kalman.acceleration_weight = 0.5f;
         kalman.jerk_weight = 0.1f;
-        kalman.prediction_interval = sm::Duration(std::max(0.001f, config.google_prediction_duration_ms * 0.001f));
+        kalman.prediction_interval = sm::Duration(std::max(0.001f, config.prediction.durationMs * 0.001f));
         kalman.confidence_params.desired_number_of_samples = 20;
         kalman.confidence_params.max_estimation_distance = 1.5f;
         kalman.confidence_params.min_travel_speed = 1.0f;
