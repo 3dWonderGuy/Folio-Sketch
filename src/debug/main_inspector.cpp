@@ -1039,8 +1039,10 @@ int main(int argc, char* argv[]) {
             geometryInspector.SetCapsuleTelemetry(
                 glCapsuleRenderer.GetInstanceCount(),
                 glCapsuleRenderer.GetLastCpuIngestionTimeMs());
+            geometryInspector.UpdateShapeRecognition(activeModeledPts, config);
         } else {
             geometryInspector.SetCapsuleTelemetry(0, 0.0);
+            geometryInspector.UpdateShapeRecognition({}, config);
         }
 
         // =====================================================================

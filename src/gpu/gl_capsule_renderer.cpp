@@ -23,6 +23,7 @@
 #include <string>
 
 namespace Folio {
+using Debug::CanvasTransform;
 
 bool GlCapsuleRenderer::Init() {
 #if defined(__ANDROID__)

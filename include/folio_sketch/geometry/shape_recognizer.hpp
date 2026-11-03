@@ -129,9 +129,9 @@ public:
         result.isClosed = true;
 
         // Compute 2D axis-aligned bounding box and centroid
-        float minX = points[0].x, maxX = points[0].x;
-        float minY = points[0].y, maxY = points[0].y;
-        float cx = 0.0f, cy = 0.0f;
+        double minX = points[0].x, maxX = points[0].x;
+        double minY = points[0].y, maxY = points[0].y;
+        double cx = 0.0, cy = 0.0;
 
         for (const auto& pt : points) {
             minX = std::min(minX, pt.x);
@@ -141,11 +141,11 @@ public:
             cx += pt.x;
             cy += pt.y;
         }
-        cx /= static_cast<float>(points.size());
-        cy /= static_cast<float>(points.size());
+        cx /= static_cast<double>(points.size());
+        cy /= static_cast<double>(points.size());
 
-        float bboxW = std::max(0.01f, maxX - minX);
-        float bboxH = std::max(0.01f, maxY - minY);
+        float bboxW = static_cast<float>(std::max(0.01, maxX - minX));
+        float bboxH = static_cast<float>(std::max(0.01, maxY - minY));
         float radiusA = bboxW * 0.5f;
         float radiusB = bboxH * 0.5f;
 
@@ -191,8 +191,8 @@ public:
         // 2c. Curvilinear loops: Circle or Ellipse
         float meanRadialDev = 0.0f;
         for (const auto& pt : points) {
-            float dx = (pt.x - cx) / radiusA;
-            float dy = (pt.y - cy) / radiusB;
+            float dx = static_cast<float>((pt.x - cx) / radiusA);
+            float dy = static_cast<float>((pt.y - cy) / radiusB);
             float normalizedDist = std::hypot(dx, dy);
             meanRadialDev += std::abs(normalizedDist - 1.0f);
         }
@@ -203,10 +203,10 @@ public:
             if (aspectDiff <= snap.circleAspectTolerance) {
                 result.type = RecognizedShapeType::Circle;
                 float r = (radiusA + radiusB) * 0.5f;
-                SampleEllipse(cx, cy, r, r, avgRadius, result.syntheticPoints);
+                SampleEllipse(static_cast<float>(cx), static_cast<float>(cy), r, r, avgRadius, result.syntheticPoints);
             } else {
                 result.type = RecognizedShapeType::Ellipse;
-                SampleEllipse(cx, cy, radiusA, radiusB, avgRadius, result.syntheticPoints);
+                SampleEllipse(static_cast<float>(cx), static_cast<float>(cy), radiusA, radiusB, avgRadius, result.syntheticPoints);
             }
             result.confidence = std::clamp(1.0f - (meanRadialDev / snap.ellipseFitToleranceMm), 0.0f, 1.0f);
             return result;

@@ -107,6 +107,42 @@ bool GeometryInspector::RenderUI(InkingConfig& config, StrokeStyle& style) {
         geomDirty = true;
     }
 
+    ImGui::SeparatorText("Shape Snapping & Geometric Recognition");
+    if (ImGui::Button("Reset Snapping Defaults")) {
+        config.shapeSnapping = InkingConfig::ShapeSnapping{};
+        geomDirty = true;
+    }
+    geomDirty |= ImGui::Checkbox("Enable Hold-to-Snap", &config.shapeSnapping.enableHoldToSnap);
+    geomDirty |= ImGui::SliderFloat("Hold Dwell Duration (s)", &config.shapeSnapping.holdDwellDurationSec, 0.1f, 2.0f, "%.2f s");
+    geomDirty |= ImGui::SliderFloat("Movement Dwell Threshold (mm)", &config.shapeSnapping.movementThresholdMm, 0.2f, 5.0f, "%.2f mm");
+    geomDirty |= ImGui::SliderFloat("Loop Closure Gap (mm)", &config.shapeSnapping.loopClosureGapMm, 1.0f, 20.0f, "%.1f mm");
+    geomDirty |= ImGui::SliderFloat("Line Straightness Tol (mm)", &config.shapeSnapping.lineStraightnessToleranceMm, 0.1f, 5.0f, "%.2f mm");
+    geomDirty |= ImGui::SliderFloat("Circle Aspect Tol", &config.shapeSnapping.circleAspectTolerance, 0.05f, 0.5f, "%.2f");
+    geomDirty |= ImGui::SliderFloat("Ellipse Fit Tol (mm)", &config.shapeSnapping.ellipseFitToleranceMm, 0.2f, 5.0f, "%.2f mm");
+    geomDirty |= ImGui::SliderFloat("Polygon Corner Tol (deg)", &config.shapeSnapping.polygonCornerAngleThresholdDeg, 15.0f, 90.0f, "%.1f deg");
+
+    ImGui::Checkbox("Show Recognized Shape Overlay", &m_showRecognizedShapeOverlay);
+
+    const char* shapeTypeName = "None";
+    switch (m_lastRecognition.type) {
+        case RecognizedShapeType::Line: shapeTypeName = "Straight Line"; break;
+        case RecognizedShapeType::Circle: shapeTypeName = "Circle"; break;
+        case RecognizedShapeType::Ellipse: shapeTypeName = "Ellipse"; break;
+        case RecognizedShapeType::Triangle: shapeTypeName = "Triangle"; break;
+        case RecognizedShapeType::Rectangle: shapeTypeName = "Rectangle"; break;
+        case RecognizedShapeType::Square: shapeTypeName = "Square"; break;
+        default: shapeTypeName = "None (Freehand)"; break;
+    }
+
+    if (m_lastRecognition.type != RecognizedShapeType::None) {
+        ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.4f, 1.0f),
+                           "Recognized: %s (Confidence: %.0f%%, Synthetic Vertices: %zu)",
+                           shapeTypeName, m_lastRecognition.confidence * 100.0f,
+                           m_lastRecognition.syntheticPoints.size());
+    } else {
+        ImGui::TextDisabled("Recognized: None (Freehand)");
+    }
+
     ImGui::SeparatorText("Point Conditioning");
     if (ImGui::Checkbox("Stationary Envelopment (ds <= |dr|)", &config.postProcessing.stationaryEnvelopment)) {
         geomDirty = true;
@@ -389,6 +425,24 @@ void GeometryInspector::RenderCanvasOverlays(ImDrawList* drawList,
             ImVec2 r = transform.WorldToScreen(static_cast<float>(pEnd.x - sEnd.nx * pEnd.r),
                                                static_cast<float>(pEnd.y - sEnd.ny * pEnd.r));
             drawList->AddLine(l, r, inNormCol, 1.0f);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Shape Recognition Overlay: Draws fitted synthetic geometric primitive
+    // -------------------------------------------------------------------------
+    if (m_showRecognizedShapeOverlay && m_lastRecognition.type != RecognizedShapeType::None &&
+        m_lastRecognition.syntheticPoints.size() >= 2) {
+        constexpr ImU32 shapeCol = IM_COL32(0, 255, 180, 220); // Bright cyan-green
+        const auto& synthPts = m_lastRecognition.syntheticPoints;
+        for (size_t i = 0; i + 1 < synthPts.size(); ++i) {
+            ImVec2 p0 = transform.WorldToScreen(synthPts[i].x, synthPts[i].y);
+            ImVec2 p1 = transform.WorldToScreen(synthPts[i + 1].x, synthPts[i + 1].y);
+            drawList->AddLine(p0, p1, shapeCol, 2.5f);
+        }
+        for (const auto& sp : synthPts) {
+            ImVec2 c = transform.WorldToScreen(sp.x, sp.y);
+            drawList->AddCircle(c, std::max(2.0f, sp.r * transform.zoom), IM_COL32(0, 255, 180, 70), 12, 1.0f);
         }
     }
 }

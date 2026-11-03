@@ -11,6 +11,7 @@
 #include <cstdint>
 #include "folio_sketch/core/ink_config.hpp"
 #include "folio_sketch/core/ink_stroke_data.hpp"
+#include "folio_sketch/geometry/shape_recognizer.hpp"
 #include "folio_sketch/gpu/ink_mesh.hpp"
 #include "folio_sketch/vector/ink_path.hpp"
 #include "debug/raw_sensor_layer.hpp"
@@ -105,15 +106,26 @@ public:
     }
 
     [[nodiscard]] const MeshDefectStats& GetDefectStats() const noexcept { return m_stats; }
+    [[nodiscard]] const ShapeRecognitionResult& GetLastRecognitionResult() const noexcept { return m_lastRecognition; }
+    void UpdateShapeRecognition(std::span<const StrokePoint> points, const InkingConfig& config) {
+        if (points.size() >= 2) {
+            std::vector<StrokePoint> pts(points.begin(), points.end());
+            m_lastRecognition = ShapeRecognizer::ClassifyAndFit(pts, config);
+        } else {
+            m_lastRecognition = ShapeRecognitionResult{};
+        }
+    }
 
 private:
     bool m_enabled = true;
     GeometryViewMode m_viewMode = GeometryViewMode::GpuCapsuleSdf;
     MeshDefectStats m_stats{};
+    ShapeRecognitionResult m_lastRecognition{};
     bool m_highlightInvertedTriangles = true;
     bool m_showSkirtWireframe = true;
     bool m_showMeshBehindNeedles = true;
     bool m_showCapsuleBoundingQuads = false;
+    bool m_showRecognizedShapeOverlay = true;
     size_t m_capsuleInstanceCount = 0;
     double m_capsuleCpuIngestionMs = 0.0;
     double m_benchmark1000PtCapsuleMs = -1.0;
