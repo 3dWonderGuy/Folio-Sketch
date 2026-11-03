@@ -44,7 +44,7 @@
 #include "debug/width_inspector.hpp"
 #include "debug/geometry_inspector.hpp"
 #include "debug/stroke_scrubber.hpp"
-#include "debug/gl_capsule_renderer.hpp"
+#include "folio_sketch/gpu/gl_capsule_renderer.hpp"
 
 using namespace Folio;
 using namespace Folio::Debug;
@@ -937,7 +937,12 @@ int main(int argc, char* argv[]) {
 
                     if (ImGui::Button("Evaluate & Apply Width Dynamics")) {
                         widthInspector.SetShowRadiusDiscs(true);
-                        if (strokeScrubber.IsFrozen()) {
+                        if (!lastRawSamples.empty() && !engine.IsStrokeActive()) {
+                            ReplayRawSamplesThroughEngine(engine, lastRawSamples, strokeStyle, viewport.zoom, lastFinishedStroke);
+                            if (strokeScrubber.IsFrozen()) {
+                                strokeScrubber.FreezeStroke(lastRawSamples, lastFinishedStroke.modeledPoints, strokeStyle, viewport.zoom);
+                            }
+                        } else if (strokeScrubber.IsFrozen()) {
                             WidthInspector::ReevaluateRadii(strokeScrubber.GetMutableFrozenPoints(),
                                                             config, strokeStyle, viewport.zoom);
                             strokeScrubber.Retessellate(strokeStyle, viewport.zoom);
@@ -951,7 +956,12 @@ int main(int argc, char* argv[]) {
 
                     if (widthInspector.RenderUI(config, strokeStyle, ptsForPlot)) {
                         engine.SetConfig(config);
-                        if (strokeScrubber.IsFrozen()) {
+                        if (!lastRawSamples.empty() && !engine.IsStrokeActive()) {
+                            ReplayRawSamplesThroughEngine(engine, lastRawSamples, strokeStyle, viewport.zoom, lastFinishedStroke);
+                            if (strokeScrubber.IsFrozen()) {
+                                strokeScrubber.FreezeStroke(lastRawSamples, lastFinishedStroke.modeledPoints, strokeStyle, viewport.zoom);
+                            }
+                        } else if (strokeScrubber.IsFrozen()) {
                             WidthInspector::ReevaluateRadii(strokeScrubber.GetMutableFrozenPoints(),
                                                             config, strokeStyle, viewport.zoom);
                             strokeScrubber.Retessellate(strokeStyle, viewport.zoom);

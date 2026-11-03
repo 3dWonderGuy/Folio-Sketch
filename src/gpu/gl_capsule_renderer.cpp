@@ -5,7 +5,7 @@
  * =========================================================================================
  */
 
-#include "debug/gl_capsule_renderer.hpp"
+#include "folio_sketch/gpu/gl_capsule_renderer.hpp"
 #include "folio_sketch/gpu/ink_mesh.hpp"
 
 #if defined(__ANDROID__)
@@ -22,7 +22,7 @@
 #include <iostream>
 #include <string>
 
-namespace Folio::Debug {
+namespace Folio {
 
 bool GlCapsuleRenderer::Init() {
 #if defined(__ANDROID__)

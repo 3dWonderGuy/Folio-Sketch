@@ -85,6 +85,15 @@ struct InkingConfig {
         float tiltMaxAngleRad              = 1.05f;            // Angular tilt threshold (~60 deg from upright) at which maximum shading width is reached
         float velocityThinningMaxSpeed     = 1500.0f;          // Pen velocity (mm/s) at which maximum hydrodynamic velocity thinning occurs
         float widthSmoothingEma            = 0.6f;             // Exponential Moving Average filter [0.0, 1.0] to eliminate abrupt step jumps in stroke radius
+        bool  useAccelerationFiltering     = true;             // Enables inertial speed filtering bounded by physical acceleration and deceleration limits
+        float maxAccelerationMmPerSec2     = 3500.0f;          // Maximum physical acceleration ceiling (mm/s^2) for velocity thinning transitions
+        float maxDecelerationMmPerSec2     = 2500.0f;          // Asymmetric deceleration limit (mm/s^2) preventing sudden line blooming upon pen deceleration
+        bool  useCornerCompensation        = true;             // Enables turn-rate speed compensation to suppress corner bloat at sharp vertices
+        float cornerCompensationThresholdRad = 0.52359877f;    // Angular delta threshold (~30 deg) above which corner velocity attenuation begins
+        float maxRadiusSlopePerMm          = 0.35f;            // Spatial cone-slope clamp (dr/ds) preventing radius blooming during low-displacement movements
+        bool  enableGaussianRadiusSmoothing = true;            // Post-evaluates stroke radius profile with Gaussian filter to round off sharp peaks
+        float radiusSmoothingKernelSigmaMm = 3.5f;             // Spatial Gaussian kernel standard deviation (mm) along stroke arc-length
+        int   radiusSmoothingPasses        = 2;                // Number of radius smoothing iterations (rounds sharp peaks into smooth hills)
         float tailTaperLengthMm            = 0.0f;             // Arc length (mm) at stroke tail over which radius tapers down to minWidth (0 = disabled)
         float tailTaperPower               = 1.0f;             // Taper falloff exponent (1.0 = linear taper, >1.0 = rapid tip falloff)
     } dynamics;
@@ -100,6 +109,20 @@ struct InkingConfig {
         float simplificationRadiusTolerance = 0.08f;           // Maximum relative radius change permitted before retaining a simplified vertex
         float minTurnAngleForJointCapDeg   = 3.0f;             // Minimum corner turning angle required before generating round pivot joint caps
     } postProcessing;
+
+    // -------------------------------------------------------------------------
+    // 7. SHAPE SNAPPING & RECOGNITION
+    // -------------------------------------------------------------------------
+    struct ShapeSnapping {
+        bool  enableHoldToSnap             = true;             // Enables gesture hold-dwell detection to trigger geometric shape snapping
+        float holdDwellDurationSec         = 0.5f;             // Stationary hold dwell duration (seconds) required to trigger shape snapping
+        float movementThresholdMm          = 1.5f;             // Maximum movement radius (mm) allowed during the dwell window to be considered stationary
+        float loopClosureGapMm             = 5.0f;             // Maximum gap distance (mm) between stroke endpoints to qualify as a closed loop
+        float lineStraightnessToleranceMm  = 1.0f;             // Maximum chord deviation (mm) to classify an open stroke as a straight line
+        float circleAspectTolerance        = 0.18f;            // Maximum eccentricity / aspect ratio deviation (|w - h| / max(w, h)) for circle fitting
+        float ellipseFitToleranceMm        = 1.5f;             // Maximum mean radial deviation (mm) for ellipse fitting
+        float polygonCornerAngleThresholdDeg = 45.0f;         // Minimum angular change (degrees) at RDP vertices to qualify as a polygon corner
+    } shapeSnapping;
 };
 
 using InkingTuningConfig = InkingConfig;

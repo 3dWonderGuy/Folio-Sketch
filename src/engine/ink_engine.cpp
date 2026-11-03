@@ -61,12 +61,20 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
     StylusInputPoint startPt(worldX, worldY, pressure, timeSec, 0.0f, tiltX, tiltY);
     m_activeStrokePoints.push_back(startPt);
 
-    // 2. Compute initial line width
+    // 2. Initialize temporal dynamics tracking for acceleration and corner compensation
+    m_filteredSpeedMmPerSec = 0.0f;
+    m_lastPointTimeSec = timeSec;
+    m_lastModeledTimeSec = timeSec;
+    m_lastHeadingRad = 0.0f;
+    m_hasHeading = false;
+    m_currentTurnAngleRad = 0.0f;
+
+    // 3. Compute initial line width
     float startPressure = (startPt.pressure >= 0.0f) ? startPt.pressure : 0.65f;
     float dynamicWidth = EvaluateTapWidth(startPressure, startPt.tiltX, startPt.tiltY);
     m_smoothedWidth = dynamicWidth;
 
-    // 3. Emit immediate touchdown dot (0ms visual feedback while filter buffers)
+    // 4. Emit immediate touchdown dot (0ms visual feedback while filter buffers)
     StrokePoint dotPt(startPt.x, startPt.y, dynamicWidth * 0.5f, startPressure, startPt.tiltX, startPt.tiltY);
     CapsuleBuilder::BuildCapsuleInstances(
         std::span<const StrokePoint>(&dotPt, 1),
@@ -74,7 +82,7 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
         m_liveCapsules);
     m_capsulesDirty = false;
 
-    // 4. Seed the touchdown event into physics solver
+    // 5. Seed the touchdown event into physics solver
     m_physicsBridge->Reset();
     if (m_physicsBridge->ProcessTouchDown(startPt, m_physicsResultsBuffer)) {
         ProcessPhysicsResults(m_physicsResultsBuffer);
@@ -88,6 +96,54 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
 void InkEngine::AppendPoint(double worldX, double worldY, float pressure, double timeSec,
                             float tiltX, float tiltY) {
     if (!m_isStrokeActive || !m_physicsBridge) return;
+
+    // 1. Calculate temporal and spatial deltas relative to previous input point
+    float rawSpeed = 0.0f;
+    float dt = static_cast<float>(timeSec - m_lastPointTimeSec);
+    float dist = 0.0f;
+
+    if (!m_activeStrokePoints.empty()) {
+        const auto& prevPt = m_activeStrokePoints.back();
+        float dx = static_cast<float>(worldX - prevPt.x);
+        float dy = static_cast<float>(worldY - prevPt.y);
+        dist = std::hypot(dx, dy);
+
+        if (dt > 1e-5f) {
+            rawSpeed = dist / dt;
+        }
+
+        // Angular heading & corner turn delta computation
+        if (dist > 0.05f) { // Only evaluate heading if movement exceeds jitter threshold (0.05mm)
+            float currentHeading = std::atan2(dy, dx);
+            if (m_hasHeading) {
+                float angleDiff = std::abs(currentHeading - m_lastHeadingRad);
+                constexpr float kPi = 3.14159265358979323846f;
+                constexpr float kTwoPi = 2.0f * kPi;
+                while (angleDiff > kPi) {
+                    angleDiff = std::abs(angleDiff - kTwoPi);
+                }
+                m_currentTurnAngleRad = angleDiff;
+            } else {
+                m_currentTurnAngleRad = 0.0f;
+            }
+            m_lastHeadingRad = currentHeading;
+            m_hasHeading = true;
+        }
+    }
+
+    m_lastPointTimeSec = timeSec;
+
+    // 2. Filter speed using physical acceleration/deceleration constraints
+    if (m_evalConfig.dynamics.useAccelerationFiltering) {
+        m_filteredSpeedMmPerSec = StrokeWidthEvaluator::FilterSpeedWithAcceleration(
+            rawSpeed,
+            m_filteredSpeedMmPerSec,
+            dt,
+            m_evalConfig.dynamics.maxAccelerationMmPerSec2,
+            m_evalConfig.dynamics.maxDecelerationMmPerSec2);
+    } else {
+        m_filteredSpeedMmPerSec = rawSpeed;
+    }
 
     StylusInputPoint pt(worldX, worldY, pressure, timeSec, 0.0f, tiltX, tiltY);
     m_activeStrokePoints.push_back(pt);
@@ -127,6 +183,14 @@ FinishedStrokeData InkEngine::FinishStroke() {
     // Stage 3: Optional Tail Tapering
     InkStrokeFinisher::ApplyTailTaper(m_config, m_activeStyle, m_liveModeledPoints);
 
+    // Stage 3.5: Spatial Gaussian Radius Smoothing (Rounds sharp spikes into smooth hills)
+    if (m_config.dynamics.enableGaussianRadiusSmoothing && m_liveModeledPoints.size() > 2) {
+        StrokePostProcessor::SmoothRadiiGaussian(
+            m_liveModeledPoints,
+            m_config.dynamics.radiusSmoothingKernelSigmaMm,
+            m_config.dynamics.radiusSmoothingPasses);
+    }
+
     // Stage 4: Post-processing simplification (decimates redundant collinear vertices)
     if (m_config.postProcessing.enableSimplification && m_liveModeledPoints.size() > 2) {
         m_liveModeledPoints = StrokePostProcessor::Simplify(
@@ -165,6 +229,12 @@ void InkEngine::CancelStroke() {
     m_capsulesDirty = false;
     m_predictionDirty = false;
     m_smoothedWidth = -1.0f;
+    m_filteredSpeedMmPerSec = 0.0f;
+    m_lastPointTimeSec = 0.0;
+    m_lastModeledTimeSec = 0.0;
+    m_lastHeadingRad = 0.0f;
+    m_hasHeading = false;
+    m_currentTurnAngleRad = 0.0f;
     m_isStrokeActive = false;
 }
 
@@ -256,11 +326,13 @@ StrokePoint InkEngine::ToStrokePoint(const sm::Result& res, float previousWidth)
 
     const bool isPencil = (m_activeStyle.pattern == StrokePattern::TexturedPencil);
     float pForEval = m_evalConfig.dynamics.usePressure ? effectivePressure : -1.0f;
-    float vForEval = m_evalConfig.dynamics.useVelocity ? speed : 0.0f;
+    float vForEval = m_evalConfig.dynamics.useVelocity
+                         ? (m_evalConfig.dynamics.useAccelerationFiltering ? m_filteredSpeedMmPerSec : speed)
+                         : 0.0f;
 
     float dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidthWithTiltRad(
         m_activeStyle.baseWidth, pForEval, vForEval, tiltRad,
-        previousWidth, m_zoomScale, m_evalConfig, isPencil);
+        previousWidth, m_zoomScale, m_evalConfig, isPencil, m_currentTurnAngleRad);
 
     return StrokePoint(res.position.x, res.position.y, dynamicWidth * 0.5f, effectivePressure, tiltX, tiltY);
 }
@@ -269,7 +341,65 @@ void InkEngine::ProcessPhysicsResults(const std::vector<sm::Result>& results) {
     if (results.empty()) return;
 
     for (const auto& res : results) {
+        // 1. Calculate physical speed and heading directly on modeled trajectory
+        float resSpeed = (res.velocity.x != 0.0f || res.velocity.y != 0.0f)
+                             ? std::hypot(res.velocity.x, res.velocity.y)
+                             : 0.0f;
+        double resTimeSec = res.time.Value();
+        float dt = static_cast<float>(resTimeSec - m_lastModeledTimeSec);
+        if (m_lastModeledTimeSec <= 0.0 || dt < 0.0f) {
+            dt = 1.0f / 180.0f;
+        }
+        m_lastModeledTimeSec = resTimeSec;
+
+        // 2. Filter speed with acceleration limits on the modeled path
+        if (m_evalConfig.dynamics.useAccelerationFiltering) {
+            m_filteredSpeedMmPerSec = StrokeWidthEvaluator::FilterSpeedWithAcceleration(
+                resSpeed,
+                m_filteredSpeedMmPerSec,
+                dt,
+                m_evalConfig.dynamics.maxAccelerationMmPerSec2,
+                m_evalConfig.dynamics.maxDecelerationMmPerSec2);
+        } else {
+            m_filteredSpeedMmPerSec = resSpeed;
+        }
+
+        // 3. Compute angular heading change along modeled path
+        if (!m_liveModeledPoints.empty()) {
+            float dx = static_cast<float>(res.position.x - m_liveModeledPoints.back().x);
+            float dy = static_cast<float>(res.position.y - m_liveModeledPoints.back().y);
+            float ds = std::hypot(dx, dy);
+            if (ds > 0.03f) { // Ignore sub-0.03mm micro-jitter
+                float heading = std::atan2(dy, dx);
+                if (m_hasHeading) {
+                    float diff = std::abs(heading - m_lastHeadingRad);
+                    constexpr float kPi = 3.14159265358979323846f;
+                    constexpr float kTwoPi = 2.0f * kPi;
+                    while (diff > kPi) {
+                        diff = std::abs(diff - kTwoPi);
+                    }
+                    m_currentTurnAngleRad = diff;
+                } else {
+                    m_currentTurnAngleRad = 0.0f;
+                }
+                m_lastHeadingRad = heading;
+                m_hasHeading = true;
+            }
+        }
+
         StrokePoint pt = ToStrokePoint(res, m_smoothedWidth);
+
+        // 4. Clamp spatial radius slope (dr/ds) against previous point to prevent bloat during slow movements
+        if (!m_liveModeledPoints.empty()) {
+            float ds = static_cast<float>(std::hypot(pt.x - m_liveModeledPoints.back().x,
+                                                     pt.y - m_liveModeledPoints.back().y));
+            pt.r = StrokeWidthEvaluator::ClampSpatialRadiusSlope(
+                pt.r,
+                m_liveModeledPoints.back().r,
+                ds,
+                m_evalConfig.dynamics.maxRadiusSlopePerMm);
+        }
+
         m_smoothedWidth = pt.r * 2.0f;
 
         // Filter out stationary duplicates (< 1e-4 mm)

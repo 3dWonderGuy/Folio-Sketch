@@ -104,8 +104,9 @@ set(FOLIO_SKETCH_SOURCES
     # Diagnostics & Debug
     "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/ink_generator_debug.cpp"
 
-    # GPU Mesh Builder
+    # GPU Mesh Builder & Renderer
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/ink_mesh_builder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/gl_capsule_renderer.cpp"
 )
 
 set(FOLIO_SKETCH_HEADERS
@@ -124,6 +125,10 @@ set(FOLIO_SKETCH_HEADERS
 
     # GPU
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/gpu/ink_mesh.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/gpu/gl_capsule_renderer.hpp"
+
+    # Geometry
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/geometry/shape_recognizer.hpp"
 
     # Vector
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/vector/ink_path.hpp"
@@ -222,7 +227,6 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
 
     set(FOLIO_INSPECTOR_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/main_inspector.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/gl_capsule_renderer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/raw_sensor_layer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/modeler_inspector.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/width_inspector.cpp"

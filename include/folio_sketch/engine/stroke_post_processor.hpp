@@ -1,135 +1,32 @@
 #pragma once
 /**
  * =========================================================================================
- * @file core/ink_engine/stroke_post_processor.hpp
- * @brief Standalone Post-Processing, Geometric Analysis, and Simplification for Vector Ink
+ * @file folio_sketch/engine/stroke_post_processor.hpp
+ * @brief Post-Processing and Curve Simplification for Vector Ink
  * =========================================================================================
  *
- * ARCHITECTURAL PURPOSE:
- * -----------------------
- * Standalone post-processing pipeline for finalized ink strokes:
- * 1. Geometric Complexity Analysis (open stroke vs. closed loop vs. self-intersecting).
- * 2. Curve Simplification (collinear decimation / Ramer-Douglas-Peucker).
- * 3. Enclosed polygon loop detection for infill handling.
- * 4. Contour topology restructuring.
- *
- * Note: Unconnected standalone module with empty stubs ready for algorithm implementation.
+ * Responsibilities:
+ * - Curve Simplification: Decimates redundant collinear vertices via a shape-preserving
+ *   Ramer-Douglas-Peucker (RDP) algorithm, retaining sharp corners and dynamic thickness.
  */
 
 #include <vector>
-#include <cstdint>
 #include <cmath>
+#include <algorithm>
 #include "folio_sketch/core/ink_stroke_data.hpp"
 
 namespace Folio {
 
-/**
- * @enum StrokeTopology
- * @brief Categorizes stroke geometry for selective post-processing.
- */
-enum class StrokeTopology : uint8_t {
-    OpenStroke = 0,       ///< Standard open handwriting line or curve
-    ClosedLoop,           ///< Endpoints meet within closure distance threshold
-    SelfIntersecting      ///< Crosses over itself (squiggles, loops, complex doodles)
-};
-
-/**
- * @struct StrokeAnalysisResult
- * @brief Structural metadata extracted from analyzing stroke geometry.
- */
-struct StrokeAnalysisResult {
-    StrokeTopology topology              = StrokeTopology::OpenStroke;
-    bool           isClosed              = false;
-    bool           hasSelfIntersections  = false;
-    double         totalArcLengthMm      = 0.0;
-    double         endpointDistanceMm    = 0.0;
-};
-
 class StrokePostProcessor {
 public:
-    /**
-     * @brief Analyzes topological structure of a stroke (endpoints, length, loops).
-     * @param stroke Finished stroke data payload.
-     * @return Structural analysis metadata.
-     */
-    [[nodiscard]] static StrokeAnalysisResult Analyze(const FinishedStrokeData& stroke) noexcept {
-        StrokeAnalysisResult result;
-
-        const size_t ptCount = stroke.modeledPoints.size();
-        if (ptCount >= 2) {
-            const auto& first = stroke.modeledPoints.front();
-            const auto& last  = stroke.modeledPoints.back();
-            result.endpointDistanceMm = std::hypot(last.x - first.x, last.y - first.y);
-
-            for (size_t i = 1; i < ptCount; ++i) {
-                result.totalArcLengthMm += std::hypot(
-                    stroke.modeledPoints[i].x - stroke.modeledPoints[i - 1].x,
-                    stroke.modeledPoints[i].y - stroke.modeledPoints[i - 1].y);
-            }
-
-            result.isClosed = DetectClosedLoop(stroke.modeledPoints);
-            if (result.isClosed) {
-                result.topology = StrokeTopology::ClosedLoop;
-            }
-
-            // Check for self-intersections between non-adjacent segments
-            if (ptCount >= 4) {
-                auto segmentsCross = [](const StrokePoint& a, const StrokePoint& b,
-                                        const StrokePoint& c, const StrokePoint& d) noexcept -> bool {
-                    double d1 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-                    double d2 = (b.x - a.x) * (d.y - a.y) - (b.y - a.y) * (d.x - a.x);
-                    double d3 = (d.x - c.x) * (a.y - c.y) - (d.y - c.y) * (a.x - c.x);
-                    double d4 = (d.x - c.x) * (b.y - c.y) - (d.y - c.y) * (b.x - c.x);
-
-                    if (((d1 > 1e-6 && d2 < -1e-6) || (d1 < -1e-6 && d2 > 1e-6)) &&
-                        ((d3 > 1e-6 && d4 < -1e-6) || (d3 < -1e-6 && d4 > 1e-6))) {
-                        return true;
-                    }
-                    return false;
-                };
-
-                size_t step = (ptCount <= 300) ? 1 : (ptCount / 300);
-                for (size_t i = 0; i + step < ptCount && !result.hasSelfIntersections; i += step) {
-                    const auto& pA = stroke.modeledPoints[i];
-                    const auto& pB = stroke.modeledPoints[i + step];
-                    double minX1 = std::min(pA.x, pB.x), maxX1 = std::max(pA.x, pB.x);
-                    double minY1 = std::min(pA.y, pB.y), maxY1 = std::max(pA.y, pB.y);
-
-                    for (size_t j = i + 2 * step; j + step < ptCount; j += step) {
-                        if (i == 0 && j + step >= ptCount - 1 && result.isClosed) continue;
-
-                        const auto& pC = stroke.modeledPoints[j];
-                        const auto& pD = stroke.modeledPoints[j + step];
-
-                        if (std::max(pC.x, pD.x) < minX1 || std::min(pC.x, pD.x) > maxX1 ||
-                            std::max(pC.y, pD.y) < minY1 || std::min(pC.y, pD.y) > maxY1) {
-                            continue;
-                        }
-
-                        if (segmentsCross(pA, pB, pC, pD)) {
-                            result.hasSelfIntersections = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (result.hasSelfIntersections && !result.isClosed) {
-                    result.topology = StrokeTopology::SelfIntersecting;
-                }
-            }
-        }
-
-        return result;
-    }
-
     /**
      * @brief Simplifies stroke centerline points by decimating redundant collinear vertices.
      *
      * Shape-preserving Ramer-Douglas-Peucker: a span [A, B] is collapsed into a single chord only if
      * every interior point satisfies ALL of:
-     *  - perpendicular distance to the chord   <= toleranceMm
-     *  - direction deviation of its segment     <= maxTurnDeg (prevents faceted "peaks" on arcs)
-     *  - radius deviation from linear interp    <= radiusTolerance * r (preserves width profile)
+     *  - perpendicular distance to the chord <= toleranceMm
+     *  - direction deviation of its segment  <= maxTurnDeg (prevents faceted peaks on arcs)
+     *  - radius deviation from linear interp <= radiusTolerance * r (preserves thickness profile)
      *
      * @param points Input centerline vertices.
      * @param toleranceMm Distance tolerance in millimeters.
@@ -230,43 +127,71 @@ public:
     }
 
     /**
-     * @brief Checks if start and end vertices meet within a specified closure radius.
-     * @param points Input stroke centerline points.
-     * @param maxClosureRadiusMm Maximum gap distance to consider the stroke closed.
-     * @return True if stroke forms a closed loop.
+     * @brief Smooths the radius profile of a stroke along its arc-length using a spatial Gaussian filter.
+     *
+     * Converts sharp, jagged thickness peaks and sawtooth spikes into soft, rounded hills.
+     * Operates in true physical millimeter arc-length space so smoothing is invariant to point density.
+     *
+     * @param points Input/output stroke points whose .r radii are smoothed in-place.
+     * @param sigmaMm Standard deviation of the Gaussian kernel in millimeters (e.g. 2.0 - 5.0 mm).
+     * @param passes Number of smoothing passes (e.g. 1 or 2).
      */
-    [[nodiscard]] static bool DetectClosedLoop(
-        const std::vector<StrokePoint>& points,
-        float maxClosureRadiusMm = 2.0f) noexcept {
-        if (points.size() < 3) return false;
+    static void SmoothRadiiGaussian(std::vector<StrokePoint>& points,
+                                    float sigmaMm = 3.5f,
+                                    int passes = 2) noexcept {
+        const size_t n = points.size();
+        if (n < 3 || sigmaMm <= 0.01f || passes <= 0) return;
 
-        const auto& first = points.front();
-        const auto& last  = points.back();
-        double dist = std::hypot(last.x - first.x, last.y - first.y);
-        if (dist > maxClosureRadiusMm) return false;
-
-        double arcLen = 0.0;
-        for (size_t i = 1; i < points.size(); ++i) {
-            arcLen += std::hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+        // Compute cumulative arc-length distances
+        std::vector<float> arcLengths(n, 0.0f);
+        for (size_t i = 1; i < n; ++i) {
+            float ds = static_cast<float>(std::hypot(points[i].x - points[i - 1].x,
+                                                     points[i].y - points[i - 1].y));
+            arcLengths[i] = arcLengths[i - 1] + ds;
         }
-        return arcLen >= std::max(6.0, static_cast<double>(maxClosureRadiusMm) * 3.0);
-    }
 
-    /**
-     * @brief Primary post-processing entry point.
-     * @param stroke Finished stroke data.
-     * @param style Active stroke style.
-     * @return Post-processed stroke data.
-     */
-    [[nodiscard]] static FinishedStrokeData Process(
-        FinishedStrokeData stroke,
-        const StrokeStyle& style = StrokeStyle{}) {
-        (void)style;
+        const float twoSigmaSq = 2.0f * sigmaMm * sigmaMm;
+        const float maxWindowDist = 3.0f * sigmaMm; // 3-sigma cutoff (~99.7% energy)
 
-        // Stub: pass-through unmodified for now
-        return stroke;
+        std::vector<float> originalRadii(n);
+        std::vector<float> smoothedRadii(n);
+
+        for (int p = 0; p < passes; ++p) {
+            for (size_t i = 0; i < n; ++i) {
+                originalRadii[i] = points[i].r;
+            }
+
+            for (size_t i = 0; i < n; ++i) {
+                float centerS = arcLengths[i];
+                float weightSum = 0.0f;
+                float radiusSum = 0.0f;
+
+                // Expand backwards along arc-length within 3-sigma window
+                for (int j = static_cast<int>(i); j >= 0; --j) {
+                    float dist = centerS - arcLengths[j];
+                    if (dist > maxWindowDist) break;
+                    float w = std::exp(-(dist * dist) / twoSigmaSq);
+                    weightSum += w;
+                    radiusSum += originalRadii[j] * w;
+                }
+
+                // Expand forwards along arc-length within 3-sigma window
+                for (size_t j = i + 1; j < n; ++j) {
+                    float dist = arcLengths[j] - centerS;
+                    if (dist > maxWindowDist) break;
+                    float w = std::exp(-(dist * dist) / twoSigmaSq);
+                    weightSum += w;
+                    radiusSum += originalRadii[j] * w;
+                }
+
+                smoothedRadii[i] = (weightSum > 1e-5f) ? (radiusSum / weightSum) : originalRadii[i];
+            }
+
+            for (size_t i = 0; i < n; ++i) {
+                points[i].r = smoothedRadii[i];
+            }
+        }
     }
 };
 
 } // namespace Folio
-

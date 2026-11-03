@@ -1,7 +1,7 @@
 #pragma once
 /**
  * =========================================================================================
- * @file src/debug/gl_capsule_renderer.hpp
+ * @file folio_sketch/gpu/gl_capsule_renderer.hpp
  * @brief GPU-Driven Analytic Segment Signed Distance Field (Capsule SDF) Instanced Renderer
  * =========================================================================================
  *
@@ -19,7 +19,10 @@
 #include "folio_sketch/gpu/ink_mesh.hpp"
 #include "debug/raw_sensor_layer.hpp"
 
-namespace Folio::Debug {
+namespace Folio {
+namespace Debug {
+    using CanvasTransform = Folio::Debug::CanvasTransform;
+}
 
 /**
  * @struct CapsuleBrush
@@ -65,7 +68,7 @@ public:
     /**
      * @brief Renders the currently uploaded capsule instances using glDrawArraysInstanced.
      */
-    void Render(const CanvasTransform& transform, int vpWidth, int vpHeight,
+    void Render(const Debug::CanvasTransform& transform, int vpWidth, int vpHeight,
                 const CapsuleBrush& brush = {});
 
     /**
@@ -73,7 +76,7 @@ public:
      */
     void RenderStroke(std::span<const StrokePoint> points,
                       uint32_t color,
-                      const CanvasTransform& transform,
+                      const Debug::CanvasTransform& transform,
                       int vpWidth,
                       int vpHeight,
                       const CapsuleBrush& brush = {});
@@ -81,7 +84,7 @@ public:
     /**
      * @brief Renders optional debug wireframe outlines of the coarse world-space capsule bounding quads.
      */
-    void RenderBoundingQuadsWireframe(ImDrawList* drawList, const CanvasTransform& transform) const;
+    void RenderBoundingQuadsWireframe(ImDrawList* drawList, const Debug::CanvasTransform& transform) const;
 
     /**
      * @brief Runs a pure CPU ingestion benchmark on a synthetic N-point stroke and returns elapsed time in ms.
@@ -95,7 +98,7 @@ public:
 private:
     static unsigned int CompileShader(unsigned int type, const char* src);
     void EnsureLayer(int w, int h);
-    void DrawInstances(const CanvasTransform& transform, int vpWidth, int vpHeight,
+    void DrawInstances(const Debug::CanvasTransform& transform, int vpWidth, int vpHeight,
                        const CapsuleBrush& brush) const;
 
     unsigned int m_compositeProgram = 0;
@@ -119,4 +122,9 @@ private:
     double m_lastCpuIngestionMs = 0.0;
 };
 
-} // namespace Folio::Debug
+namespace Debug {
+    using GlCapsuleRenderer = Folio::GlCapsuleRenderer;
+    using CapsuleBrush = Folio::CapsuleBrush;
+}
+
+} // namespace Folio

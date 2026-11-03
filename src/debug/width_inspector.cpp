@@ -1,5 +1,6 @@
 #include "debug/width_inspector.hpp"
 #include "folio_sketch/engine/stroke_width_evaluator.hpp"
+#include "folio_sketch/engine/stroke_post_processor.hpp"
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -36,6 +37,32 @@ bool WidthInspector::RenderUI(InkingConfig& config,
     widthDirty |= ImGui::SliderFloat("Pressure Gamma", &config.calibration.pressureGamma, 0.25f, 3.0f, "%.2f");
     widthDirty |= ImGui::SliderFloat("Pressure Deadzone", &config.calibration.pressureDeadzoneMin, 0.0f, 0.25f, "%.3f");
     widthDirty |= ImGui::SliderFloat("Pressure Saturation", &config.calibration.pressureSaturationMax, 0.50f, 1.0f, "%.3f");
+
+    ImGui::SeparatorText("Acceleration & Corner Compensation");
+    if (ImGui::Button("Reset Dynamics to Recommended Defaults")) {
+        config.dynamics.useAccelerationFiltering = true;
+        config.dynamics.maxAccelerationMmPerSec2 = 3500.0f;
+        config.dynamics.maxDecelerationMmPerSec2 = 2500.0f;
+        config.dynamics.useCornerCompensation = true;
+        config.dynamics.cornerCompensationThresholdRad = 0.52359877f;
+        config.dynamics.maxRadiusSlopePerMm = 0.35f;
+        widthDirty = true;
+    }
+    widthDirty |= ImGui::Checkbox("useAccelerationFiltering", &config.dynamics.useAccelerationFiltering);
+    ImGui::SameLine();
+    widthDirty |= ImGui::Checkbox("useCornerCompensation", &config.dynamics.useCornerCompensation);
+    widthDirty |= ImGui::SliderFloat("maxAcceleration (mm/s^2)", &config.dynamics.maxAccelerationMmPerSec2, 500.0f, 10000.0f, "%.0f");
+    widthDirty |= ImGui::SliderFloat("maxDeceleration (mm/s^2)", &config.dynamics.maxDecelerationMmPerSec2, 500.0f, 10000.0f, "%.0f");
+    widthDirty |= ImGui::SliderFloat("cornerThresholdRad", &config.dynamics.cornerCompensationThresholdRad, 0.1f, 1.57f, "%.2f rad");
+    widthDirty |= ImGui::SliderFloat("maxRadiusSlopePerMm (dr/ds)", &config.dynamics.maxRadiusSlopePerMm, 0.05f, 1.0f, "%.2f");
+
+    ImGui::SeparatorText("Gaussian Peak Smoothing (Rounds Sharp Spikes)");
+    widthDirty |= ImGui::Checkbox("enableGaussianRadiusSmoothing", &config.dynamics.enableGaussianRadiusSmoothing);
+    if (config.dynamics.enableGaussianRadiusSmoothing) {
+        widthDirty |= ImGui::SliderFloat("Gaussian Sigma (mm)", &config.dynamics.radiusSmoothingKernelSigmaMm, 0.5f, 15.0f, "%.1f mm");
+        widthDirty |= ImGui::SliderInt("Smoothing Passes", &config.dynamics.radiusSmoothingPasses, 1, 5);
+        ImGui::TextDisabled("Filters raw width along stroke arc-length to round sharp peaks into smooth hills.");
+    }
 
     ImGui::SeparatorText("Width Overlays & Curve Plot");
     ImGui::Checkbox("Show Hollow Radius Discs (r_i)", &m_showRadiusDiscs);
@@ -117,25 +144,67 @@ void WidthInspector::ReevaluateRadii(std::vector<StrokePoint>& points,
     if (points.empty()) return;
 
     float prevWidth = -1.0f;
+    float filteredSpeed = 0.0f;
+    float lastHeading = 0.0f;
+    bool hasHeading = false;
     const bool isPencil = (style.pattern == StrokePattern::TexturedPencil);
     constexpr float kDefaultDtSec = 1.0f / 180.0f;
 
     for (size_t i = 0; i < points.size(); ++i) {
-        float speed = 0.0f;
+        float rawSpeed = 0.0f;
+        float ds = 0.0f;
+        float turnAngleRad = 0.0f;
+
         if (i > 0) {
-            float ds = static_cast<float>(std::hypot(points[i].x - points[i - 1].x,
-                                                     points[i].y - points[i - 1].y));
-            speed = ds / kDefaultDtSec;
+            float dx = static_cast<float>(points[i].x - points[i - 1].x);
+            float dy = static_cast<float>(points[i].y - points[i - 1].y);
+            ds = std::hypot(dx, dy);
+            rawSpeed = ds / kDefaultDtSec;
+
+            if (ds > 0.05f) {
+                float heading = std::atan2(dy, dx);
+                if (hasHeading) {
+                    float diff = std::abs(heading - lastHeading);
+                    constexpr float kPi = 3.14159265358979323846f;
+                    while (diff > kPi) diff = std::abs(diff - 2.0f * kPi);
+                    turnAngleRad = diff;
+                }
+                lastHeading = heading;
+                hasHeading = true;
+            }
         }
+
+        if (config.dynamics.useAccelerationFiltering) {
+            filteredSpeed = StrokeWidthEvaluator::FilterSpeedWithAcceleration(
+                rawSpeed, filteredSpeed, kDefaultDtSec,
+                config.dynamics.maxAccelerationMmPerSec2,
+                config.dynamics.maxDecelerationMmPerSec2);
+        } else {
+            filteredSpeed = rawSpeed;
+        }
+
         float pForEval = config.dynamics.usePressure ? points[i].pressure : -1.0f;
-        float vForEval = config.dynamics.useVelocity ? speed : 0.0f;
+        float vForEval = config.dynamics.useVelocity ? filteredSpeed : 0.0f;
         float tiltRad = config.dynamics.useTilt ? std::hypot(points[i].tiltX, points[i].tiltY) : 0.0f;
 
         float width = StrokeWidthEvaluator::CalculateDynamicWidthWithTiltRad(
             style.baseWidth, pForEval, vForEval, tiltRad,
-            prevWidth, zoomScale, config, isPencil);
+            prevWidth, zoomScale, config, isPencil, turnAngleRad);
         prevWidth = width;
-        points[i].r = std::max(0.01f, width * 0.5f);
+
+        float targetRadius = std::max(0.01f, width * 0.5f);
+        if (i > 0) {
+            targetRadius = StrokeWidthEvaluator::ClampSpatialRadiusSlope(
+                targetRadius, points[i - 1].r, ds, config.dynamics.maxRadiusSlopePerMm);
+        }
+        points[i].r = targetRadius;
+    }
+
+    if (config.dynamics.enableGaussianRadiusSmoothing && points.size() > 2) {
+        StrokePostProcessor::SmoothRadiiGaussian(
+            points,
+            config.dynamics.radiusSmoothingKernelSigmaMm,
+            config.dynamics.radiusSmoothingPasses);
     }
 }
 

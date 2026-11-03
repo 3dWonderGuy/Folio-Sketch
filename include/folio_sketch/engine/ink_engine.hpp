@@ -51,10 +51,11 @@ public:
     InkEngine();
     ~InkEngine();
 
-    InkEngine(const InkEngine&) = delete;
-    InkEngine& operator=(const InkEngine&) = delete;
-    InkEngine(InkEngine&&) = delete;
-    InkEngine& operator=(InkEngine&&) = delete;
+    // Prevent accidental copying or slicing of live engine state and physics solver buffers
+    InkEngine(const InkEngine&) = delete;            // Non-copyable
+    InkEngine& operator=(const InkEngine&) = delete; // Non-copy-assignable
+    InkEngine(InkEngine&&) = delete;                 // Non-movable
+    InkEngine& operator=(InkEngine&&) = delete;      // Non-move-assignable
 
     // -------------------------------------------------------------------------
     // 1. INKING LIFECYCLE
@@ -158,6 +159,14 @@ private:
     InkingConfig m_evalConfig;
     float m_zoomScale = 1.0f;
     float m_smoothedWidth = -1.0f;
+
+    // Dynamics Temporal State (Acceleration filtering & Corner compensation)
+    float m_filteredSpeedMmPerSec = 0.0f;
+    double m_lastPointTimeSec = 0.0;
+    float m_lastHeadingRad = 0.0f;
+    bool m_hasHeading = false;
+    float m_currentTurnAngleRad = 0.0f;
+    double m_lastModeledTimeSec = 0.0;
 
     // Geometry & Result Buffers
     std::vector<StylusInputPoint> m_activeStrokePoints;

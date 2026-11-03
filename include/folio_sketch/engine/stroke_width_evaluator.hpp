@@ -1,19 +1,22 @@
 #pragma once
 /**
  * =========================================================================================
- * @file core/ink_engine/stroke_width_evaluator.hpp
- * @brief Dynamic Stylus Width, Pressure Curve, and Velocity Thinning Evaluator
+ * @file folio_sketch/engine/stroke_width_evaluator.hpp
+ * @brief Dynamic Stylus Width, Pressure Curve, Velocity Thinning, and Corner Evaluator
  * =========================================================================================
  *
  * Encapsulates all non-linear stylus dynamics:
  * 1. Hardware pressure curve calibration (deadzone, saturation, power-law gamma).
- * 2. Pressure-to-thickness bounding and scaling.
- * 3. Velocity thinning (Fountain pen hydrodynamic thinning effect).
- * 4. Exponential Moving Average (EMA) width filter for flicker-free transitions.
+ * 2. Inertial velocity filtering bounded by physical acceleration/deceleration limits.
+ * 3. Corner turn-rate compensation to suppress vertex bloating.
+ * 4. Velocity thinning (Fountain pen hydrodynamic thinning effect).
+ * 5. Spatial cone-slope radius clamping (dr/ds).
+ * 6. Exponential Moving Average (EMA) width filter for flicker-free transitions.
  */
 
 #include <cmath>
 #include <algorithm>
+#include <numbers>
 #include "folio_sketch/core/ink_config.hpp"
 #include "folio_sketch/core/ink_stroke_data.hpp"
 
@@ -21,6 +24,101 @@ namespace Folio {
 
 class StrokeWidthEvaluator {
 public:
+    // =========================================================================
+    // 1. INERTIAL ACCELERATION & CORNER COMPENSATION EVALUATORS
+    // =========================================================================
+
+    /**
+     * @brief Filters raw input speed through asymmetric physical acceleration and deceleration limits.
+     * @param rawSpeed Instantaneous speed (mm/s).
+     * @param previousFilteredSpeed Previous filtered speed (mm/s).
+     * @param dt Elapsed time interval (seconds).
+     * @param maxAccel Maximum positive acceleration (mm/s^2).
+     * @param maxDecel Maximum deceleration limit (mm/s^2).
+     * @return Inertially clamped speed in mm/s (>= 0.0f).
+     */
+    [[nodiscard]] static float FilterSpeedWithAcceleration(float rawSpeed,
+                                                           float previousFilteredSpeed,
+                                                           float dt,
+                                                           float maxAccel,
+                                                           float maxDecel) noexcept {
+        if (dt <= 1e-5f) {
+            return previousFilteredSpeed;
+        }
+
+        float deltaV = rawSpeed - previousFilteredSpeed;
+        float minDeltaV = -maxDecel * dt;
+        float maxDeltaV = maxAccel * dt;
+        deltaV = std::clamp(deltaV, minDeltaV, maxDeltaV);
+
+        return std::max(0.0f, previousFilteredSpeed + deltaV);
+    }
+
+    /**
+     * @brief Computes velocity thinning factor with turn-rate speed compensation.
+     *
+     * When turning sharp corners (turnAngleRad > cornerCompensationThresholdRad), pen travel speed
+     * drops toward zero, which would normally collapse velocity thinning to 1.0 (causing an unnatural
+     * corner bulge). This method blends speed toward an effective cruising speed (0.4 * maxSpeed)
+     * proportional to turn sharpness before computing thinning.
+     *
+     * @param filteredSpeedMmPerSec Inertially filtered pen speed (mm/s).
+     * @param turnAngleRad Angular turn delta between consecutive segments in radians [0, pi].
+     * @param zoomScale Viewport zoom scale.
+     * @param config Active inking configuration.
+     * @return Hydrodynamic velocity thinning factor in [minWidthMultiplier, 1.0].
+     */
+    [[nodiscard]] static float ComputeCompensatedVelocityThinning(float filteredSpeedMmPerSec,
+                                                                 float turnAngleRad,
+                                                                 float zoomScale,
+                                                                 const InkingConfig& config) noexcept {
+        if (!config.dynamics.useVelocity) {
+            return 1.0f;
+        }
+
+        float effectiveSpeed = filteredSpeedMmPerSec;
+
+        if (config.dynamics.useCornerCompensation &&
+            turnAngleRad > config.dynamics.cornerCompensationThresholdRad) {
+            float maxSpeed = std::max(1.0f, config.dynamics.velocityThinningMaxSpeed);
+            float cruisingSpeed = 0.4f * maxSpeed;
+
+            // Blend toward cruisingSpeed proportional to turn sharpness past threshold up to pi
+            constexpr float kPi = 3.14159265358979323846f;
+            float denom = std::max(1e-4f, kPi - config.dynamics.cornerCompensationThresholdRad);
+            float t = std::clamp((turnAngleRad - config.dynamics.cornerCompensationThresholdRad) / denom, 0.0f, 1.0f);
+            // Smoothstep blending
+            float smoothT = t * t * (3.0f - 2.0f * t);
+            effectiveSpeed = std::max(effectiveSpeed, std::lerp(effectiveSpeed, cruisingSpeed, smoothT));
+        }
+
+        return ComputeVelocityThinning(effectiveSpeed, zoomScale, config);
+    }
+
+    /**
+     * @brief Clamps spatial cone-slope (dr/ds) to prevent radius expansion from outpacing arc length.
+     * @param targetRadius Calculated unconstrained target radius (mm).
+     * @param previousRadius Radius of previous modeled point (mm).
+     * @param segmentLengthMm Arc length between previous point and current point (mm).
+     * @param maxSlope Maximum allowable dr/ds slope ratio.
+     * @return Spatially bounded radius (mm).
+     */
+    [[nodiscard]] static float ClampSpatialRadiusSlope(float targetRadius,
+                                                      float previousRadius,
+                                                      float segmentLengthMm,
+                                                      float maxSlope) noexcept {
+        if (previousRadius <= 0.0f || segmentLengthMm <= 0.0f || maxSlope <= 0.0f) {
+            return targetRadius;
+        }
+
+        float maxDeltaR = segmentLengthMm * maxSlope;
+        return std::clamp(targetRadius, previousRadius - maxDeltaR, previousRadius + maxDeltaR);
+    }
+
+    // =========================================================================
+    // 2. DYNAMIC WIDTH CALCULATION ENTRY POINTS
+    // =========================================================================
+
     /**
      * @brief Evaluates complete dynamic stroke thickness from Point2D telemetry and applies EMA smoothing.
      * 
@@ -36,11 +134,15 @@ public:
      * @param isPencil If true, uses graphite pencil physics where pressure controls grain/opacity rather
      *                 than ballooning tip width (tilt controls shading spread).
      */
-    [[nodiscard]] static float CalculateDynamicWidthWithTiltRad(float baseWidth, float pressure,
-                                                                float speed, float tiltRad,
-                                                                float previousWidth, float zoomScale,
+    [[nodiscard]] static float CalculateDynamicWidthWithTiltRad(float baseWidth,
+                                                                float pressure,
+                                                                float speed,
+                                                                float tiltRad,
+                                                                float previousWidth,
+                                                                float zoomScale,
                                                                 const InkingConfig& config,
-                                                                bool isPencil = false) noexcept {
+                                                                bool isPencil = false,
+                                                                float turnAngleRad = 0.0f) noexcept {
         float effBaseWidth = baseWidth;
         float effPressure = pressure;
         float effSpeed = speed;
@@ -55,7 +157,9 @@ public:
         }
 
         float pressureWidth = ScaleWidthByPressure(effBaseWidth, effPressure, config);
-        float velocityFactor = ComputeVelocityThinning(effSpeed, zoomScale, config);
+        float velocityFactor = (config.dynamics.useCornerCompensation && turnAngleRad > 0.0f)
+                                   ? ComputeCompensatedVelocityThinning(effSpeed, turnAngleRad, zoomScale, config)
+                                   : ComputeVelocityThinning(effSpeed, zoomScale, config);
         float tiltFactor = ComputeTiltModulation(tiltRad, config);
         float targetWidth = pressureWidth * velocityFactor * tiltFactor;
         return ApplySmoothingEMA(previousWidth, targetWidth, config.dynamics.widthSmoothingEma);
@@ -68,10 +172,11 @@ public:
                                                      float speed, float tiltX, float tiltY,
                                                      float previousWidth, float zoomScale,
                                                      const InkingConfig& config,
-                                                     bool isPencil = false) noexcept {
+                                                     bool isPencil = false,
+                                                     float turnAngleRad = 0.0f) noexcept {
         float tiltRad = (config.dynamics.useTilt && (tiltX != 0.0f || tiltY != 0.0f)) ? std::hypot(tiltX, tiltY) : 0.0f;
         return CalculateDynamicWidthWithTiltRad(baseWidth, pressure, speed, tiltRad,
-                                                previousWidth, zoomScale, config, isPencil);
+                                                previousWidth, zoomScale, config, isPencil, turnAngleRad);
     }
 
     /**
@@ -84,6 +189,9 @@ public:
                                      previousWidth, zoomScale, config);
     }
 
+    // =========================================================================
+    // 3. INTERNAL EVALUATORS
+    // =========================================================================
 private:
     /**
      * @brief Maps raw hardware stylus pressure through deadzone, saturation, and power-law gamma curve.
@@ -149,8 +257,7 @@ private:
 
         float speed = speedMmPerSec * zoomScale;
         float maxSpeed = std::max(1.0f, config.dynamics.velocityThinningMaxSpeed);
-        float normalizedSpeed = std::clamp(
-            speed / maxSpeed, 0.0f, 1.0f);
+        float normalizedSpeed = std::clamp(speed / maxSpeed, 0.0f, 1.0f);
         float minThin = std::clamp(config.dynamics.minWidthMultiplier, 0.01f, 1.0f);
         return 1.0f - normalizedSpeed * (1.0f - minThin);
     }
