@@ -1,0 +1,418 @@
+/**
+ * =========================================================================================
+ * @file src/debug/gl_capsule_renderer.cpp
+ * @brief GPU-Driven Analytic Segment Signed Distance Field (Capsule SDF) Instanced Renderer
+ * =========================================================================================
+ */
+
+#include "folio_sketch/gpu/gl_capsule_renderer.hpp"
+#include "folio_sketch/gpu/ink_mesh.hpp"
+
+#if defined(__ANDROID__)
+#include <GLES3/gl3.h>
+#else
+#define GL_GLEXT_PROTOTYPES 1
+#include <SDL3/SDL_opengl.h>
+#include <SDL3/SDL_opengl_glext.h>
+#endif
+
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <iostream>
+#include <string>
+
+namespace Folio {
+using Debug::CanvasTransform;
+
+bool GlCapsuleRenderer::Init() {
+#if defined(__ANDROID__)
+    const char* glslHeader = "#version 300 es\nprecision highp float;\n";
+#else
+    const char* glslHeader = "#version 330 core\n";
+#endif
+
+    // Vertex Shader:
+    // Reconstructs local segment frame (u, n) from (aPointA, aPointB), expands the
+    // static unit quad [-1, 1]^2 by max(rA, rB) + AA padding along +/-u and +/-n,
+    // and projects world coordinates to clip space using canvas pan & zoom.
+    std::string vSrc = std::string(glslHeader) +
+        "layout(location = 0) in vec2 aQuadPos;\n"
+        "layout(location = 1) in vec2 aPointA;\n"
+        "layout(location = 2) in vec2 aPointB;\n"
+        "layout(location = 3) in vec2 aRadii;\n"
+        "layout(location = 4) in vec4 aColor;\n"
+        "uniform vec4 uTransform; // (panX, panY, zoom, unused)\n"
+        "uniform vec2 uViewport;  // (width, height)\n"
+        "out vec2 vWorldPos;\n"
+        "flat out vec2 vPointA;\n"
+        "flat out vec2 vPointB;\n"
+        "flat out vec2 vRadii;\n"
+        "flat out vec4 vColor;\n"
+        "void main() {\n"
+        "    vec2 delta = aPointB - aPointA;\n"
+        "    float segLen = length(delta);\n"
+        "    vec2 u = (segLen > 1e-5) ? (delta / segLen) : vec2(1.0, 0.0);\n"
+        "    vec2 n = vec2(-u.y, u.x);\n"
+        "    float zoom = max(uTransform.z, 1e-4);\n"
+        "    float padWorld = 2.0 / zoom;\n"
+        "    float maxR = max(aRadii.x, aRadii.y) + padWorld;\n"
+        "    vec2 mid = 0.5 * (aPointA + aPointB);\n"
+        "    float halfSpanU = 0.5 * segLen + maxR;\n"
+        "    vec2 worldPos = mid + u * (aQuadPos.x * halfSpanU) + n * (aQuadPos.y * maxR);\n"
+        "    vec2 screenPos = worldPos * zoom + uTransform.xy;\n"
+        "    vec2 ndc = vec2(\n"
+        "        (screenPos.x / uViewport.x) * 2.0 - 1.0,\n"
+        "        1.0 - (screenPos.y / uViewport.y) * 2.0\n"
+        "    );\n"
+        "    gl_Position = vec4(ndc, 0.0, 1.0);\n"
+        "    vWorldPos = worldPos;\n"
+        "    vPointA   = aPointA;\n"
+        "    vPointB   = aPointB;\n"
+        "    vRadii    = aRadii;\n"
+        "    vColor    = aColor;\n"
+        "}\n";
+
+    // Fragment Shader (Analytic Capsule SDF):
+    // Evaluates exact Euclidean distance from vWorldPos to segment [vPointA, vPointB],
+    // linearly interpolates radius r(t) = mix(rA, rB, t), and applies a 1.0-pixel
+    // screen-space smoothstep falloff across all zoom levels.
+    std::string fSrc = std::string(glslHeader) +
+        "in vec2 vWorldPos;\n"
+        "flat in vec2 vPointA;\n"
+        "flat in vec2 vPointB;\n"
+        "flat in vec2 vRadii;\n"
+        "flat in vec4 vColor;\n"
+        "uniform vec4 uTransform; // (panX, panY, zoom, unused)\n"
+        "uniform vec2 uGrain;     // (grain strength 0..1, grain cells per world unit)\n"
+        "out vec4 fragColor;\n"
+        "float hash21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n"
+        "float vnoise(vec2 p) {\n"
+        "    vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);\n"
+        "    return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x),\n"
+        "               mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x), f.y);\n"
+        "}\n"
+        "void main() {\n"
+        "    vec2 ab = vPointB - vPointA;\n"
+        "    float lenSq = dot(ab, ab);\n"
+        "    float t = (lenSq > 1e-8) ? clamp(dot(vWorldPos - vPointA, ab) / lenSq, 0.0, 1.0) : 0.0;\n"
+        "    vec2 closestPt = vPointA + t * ab;\n"
+        "    float dist = length(vWorldPos - closestPt);\n"
+        "    float r = mix(vRadii.x, vRadii.y, t);\n"
+        "    float sdfWorld = r - dist;\n"
+        "    float zoom = max(uTransform.z, 1e-4);\n"
+        "    float fw = fwidth(dist - r);\n"
+        "    float aaWidthWorld = (fw > 1e-6 && fw < 4.0 / zoom) ? fw : (1.0 / zoom);\n"
+        "    float edgeAlpha = smoothstep(-0.5 * aaWidthWorld, 0.5 * aaWidthWorld, sdfWorld);\n"
+        "    if (edgeAlpha <= 0.0) {\n"
+        "        discard;\n"
+        "    }\n"
+        "    float tooth = 1.0;\n"
+        "    if (uGrain.x > 0.0) {\n"
+        "        // Paper tooth is a function of world position only, so every overlapping capsule\n"
+        "        // sees identical grain and the stroke-layer MAX union stays seamless.\n"
+        "        vec2 gp = vWorldPos * uGrain.y;\n"
+        "        float n = 0.6 * vnoise(gp) + 0.4 * vnoise(gp * 2.7 + 17.0);\n"
+        "        tooth = mix(1.0, smoothstep(0.25, 0.75, n), uGrain.x);\n"
+        "    }\n"
+        "    fragColor = vColor * (edgeAlpha * tooth);\n"
+        "}\n";
+
+    // Composite shader: fullscreen triangle sampling the per-stroke layer with a uniform opacity.
+    std::string cvSrc = std::string(glslHeader) +
+        "out vec2 vUv;\n"
+        "void main() {\n"
+        "    vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
+        "    vUv = p;\n"
+        "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
+        "}\n";
+    std::string cfSrc = std::string(glslHeader) +
+        "in vec2 vUv;\n"
+        "uniform sampler2D uLayer;\n"
+        "uniform float uOpacity;\n"
+        "out vec4 fragColor;\n"
+        "void main() { fragColor = texture(uLayer, vUv) * uOpacity; }\n";
+    {
+        GLuint cvs = CompileShader(GL_VERTEX_SHADER, cvSrc.c_str());
+        GLuint cfs = CompileShader(GL_FRAGMENT_SHADER, cfSrc.c_str());
+        if (!cvs || !cfs) return false;
+        m_compositeProgram = glCreateProgram();
+        glAttachShader(m_compositeProgram, cvs);
+        glAttachShader(m_compositeProgram, cfs);
+        glLinkProgram(m_compositeProgram);
+        glDeleteShader(cvs);
+        glDeleteShader(cfs);
+        m_locCompLayer   = glGetUniformLocation(m_compositeProgram, "uLayer");
+        m_locCompOpacity = glGetUniformLocation(m_compositeProgram, "uOpacity");
+        glGenVertexArrays(1, &m_emptyVao);
+    }
+
+    GLuint vs = CompileShader(GL_VERTEX_SHADER, vSrc.c_str());
+    GLuint fs = CompileShader(GL_FRAGMENT_SHADER, fSrc.c_str());
+    if (!vs || !fs) return false;
+
+    m_program = glCreateProgram();
+    glAttachShader(m_program, vs);
+    glAttachShader(m_program, fs);
+    glLinkProgram(m_program);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    GLint linked = 0;
+    glGetProgramiv(m_program, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char log[512];
+        glGetProgramInfoLog(m_program, sizeof(log), nullptr, log);
+        std::cerr << "[GlCapsuleRenderer] Program link failed: " << log << std::endl;
+        return false;
+    }
+
+    m_locTransform = glGetUniformLocation(m_program, "uTransform");
+    m_locViewport  = glGetUniformLocation(m_program, "uViewport");
+    m_locGrain     = glGetUniformLocation(m_program, "uGrain");
+
+    // Static unit quad [-1.0, 1.0] composed of 2 triangles (6 vertices)
+    static constexpr float kUnitQuadVertices[12] = {
+        -1.0f, -1.0f,
+         1.0f, -1.0f,
+         1.0f,  1.0f,
+        -1.0f, -1.0f,
+         1.0f,  1.0f,
+        -1.0f,  1.0f
+    };
+
+    glGenVertexArrays(1, &m_vao);
+    glGenBuffers(1, &m_quadVbo);
+    glGenBuffers(1, &m_instanceVbo);
+
+    glBindVertexArray(m_vao);
+
+    // 1. Static Quad VBO (divisor 0)
+    glBindBuffer(GL_ARRAY_BUFFER, m_quadVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(kUnitQuadVertices), kUnitQuadVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+    glVertexAttribDivisor(0, 0);
+
+    // 2. Dynamic Instance VBO (divisor 1)
+    glBindBuffer(GL_ARRAY_BUFFER, m_instanceVbo);
+
+    // Attribute 1: vec2 pointA
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(CapsuleInstance),
+                          reinterpret_cast<const void*>(offsetof(CapsuleInstance, pointA)));
+    glVertexAttribDivisor(1, 1);
+
+    // Attribute 2: vec2 pointB
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(CapsuleInstance),
+                          reinterpret_cast<const void*>(offsetof(CapsuleInstance, pointB)));
+    glVertexAttribDivisor(2, 1);
+
+    // Attribute 3: vec2 radii (radiusA, radiusB)
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, sizeof(CapsuleInstance),
+                          reinterpret_cast<const void*>(offsetof(CapsuleInstance, radii)));
+    glVertexAttribDivisor(3, 1);
+
+    // Attribute 4: uint32 colorRgba (unpacked as normalized vec4)
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(4, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(CapsuleInstance),
+                          reinterpret_cast<const void*>(offsetof(CapsuleInstance, colorRgba)));
+    glVertexAttribDivisor(4, 1);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+    return true;
+}
+
+void GlCapsuleRenderer::Shutdown() {
+    if (m_layerTex)         { glDeleteTextures(1, &m_layerTex);         m_layerTex = 0; }
+    if (m_layerFbo)         { glDeleteFramebuffers(1, &m_layerFbo);     m_layerFbo = 0; }
+    if (m_emptyVao)         { glDeleteVertexArrays(1, &m_emptyVao);     m_emptyVao = 0; }
+    if (m_compositeProgram) { glDeleteProgram(m_compositeProgram);      m_compositeProgram = 0; }
+    m_layerW = m_layerH = 0;
+    if (m_instanceVbo) { glDeleteBuffers(1, &m_instanceVbo); m_instanceVbo = 0; }
+    if (m_quadVbo)     { glDeleteBuffers(1, &m_quadVbo);     m_quadVbo = 0; }
+    if (m_vao)         { glDeleteVertexArrays(1, &m_vao);    m_vao = 0; }
+    if (m_program)     { glDeleteProgram(m_program);         m_program = 0; }
+}
+
+void GlCapsuleRenderer::UploadStroke(std::span<const StrokePoint> points, uint32_t color) {
+    auto t0 = std::chrono::steady_clock::now();
+    InkMeshBuilder::BuildCapsuleInstances(points, color, m_instances);
+    auto t1 = std::chrono::steady_clock::now();
+    m_lastCpuIngestionMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+    if (!m_instanceVbo || m_instances.empty()) return;
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_instanceVbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 static_cast<GLsizeiptr>(m_instances.size() * sizeof(CapsuleInstance)),
+                 m_instances.data(),
+                 GL_STREAM_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+void GlCapsuleRenderer::EnsureLayer(int w, int h) {
+    if (m_layerFbo && m_layerW == w && m_layerH == h) return;
+    if (!m_layerFbo) glGenFramebuffers(1, &m_layerFbo);
+    if (!m_layerTex) glGenTextures(1, &m_layerTex);
+    glBindTexture(GL_TEXTURE_2D, m_layerTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_layerFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_layerTex, 0);
+    m_layerW = w;
+    m_layerH = h;
+}
+
+void GlCapsuleRenderer::DrawInstances(const CanvasTransform& transform, int vpWidth, int vpHeight,
+                                      const CapsuleBrush& brush) const {
+    glUseProgram(m_program);
+    glUniform4f(m_locTransform, transform.panX, transform.panY, transform.zoom, 0.0f);
+    glUniform2f(m_locViewport, static_cast<float>(vpWidth), static_cast<float>(vpHeight));
+    glUniform2f(m_locGrain, brush.grain, brush.grainScale);
+    glBindVertexArray(m_vao);
+    glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(m_instances.size()));
+    glBindVertexArray(0);
+}
+
+void GlCapsuleRenderer::Render(const CanvasTransform& transform, int vpWidth, int vpHeight,
+                               const CapsuleBrush& brush) {
+    if (!m_program || !m_vao || m_instances.empty() || vpWidth <= 0 || vpHeight <= 0) return;
+
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+
+    // Direct path: straight premultiplied "over" per capsule. Translucent overlaps accumulate,
+    // which is exactly the double-darkening artifact the stroke-layer path exists to remove.
+    if (!brush.unionOverlap && brush.opacity >= 0.999f) {
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        DrawInstances(transform, vpWidth, vpHeight, brush);
+        glUseProgram(0);
+        return;
+    }
+
+    // Stroke-layer path: rasterize all capsules into an offscreen layer with MAX blending
+    // (set union of coverage, no accumulation), then composite once with the brush opacity.
+    GLint prevFbo = 0;
+    GLint vp[4] = {0, 0, vpWidth, vpHeight};
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+    glGetIntegerv(GL_VIEWPORT, vp);
+    EnsureLayer(vp[2], vp[3]);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_layerFbo);
+    glViewport(0, 0, vp[2], vp[3]);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glBlendEquation(GL_MAX);
+    glBlendFunc(GL_ONE, GL_ONE);
+    DrawInstances(transform, vpWidth, vpHeight, brush);
+    glBlendEquation(GL_FUNC_ADD);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
+    glViewport(vp[0], vp[1], vp[2], vp[3]);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    glUseProgram(m_compositeProgram);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_layerTex);
+    glUniform1i(m_locCompLayer, 0);
+    glUniform1f(m_locCompOpacity, brush.opacity);
+    glBindVertexArray(m_emptyVao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+}
+
+void GlCapsuleRenderer::RenderStroke(std::span<const StrokePoint> points,
+                                     uint32_t color,
+                                     const CanvasTransform& transform,
+                                     int vpWidth,
+                                     int vpHeight,
+                                     const CapsuleBrush& brush) {
+    UploadStroke(points, color);
+    Render(transform, vpWidth, vpHeight, brush);
+}
+
+void GlCapsuleRenderer::RenderBoundingQuadsWireframe(ImDrawList* drawList,
+                                                     const CanvasTransform& transform) const {
+    if (!drawList || m_instances.empty()) return;
+
+    const float zoom = std::max(transform.zoom, 1e-4f);
+    const float padWorld = 2.0f / zoom;
+    const ImU32 quadCol = IM_COL32(80, 220, 255, 160);
+    const ImU32 diagCol = IM_COL32(80, 220, 255, 75);
+
+    for (const auto& inst : m_instances) {
+        float dx = inst.pointB.x - inst.pointA.x;
+        float dy = inst.pointB.y - inst.pointA.y;
+        float segLen = std::hypot(dx, dy);
+        float ux = (segLen > 1e-5f) ? (dx / segLen) : 1.0f;
+        float uy = (segLen > 1e-5f) ? (dy / segLen) : 0.0f;
+        float nx = -uy;
+        float ny =  ux;
+
+        float maxR = std::max(inst.radii.x, inst.radii.y) + padWorld;
+        float midX = 0.5f * (inst.pointA.x + inst.pointB.x);
+        float midY = 0.5f * (inst.pointA.y + inst.pointB.y);
+        float halfSpanU = 0.5f * segLen + maxR;
+
+        ImVec2 c0 = transform.WorldToScreen(midX - ux * halfSpanU - nx * maxR,
+                                            midY - uy * halfSpanU - ny * maxR);
+        ImVec2 c1 = transform.WorldToScreen(midX + ux * halfSpanU - nx * maxR,
+                                            midY + uy * halfSpanU - ny * maxR);
+        ImVec2 c2 = transform.WorldToScreen(midX + ux * halfSpanU + nx * maxR,
+                                            midY + uy * halfSpanU + ny * maxR);
+        ImVec2 c3 = transform.WorldToScreen(midX - ux * halfSpanU + nx * maxR,
+                                            midY - uy * halfSpanU + ny * maxR);
+
+        drawList->AddQuad(c0, c1, c2, c3, quadCol, 1.0f);
+        drawList->AddLine(c0, c2, diagCol, 1.0f);
+    }
+}
+
+double GlCapsuleRenderer::BenchmarkCpuIngestionMs(size_t pointCount, int iterations) {
+    if (pointCount == 0 || iterations <= 0) return 0.0;
+
+    std::vector<StrokePoint> syntheticPts(pointCount);
+    for (size_t i = 0; i < pointCount; ++i) {
+        double t = static_cast<double>(i) * 0.05;
+        syntheticPts[i].x = 200.0 + t * 12.0 + std::sin(t) * 25.0;
+        syntheticPts[i].y = 200.0 + std::cos(t * 1.3) * 25.0;
+        syntheticPts[i].r = 3.5f + 1.5f * static_cast<float>(std::sin(t * 0.7));
+    }
+
+    std::vector<CapsuleInstance> outInstances;
+    outInstances.reserve(pointCount);
+
+    auto t0 = std::chrono::steady_clock::now();
+    for (int it = 0; it < iterations; ++it) {
+        InkMeshBuilder::BuildCapsuleInstances(syntheticPts, 0xFF41A5FFu, outInstances);
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration<double, std::milli>(t1 - t0).count() / static_cast<double>(iterations);
+}
+
+unsigned int GlCapsuleRenderer::CompileShader(unsigned int type, const char* src) {
+    GLuint s = glCreateShader(type);
+    glShaderSource(s, 1, &src, nullptr);
+    glCompileShader(s);
+    GLint ok = 0;
+    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        char log[512];
+        glGetShaderInfoLog(s, sizeof(log), nullptr, log);
+        std::cerr << "[GlCapsuleRenderer] Shader compile error: " << log << std::endl;
+        glDeleteShader(s);
+        return 0;
+    }
+    return s;
+}
+
+} // namespace Folio::Debug
