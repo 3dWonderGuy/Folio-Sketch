@@ -8,14 +8,6 @@
 #include "debug/gl_shape_renderer.hpp"
 #include "debug/gl_loader.hpp"
 
-#if defined(__ANDROID__)
-#include <GLES3/gl3.h>
-#else
-#define GL_GLEXT_PROTOTYPES 1
-#include <SDL3/SDL_opengl.h>
-#include <SDL3/SDL_opengl_glext.h>
-#endif
-
 #include <iostream>
 #include <string>
 

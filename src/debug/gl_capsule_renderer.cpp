@@ -9,14 +9,6 @@
 #include "debug/gl_loader.hpp"
 #include "folio_sketch/gpu/ink_mesh.hpp"
 
-#if defined(__ANDROID__)
-#include <GLES3/gl3.h>
-#else
-#define GL_GLEXT_PROTOTYPES 1
-#include <SDL3/SDL_opengl.h>
-#include <SDL3/SDL_opengl_glext.h>
-#endif
-
 #include <chrono>
 #include <cmath>
 #include <cstddef>

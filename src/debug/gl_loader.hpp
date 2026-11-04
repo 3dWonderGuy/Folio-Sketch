@@ -13,7 +13,13 @@
 
 #if defined(__ANDROID__)
 #include <GLES3/gl3.h>
+#elif defined(_WIN32)
+// On Windows, opengl32.dll only exports OpenGL 1.1 statically.
+// Do NOT define GL_GLEXT_PROTOTYPES on Windows; modern GL functions are loaded dynamically via SDL_GL_GetProcAddress.
+#include <SDL3/SDL_opengl.h>
+#include <SDL3/SDL_opengl_glext.h>
 #else
+// On Linux/macOS, desktop GL libraries export modern functions directly.
 #define GL_GLEXT_PROTOTYPES 1
 #include <SDL3/SDL_opengl.h>
 #include <SDL3/SDL_opengl_glext.h>

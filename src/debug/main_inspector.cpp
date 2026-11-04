@@ -20,13 +20,6 @@
 #include "debug/gl_loader.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
-#if defined(__ANDROID__)
-#include <GLES3/gl3.h>
-#else
-#define GL_GLEXT_PROTOTYPES 1
-#include <SDL3/SDL_opengl.h>
-#include <SDL3/SDL_opengl_glext.h>
-#endif
 
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
