@@ -64,14 +64,44 @@ struct CapsuleInstance {
 };
 
 // =============================================================================
-// 3. LEGACY GPU TRIANGLE MESH TYPES
+// 3. GPU SHAPE SDF INSTANCE TYPES
+// =============================================================================
+
+/**
+ * @enum ShapeKind
+ * @brief Categorizes geometric primitives rendered via analytic GPU SDF shaders.
+ */
+enum class ShapeKind : uint32_t {
+    Rectangle        = 0, ///< Axis-aligned rectangle
+    RoundedRectangle = 1, ///< Rectangle with rounded corners (cornerRadius)
+    Circle           = 2, ///< Circle (size.x = diameter, cornerRadius = radius)
+    Ellipse          = 3  ///< Axis-aligned ellipse (size.x = 2*rx, size.y = 2*ry)
+};
+
+/**
+ * @struct GpuShapeInstance
+ * @brief Per-shape instance attribute layout streamed to GPU Shape SDF shader.
+ */
+struct GpuShapeInstance {
+    CapsuleVec2 center{};                     ///< Center in world coordinates (mm)
+    CapsuleVec2 size{};                       ///< (width, height) in world coordinates (mm)
+    float       cornerRadius = 0.0f;          ///< Corner radius for rounded rectangles (mm)
+    float       strokeWidth  = 0.0f;          ///< Border width (mm); 0.0f = filled shape without border
+    uint32_t    fillColor    = 0x00000000u;   ///< Packed 32-bit premultiplied RGBA fill
+    uint32_t    strokeColor  = 0xFF000000u;   ///< Packed 32-bit premultiplied RGBA border/stroke
+    ShapeKind   kind         = ShapeKind::Rectangle;
+};
+
+// =============================================================================
+// 4. LEGACY GPU TRIANGLE MESH TYPES (DEPRECATED)
 // =============================================================================
 
 /**
  * @struct InkVertex
- * @brief Vertex format for indexed triangle mesh rendering.
+ * @brief (Deprecated) Vertex format for indexed triangle mesh rendering.
+ * @deprecated Use CapsuleInstance for inking strokes or GpuShapeInstance for shapes.
  */
-struct InkVertex {
+struct [[deprecated("Use CapsuleInstance for ink or GpuShapeInstance for shapes.")]] InkVertex {
     float    x = 0.0f;              ///< World X (mm)
     float    y = 0.0f;              ///< World Y (mm)
     float    edgeDist = 0.0f;       ///< [-1.0, +1.0] signed distance to edge for fragment AA
@@ -81,9 +111,10 @@ struct InkVertex {
 
 /**
  * @struct InkMesh
- * @brief Vertex and index buffers for GPU triangle mesh rendering.
+ * @brief (Deprecated) Vertex and index buffers for GPU triangle mesh rendering.
+ * @deprecated Use CapsuleInstance for inking strokes or GpuShapeInstance for shapes.
  */
-struct InkMesh {
+struct [[deprecated("Use CapsuleInstance for ink or GpuShapeInstance for shapes.")]] InkMesh {
     std::vector<InkVertex> vertices;
     std::vector<uint32_t>  indices;
     uint32_t coreIndexCount = 0;
@@ -100,8 +131,71 @@ struct InkMesh {
 };
 
 // =============================================================================
-// 4. CAPSULE BUILDER
+// 5. BUILDERS (CAPSULE & SHAPE)
 // =============================================================================
+
+/**
+ * @class ShapeBuilder
+ * @brief Helper utility to assemble GpuShapeInstance structs for real-time GPU rendering.
+ */
+class ShapeBuilder {
+public:
+    [[nodiscard]] static constexpr GpuShapeInstance MakeRectangle(
+        float centerX, float centerY, float width, float height,
+        uint32_t fillColor, uint32_t strokeColor = 0, float strokeWidth = 0.0f) noexcept {
+        GpuShapeInstance inst{};
+        inst.center = {centerX, centerY};
+        inst.size = {width, height};
+        inst.cornerRadius = 0.0f;
+        inst.strokeWidth = strokeWidth;
+        inst.fillColor = fillColor;
+        inst.strokeColor = strokeColor;
+        inst.kind = ShapeKind::Rectangle;
+        return inst;
+    }
+
+    [[nodiscard]] static constexpr GpuShapeInstance MakeRoundedRectangle(
+        float centerX, float centerY, float width, float height, float cornerRadius,
+        uint32_t fillColor, uint32_t strokeColor = 0, float strokeWidth = 0.0f) noexcept {
+        GpuShapeInstance inst{};
+        inst.center = {centerX, centerY};
+        inst.size = {width, height};
+        inst.cornerRadius = cornerRadius;
+        inst.strokeWidth = strokeWidth;
+        inst.fillColor = fillColor;
+        inst.strokeColor = strokeColor;
+        inst.kind = ShapeKind::RoundedRectangle;
+        return inst;
+    }
+
+    [[nodiscard]] static constexpr GpuShapeInstance MakeCircle(
+        float centerX, float centerY, float radius,
+        uint32_t fillColor, uint32_t strokeColor = 0, float strokeWidth = 0.0f) noexcept {
+        GpuShapeInstance inst{};
+        inst.center = {centerX, centerY};
+        inst.size = {radius * 2.0f, radius * 2.0f};
+        inst.cornerRadius = radius;
+        inst.strokeWidth = strokeWidth;
+        inst.fillColor = fillColor;
+        inst.strokeColor = strokeColor;
+        inst.kind = ShapeKind::Circle;
+        return inst;
+    }
+
+    [[nodiscard]] static constexpr GpuShapeInstance MakeEllipse(
+        float centerX, float centerY, float radiusX, float radiusY,
+        uint32_t fillColor, uint32_t strokeColor = 0, float strokeWidth = 0.0f) noexcept {
+        GpuShapeInstance inst{};
+        inst.center = {centerX, centerY};
+        inst.size = {radiusX * 2.0f, radiusY * 2.0f};
+        inst.cornerRadius = 0.0f;
+        inst.strokeWidth = strokeWidth;
+        inst.fillColor = fillColor;
+        inst.strokeColor = strokeColor;
+        inst.kind = ShapeKind::Ellipse;
+        return inst;
+    }
+};
 
 /**
  * @class CapsuleBuilder

@@ -69,6 +69,12 @@ public:
     bool RenderUI(InkingConfig& config, StrokeStyle& style);
 
     /**
+     * @brief Renders only the shape snapping / recognition tuning controls and the last recognition result.
+     * @return True if any snapping threshold changed.
+     */
+    bool RenderSnappingUI(InkingConfig& config);
+
+    /**
      * @brief Renders canvas overlays for the active GeometryViewMode (Discs, CPU Outline, Wireframe, Needles).
      *        Note: Solid GPU Mesh fill in Modes 2 & 4 is rendered by the OpenGL shader pass before ImGui.
      */

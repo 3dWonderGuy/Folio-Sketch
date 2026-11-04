@@ -5,7 +5,7 @@
  * =========================================================================================
  */
 
-#include "folio_sketch/gpu/gl_capsule_renderer.hpp"
+#include "debug/gl_capsule_renderer.hpp"
 #include "folio_sketch/gpu/ink_mesh.hpp"
 
 #if defined(__ANDROID__)
@@ -415,4 +415,4 @@ unsigned int GlCapsuleRenderer::CompileShader(unsigned int type, const char* src
     return s;
 }
 
-} // namespace Folio::Debug
+} // namespace Folio

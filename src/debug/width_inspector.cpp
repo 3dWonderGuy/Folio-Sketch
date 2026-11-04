@@ -29,11 +29,12 @@ bool WidthInspector::RenderUI(InkingConfig& config,
     }
 
     ImGui::SeparatorText("Thickness & Ratio Bounds");
-    widthDirty |= ImGui::SliderFloat("baseWidth", &style.baseWidth, 0.5f, 40.0f, "%.2f");
+    widthDirty |= ImGui::SliderFloat("baseWidth", &style.baseWidth, 0.5f, 60.0f, "%.2f");
     widthDirty |= ImGui::SliderFloat("minWidthRatio", &config.dynamics.minWidthMultiplier, 0.05f, 1.0f, "%.2f");
     widthDirty |= ImGui::SliderFloat("maxWidthRatio", &config.dynamics.maxWidthMultiplier, 0.5f, 3.0f, "%.2f");
     widthDirty |= ImGui::SliderFloat("velocityMaxClamp", &config.dynamics.velocityThinningMaxSpeed, 50.0f, 3500.0f, "%.0f");
     widthDirty |= ImGui::SliderFloat("EMA Smoothing Factor", &config.dynamics.widthSmoothingEma, 0.01f, 1.0f, "%.2f");
+    widthDirty |= ImGui::Checkbox("enablePressureCurve", &config.calibration.enablePressureCurve);
     widthDirty |= ImGui::SliderFloat("Pressure Gamma", &config.calibration.pressureGamma, 0.25f, 3.0f, "%.2f");
     widthDirty |= ImGui::SliderFloat("Pressure Deadzone", &config.calibration.pressureDeadzoneMin, 0.0f, 0.25f, "%.3f");
     widthDirty |= ImGui::SliderFloat("Pressure Saturation", &config.calibration.pressureSaturationMax, 0.50f, 1.0f, "%.3f");
@@ -62,6 +63,29 @@ bool WidthInspector::RenderUI(InkingConfig& config,
         widthDirty |= ImGui::SliderFloat("Gaussian Sigma (mm)", &config.dynamics.radiusSmoothingKernelSigmaMm, 0.5f, 15.0f, "%.1f mm");
         widthDirty |= ImGui::SliderInt("Smoothing Passes", &config.dynamics.radiusSmoothingPasses, 1, 5);
         ImGui::TextDisabled("Filters raw width along stroke arc-length to round sharp peaks into smooth hills.");
+    }
+
+    ImGui::SeparatorText("Tilt Dynamics (Pencil Shading)");
+    {
+        constexpr float kRadToDeg = 180.0f / 3.14159265358979323846f;
+        constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
+        widthDirty |= ImGui::SliderFloat("maxTiltWidthMultiplier", &config.dynamics.maxTiltWidthMultiplier, 1.0f, 6.0f, "%.2fx");
+        float deadDeg = config.dynamics.tiltDeadzoneRad * kRadToDeg;
+        if (ImGui::SliderFloat("tiltDeadzone", &deadDeg, 0.0f, 45.0f, "%.1f deg")) {
+            config.dynamics.tiltDeadzoneRad = deadDeg * kDegToRad;
+            widthDirty = true;
+        }
+        float maxDeg = config.dynamics.tiltMaxAngleRad * kRadToDeg;
+        if (ImGui::SliderFloat("tiltMaxAngle", &maxDeg, 20.0f, 89.0f, "%.1f deg")) {
+            config.dynamics.tiltMaxAngleRad = maxDeg * kDegToRad;
+            widthDirty = true;
+        }
+    }
+
+    ImGui::SeparatorText("Tail Taper");
+    widthDirty |= ImGui::SliderFloat("tailTaperLength (mm)", &config.dynamics.tailTaperLengthMm, 0.0f, 40.0f, "%.1f mm");
+    if (config.dynamics.tailTaperLengthMm > 0.0f) {
+        widthDirty |= ImGui::SliderFloat("tailTaperPower", &config.dynamics.tailTaperPower, 0.5f, 4.0f, "%.2f");
     }
 
     ImGui::SeparatorText("Width Overlays & Curve Plot");

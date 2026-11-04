@@ -38,7 +38,8 @@ class InkPhysicsBridge;
  */
 struct FinishedStrokeData {
     std::vector<Segment1D>       liveSegments;
-    std::vector<StrokePoint>     modeledPoints;
+    std::vector<StrokePoint>     rawModeledPoints; ///< Modeler points before simplification / Gaussian smoothing
+    std::vector<StrokePoint>     modeledPoints;    ///< Post-processed centerline points
     std::vector<CapsuleInstance> capsules;
     InkPath                      outlinePath;
     InkMesh                      mesh;

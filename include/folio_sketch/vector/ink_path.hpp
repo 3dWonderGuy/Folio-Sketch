@@ -97,17 +97,65 @@ public:
     void cubic_to(double cx1, double cy1, double cx2, double cy2, double x, double y) { cubicTo(cx1, cy1, cx2, cy2, x, y); }
 
     void addCircle(double cx, double cy, double r) {
-        constexpr double k = 0.5522847498307936;
-        const double kr = k * r;
-        moveTo(cx + r, cy);
-        cubicTo(cx + r, cy + kr, cx + kr, cy + r, cx, cy + r);
-        cubicTo(cx - kr, cy + r, cx - r, cy + kr, cx - r, cy);
-        cubicTo(cx - r, cy - kr, cx - kr, cy - r, cx, cy - r);
-        cubicTo(cx + kr, cy - r, cx + r, cy - kr, cx + r, cy);
-        close();
+        addOval(cx, cy, r, r);
     }
 
     void add_circle(double cx, double cy, double r) { addCircle(cx, cy, r); }
+
+    void addOval(double cx, double cy, double rx, double ry) {
+        if (rx <= 0.0 || ry <= 0.0) return;
+        constexpr double k = 0.5522847498307936;
+        const double kx = k * rx;
+        const double ky = k * ry;
+        moveTo(cx + rx, cy);
+        cubicTo(cx + rx, cy + ky, cx + kx, cy + ry, cx, cy + ry);
+        cubicTo(cx - kx, cy + ry, cx - rx, cy + ky, cx - rx, cy);
+        cubicTo(cx - rx, cy - ky, cx - kx, cy - ry, cx, cy - ry);
+        cubicTo(cx + kx, cy - ry, cx + rx, cy - ky, cx + rx, cy);
+        close();
+    }
+
+    void add_oval(double cx, double cy, double rx, double ry) { addOval(cx, cy, rx, ry); }
+
+    void addRect(double x, double y, double w, double h) {
+        if (w <= 0.0 || h <= 0.0) return;
+        moveTo(x, y);
+        lineTo(x + w, y);
+        lineTo(x + w, y + h);
+        lineTo(x, y + h);
+        close();
+    }
+
+    void add_rect(double x, double y, double w, double h) { addRect(x, y, w, h); }
+
+    void addRoundedRect(double x, double y, double w, double h, double rx, double ry) {
+        if (w <= 0.0 || h <= 0.0) return;
+        rx = std::clamp(rx, 0.0, w * 0.5);
+        ry = std::clamp(ry, 0.0, h * 0.5);
+        if (rx <= 1e-5 || ry <= 1e-5) {
+            addRect(x, y, w, h);
+            return;
+        }
+
+        constexpr double k = 0.5522847498307936;
+        const double kx = k * rx;
+        const double ky = k * ry;
+
+        moveTo(x + rx, y);
+        lineTo(x + w - rx, y);
+        cubicTo(x + w - rx + kx, y, x + w, y + ry - ky, x + w, y + ry);
+        lineTo(x + w, y + h - ry);
+        cubicTo(x + w, y + h - ry + ky, x + w - rx + kx, y + h, x + w - rx, y + h);
+        lineTo(x + rx, y + h);
+        cubicTo(x + rx - kx, y + h, x, y + h - ry + ky, x, y + h - ry);
+        lineTo(x, y + ry);
+        cubicTo(x, y + ry - ky, x + rx - kx, y, x + rx, y);
+        close();
+    }
+
+    void add_rounded_rect(double x, double y, double w, double h, double rx, double ry) {
+        addRoundedRect(x, y, w, h, rx, ry);
+    }
 
     void addPath(const InkPath& other) {
         if (other.empty()) return;

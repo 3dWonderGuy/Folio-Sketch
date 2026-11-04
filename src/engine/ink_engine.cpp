@@ -180,6 +180,9 @@ FinishedStrokeData InkEngine::FinishStroke() {
         !m_activeStrokePoints.empty() ? m_activeStrokePoints.front().tiltY : 0.0f);
     InkStrokeFinisher::ResolveSingleTapEdgeCase(m_activeStrokePoints, tapWidth, m_liveModeledPoints);
 
+    // Capture raw modeled points before any destructive post-processing stages
+    std::vector<StrokePoint> rawPointsBeforePost = m_liveModeledPoints;
+
     // Stage 3: Optional Tail Tapering
     InkStrokeFinisher::ApplyTailTaper(m_config, m_activeStyle, m_liveModeledPoints);
 
@@ -202,6 +205,7 @@ FinishedStrokeData InkEngine::FinishStroke() {
 
     // Stage 5: Package finished stroke data
     FinishedStrokeData data;
+    data.rawModeledPoints = std::move(rawPointsBeforePost);
     data.modeledPoints = m_liveModeledPoints;
     data.liveSegments  = InkStrokeFinisher::BuildCollisionSegments(m_liveModeledPoints);
 

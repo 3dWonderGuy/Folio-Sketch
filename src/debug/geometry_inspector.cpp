@@ -63,6 +63,48 @@ void GeometryInspector::AnalyzeMesh(const InkMesh& mesh) {
     }
 }
 
+bool GeometryInspector::RenderSnappingUI(InkingConfig& config) {
+    bool geomDirty = false;
+
+    ImGui::SeparatorText("Shape Snapping & Geometric Recognition");
+    if (ImGui::Button("Reset Snapping Defaults")) {
+        config.shapeSnapping = InkingConfig::ShapeSnapping{};
+        geomDirty = true;
+    }
+    geomDirty |= ImGui::Checkbox("Enable Hold-to-Snap", &config.shapeSnapping.enableHoldToSnap);
+    geomDirty |= ImGui::SliderFloat("Hold Dwell Duration (s)", &config.shapeSnapping.holdDwellDurationSec, 0.1f, 2.0f, "%.2f s");
+    geomDirty |= ImGui::SliderFloat("Movement Dwell Threshold (mm)", &config.shapeSnapping.movementThresholdMm, 0.2f, 5.0f, "%.2f mm");
+    geomDirty |= ImGui::SliderFloat("Loop Closure Gap (mm)", &config.shapeSnapping.loopClosureGapMm, 1.0f, 20.0f, "%.1f mm");
+    geomDirty |= ImGui::SliderFloat("Line Straightness Tol (mm)", &config.shapeSnapping.lineStraightnessToleranceMm, 0.1f, 5.0f, "%.2f mm");
+    geomDirty |= ImGui::SliderFloat("Circle Aspect Tol", &config.shapeSnapping.circleAspectTolerance, 0.05f, 0.5f, "%.2f");
+    geomDirty |= ImGui::SliderFloat("Ellipse Fit Tol (mm)", &config.shapeSnapping.ellipseFitToleranceMm, 0.2f, 5.0f, "%.2f mm");
+    geomDirty |= ImGui::SliderFloat("Polygon Corner Tol (deg)", &config.shapeSnapping.polygonCornerAngleThresholdDeg, 15.0f, 90.0f, "%.1f deg");
+
+    ImGui::Checkbox("Show Recognized Shape Overlay", &m_showRecognizedShapeOverlay);
+
+    const char* shapeTypeName = "None";
+    switch (m_lastRecognition.type) {
+        case RecognizedShapeType::Line: shapeTypeName = "Straight Line"; break;
+        case RecognizedShapeType::Circle: shapeTypeName = "Circle"; break;
+        case RecognizedShapeType::Ellipse: shapeTypeName = "Ellipse"; break;
+        case RecognizedShapeType::Triangle: shapeTypeName = "Triangle"; break;
+        case RecognizedShapeType::Rectangle: shapeTypeName = "Rectangle"; break;
+        case RecognizedShapeType::Square: shapeTypeName = "Square"; break;
+        default: shapeTypeName = "None (Freehand)"; break;
+    }
+
+    if (m_lastRecognition.type != RecognizedShapeType::None) {
+        ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.4f, 1.0f),
+                           "Recognized: %s (Confidence: %.0f%%, Synthetic Vertices: %zu)",
+                           shapeTypeName, m_lastRecognition.confidence * 100.0f,
+                           m_lastRecognition.syntheticPoints.size());
+    } else {
+        ImGui::TextDisabled("Recognized: None (Freehand)");
+    }
+
+    return geomDirty;
+}
+
 bool GeometryInspector::RenderUI(InkingConfig& config, StrokeStyle& style) {
     bool geomDirty = false;
 
@@ -107,41 +149,7 @@ bool GeometryInspector::RenderUI(InkingConfig& config, StrokeStyle& style) {
         geomDirty = true;
     }
 
-    ImGui::SeparatorText("Shape Snapping & Geometric Recognition");
-    if (ImGui::Button("Reset Snapping Defaults")) {
-        config.shapeSnapping = InkingConfig::ShapeSnapping{};
-        geomDirty = true;
-    }
-    geomDirty |= ImGui::Checkbox("Enable Hold-to-Snap", &config.shapeSnapping.enableHoldToSnap);
-    geomDirty |= ImGui::SliderFloat("Hold Dwell Duration (s)", &config.shapeSnapping.holdDwellDurationSec, 0.1f, 2.0f, "%.2f s");
-    geomDirty |= ImGui::SliderFloat("Movement Dwell Threshold (mm)", &config.shapeSnapping.movementThresholdMm, 0.2f, 5.0f, "%.2f mm");
-    geomDirty |= ImGui::SliderFloat("Loop Closure Gap (mm)", &config.shapeSnapping.loopClosureGapMm, 1.0f, 20.0f, "%.1f mm");
-    geomDirty |= ImGui::SliderFloat("Line Straightness Tol (mm)", &config.shapeSnapping.lineStraightnessToleranceMm, 0.1f, 5.0f, "%.2f mm");
-    geomDirty |= ImGui::SliderFloat("Circle Aspect Tol", &config.shapeSnapping.circleAspectTolerance, 0.05f, 0.5f, "%.2f");
-    geomDirty |= ImGui::SliderFloat("Ellipse Fit Tol (mm)", &config.shapeSnapping.ellipseFitToleranceMm, 0.2f, 5.0f, "%.2f mm");
-    geomDirty |= ImGui::SliderFloat("Polygon Corner Tol (deg)", &config.shapeSnapping.polygonCornerAngleThresholdDeg, 15.0f, 90.0f, "%.1f deg");
-
-    ImGui::Checkbox("Show Recognized Shape Overlay", &m_showRecognizedShapeOverlay);
-
-    const char* shapeTypeName = "None";
-    switch (m_lastRecognition.type) {
-        case RecognizedShapeType::Line: shapeTypeName = "Straight Line"; break;
-        case RecognizedShapeType::Circle: shapeTypeName = "Circle"; break;
-        case RecognizedShapeType::Ellipse: shapeTypeName = "Ellipse"; break;
-        case RecognizedShapeType::Triangle: shapeTypeName = "Triangle"; break;
-        case RecognizedShapeType::Rectangle: shapeTypeName = "Rectangle"; break;
-        case RecognizedShapeType::Square: shapeTypeName = "Square"; break;
-        default: shapeTypeName = "None (Freehand)"; break;
-    }
-
-    if (m_lastRecognition.type != RecognizedShapeType::None) {
-        ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.4f, 1.0f),
-                           "Recognized: %s (Confidence: %.0f%%, Synthetic Vertices: %zu)",
-                           shapeTypeName, m_lastRecognition.confidence * 100.0f,
-                           m_lastRecognition.syntheticPoints.size());
-    } else {
-        ImGui::TextDisabled("Recognized: None (Freehand)");
-    }
+    geomDirty |= RenderSnappingUI(config);
 
     ImGui::SeparatorText("Point Conditioning");
     if (ImGui::Checkbox("Stationary Envelopment (ds <= |dr|)", &config.postProcessing.stationaryEnvelopment)) {
