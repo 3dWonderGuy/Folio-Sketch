@@ -7,7 +7,10 @@ import android.view.MotionEvent;
 import android.view.SurfaceView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.graphics.surface.FrontBufferedRenderer;
+import androidx.graphics.lowlatency.BufferInfo;
+import androidx.graphics.lowlatency.GLFrontBufferedRenderer;
+import androidx.graphics.opengl.EGLManager;
+import java.util.Collection;
 
 /**
  * Production-ready Android SurfaceView for zero-latency inking using Folio-Sketch.
@@ -15,37 +18,38 @@ import androidx.graphics.surface.FrontBufferedRenderer;
  * Implements:
  * 1. Pillar 1: Unbuffered digitizer packet harvesting at 240Hz-480Hz via requestUnbufferedDispatch
  *    and chronological MotionEvent historical sample extraction.
- * 2. Pillar 2: Two-Phase Layer Compositor via Jetpack FrontBufferedRenderer (active in-flight
+ * 2. Pillar 2: Two-Phase Layer Compositor via Jetpack GLFrontBufferedRenderer (active in-flight
  *    strokes render directly to hardware scanout buffers, bypassing SurfaceFlinger).
  * 3. Pillar 3: Delegation to Folio-Sketch's unified GPU Capsule SDF fragment shader via JNI.
  */
 public class FolioLowLatencyView extends SurfaceView {
 
     private long mEngineHandle = 0;
-    private FrontBufferedRenderer<Object> mFrontBufferedRenderer;
+    private GLFrontBufferedRenderer<Object> mFrontBufferedRenderer;
 
-    private final FrontBufferedRenderer.Callback<Object> mRendererCallback =
-        new FrontBufferedRenderer.Callback<Object>() {
+    private final GLFrontBufferedRenderer.Callback<Object> mRendererCallback =
+        new GLFrontBufferedRenderer.Callback<Object>() {
             @Override
             public void onDrawFrontBufferedLayer(
-                @NonNull androidx.graphics.surface.SurfaceControlCompat surfaceControl,
-                int bufferWidth,
-                int bufferHeight,
-                @Nullable Object param
+                @NonNull EGLManager eglManager,
+                @NonNull BufferInfo bufferInfo,
+                @NonNull float[] transform,
+                @NonNull Object param
             ) {
                 if (mEngineHandle != 0) {
-                    FolioNativeBridge.nativeRenderWet(mEngineHandle, bufferWidth, bufferHeight);
+                    FolioNativeBridge.nativeRenderWet(mEngineHandle, bufferInfo.getWidth(), bufferInfo.getHeight());
                 }
             }
 
             @Override
-            public void onDrawMultiBufferedLayer(
-                @NonNull androidx.graphics.surface.SurfaceControlCompat surfaceControl,
-                int bufferWidth,
-                int bufferHeight
+            public void onDrawMultiDoubleBufferedLayer(
+                @NonNull EGLManager eglManager,
+                @NonNull BufferInfo bufferInfo,
+                @NonNull float[] transform,
+                @NonNull Collection<Object> params
             ) {
                 if (mEngineHandle != 0) {
-                    FolioNativeBridge.nativeRenderDry(mEngineHandle, bufferWidth, bufferHeight);
+                    FolioNativeBridge.nativeRenderDry(mEngineHandle, bufferInfo.getWidth(), bufferInfo.getHeight());
                 }
             }
         };
@@ -67,7 +71,7 @@ public class FolioLowLatencyView extends SurfaceView {
 
     private void init() {
         mEngineHandle = FolioNativeBridge.nativeCreateEngine();
-        mFrontBufferedRenderer = new FrontBufferedRenderer<>(this, mRendererCallback);
+        mFrontBufferedRenderer = new GLFrontBufferedRenderer<>(this, mRendererCallback);
     }
 
     public void clearCanvas() {
@@ -81,7 +85,7 @@ public class FolioLowLatencyView extends SurfaceView {
 
     public void release() {
         if (mFrontBufferedRenderer != null) {
-            mFrontBufferedRenderer.release(true);
+            mFrontBufferedRenderer.release(false);
             mFrontBufferedRenderer = null;
         }
         if (mEngineHandle != 0) {

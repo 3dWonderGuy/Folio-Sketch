@@ -189,9 +189,9 @@ class FolioStylusInputView @JvmOverloads constructor(
 
 ---
 
-### Step 3: Two-Phase Layer Compositor with `FrontBufferedRenderer`
+### Step 3: Two-Phase Layer Compositor with `GLFrontBufferedRenderer`
 
-Jetpack's `FrontBufferedRenderer` manages two OpenGL surface buffers:
+Jetpack's `GLFrontBufferedRenderer` (`androidx.graphics.lowlatency.GLFrontBufferedRenderer`) manages two OpenGL surface buffers:
 1. **Front-Buffered Layer ("Wet Ink")**: Rendered directly to the display scanout surface, completely bypassing SurfaceFlinger composite queues for sub-4ms response.
 2. **Multi-Buffered Layer ("Dry Ink")**: Standard double/triple-buffered presentation used for the persistent document canvas.
 
@@ -202,8 +202,9 @@ package org.foliosketch.android
 
 import android.opengl.GLES30
 import android.view.SurfaceView
-import androidx.graphics.surface.FrontBufferedRenderer
-import androidx.graphics.opengl.GLRenderer
+import androidx.graphics.lowlatency.BufferInfo
+import androidx.graphics.lowlatency.GLFrontBufferedRenderer
+import androidx.graphics.opengl.EGLManager
 
 /**
  * Manages dual-target front-buffered and multi-buffered rendering for Folio-Sketch.
@@ -212,38 +213,39 @@ class FolioLowLatencyRenderer(
     surfaceView: SurfaceView,
     private val nativeEngineHandle: Long
 ) {
-    private val callbacks = object : FrontBufferedRenderer.Callback<Any> {
+    private val callbacks = object : GLFrontBufferedRenderer.Callback<Any> {
         /**
          * Invoked whenever new live stylus packets arrive.
          * Draws ONLY the active, in-flight wet stroke directly to the front scanout buffer.
          */
         override fun onDrawFrontBufferedLayer(
-            eglSurface: androidx.graphics.surface.FrontBufferedRenderer.SurfaceControl,
-            bufferWidth: Int,
-            bufferHeight: Int,
+            eglManager: EGLManager,
+            bufferInfo: BufferInfo,
+            transform: FloatArray,
             param: Any
         ) {
-            GLES30.glViewport(0, 0, bufferWidth, bufferHeight)
+            GLES30.glViewport(0, 0, bufferInfo.width, bufferInfo.height)
             // Render active stroke directly to front buffer via Folio GPU Capsule SDF
-            nativeRenderWetStroke(nativeEngineHandle, bufferWidth, bufferHeight)
+            nativeRenderWetStroke(nativeEngineHandle, bufferInfo.width, bufferInfo.height)
         }
 
         /**
          * Invoked when a stroke completes (pen-up) or the document canvas is panned/zoomed.
          * Renders the persistent background document FBO + newly committed strokes.
          */
-        override fun onDrawMultiBufferedLayer(
-            eglSurface: androidx.graphics.surface.FrontBufferedRenderer.SurfaceControl,
-            bufferWidth: Int,
-            bufferHeight: Int
+        override fun onDrawMultiDoubleBufferedLayer(
+            eglManager: EGLManager,
+            bufferInfo: BufferInfo,
+            transform: FloatArray,
+            params: Collection<Any>
         ) {
-            GLES30.glViewport(0, 0, bufferWidth, bufferHeight)
+            GLES30.glViewport(0, 0, bufferInfo.width, bufferInfo.height)
             // Render persistent Dry document FBO
-            nativeRenderDryDocument(nativeEngineHandle, bufferWidth, bufferHeight)
+            nativeRenderDryDocument(nativeEngineHandle, bufferInfo.width, bufferInfo.height)
         }
     }
 
-    val frontBufferedRenderer = FrontBufferedRenderer(surfaceView, callbacks)
+    val frontBufferedRenderer = GLFrontBufferedRenderer(surfaceView, callbacks)
 
     fun onPacketIngested() {
         // Triggers immediate front-buffer draw without waiting for VSYNC
@@ -256,7 +258,7 @@ class FolioLowLatencyRenderer(
     }
 
     fun release() {
-        frontBufferedRenderer.release(true)
+        frontBufferedRenderer.release(false)
     }
 
     private external fun nativeRenderWetStroke(enginePtr: Long, width: Int, height: Int)
