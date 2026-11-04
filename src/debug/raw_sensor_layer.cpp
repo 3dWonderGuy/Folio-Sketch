@@ -40,7 +40,20 @@ bool RawSensorHUD::HandleEvent(const SDL_Event& event,
                                const CanvasTransform& transform,
                                RawInputSample& outSample,
                                int& outEventType) {
+    std::vector<RawInputSample> batch;
+    bool res = HandleEventBatch(event, transform, batch, outEventType);
+    if (!batch.empty()) {
+        outSample = batch.back();
+    }
+    return res;
+}
+
+bool RawSensorHUD::HandleEventBatch(const SDL_Event& event,
+                                    const CanvasTransform& transform,
+                                    std::vector<RawInputSample>& outBatch,
+                                    int& outEventType) {
     outEventType = 0;
+    outBatch.clear();
     const double nowSec = static_cast<double>(SDL_GetTicksNS()) * 1e-9;
 
     // 1. Stylus Pen Axis Telemetry (Pressure, Tilt X, Tilt Y)
@@ -69,7 +82,7 @@ bool RawSensorHUD::HandleEvent(const SDL_Event& event,
         m_penDown = true;
         RecordTimestamp(nowSec);
 
-        outSample = RawInputSample{
+        RawInputSample sample{
             .x = m_currentX,
             .y = m_currentY,
             .pressure = m_currentPressure,
@@ -77,7 +90,12 @@ bool RawSensorHUD::HandleEvent(const SDL_Event& event,
             .timestampSec = nowSec
         };
         m_activeSamples.clear();
-        m_activeSamples.push_back(outSample);
+        m_activeSamples.push_back(sample);
+        outBatch.push_back(sample);
+        m_prevSample = sample;
+        m_hasPrevSample = true;
+        m_totalIngestedPackets++;
+        m_lastBatchSize = 1;
         outEventType = 1;
         return true;
     }
@@ -89,14 +107,63 @@ bool RawSensorHUD::HandleEvent(const SDL_Event& event,
         RecordTimestamp(nowSec);
 
         if (m_penDown) {
-            outSample = RawInputSample{
+            RawInputSample currSample{
                 .x = m_currentX,
                 .y = m_currentY,
                 .pressure = m_currentPressure,
                 .tiltRad = m_currentTiltRad,
                 .timestampSec = nowSec
             };
-            m_activeSamples.push_back(outSample);
+
+            const int K = std::max(1, m_oversampleFactor);
+            if (K > 1 && m_hasPrevSample) {
+                double dt = nowSec - m_prevSample.timestampSec;
+                if (dt <= 0.0) dt = 0.002;
+
+                for (int i = 1; i <= K; ++i) {
+                    float alpha = static_cast<float>(i) / static_cast<float>(K);
+                    double subTime = m_prevSample.timestampSec + alpha * dt;
+                    float subX = m_prevSample.x + alpha * (currSample.x - m_prevSample.x);
+                    float subY = m_prevSample.y + alpha * (currSample.y - m_prevSample.y);
+                    float subP = m_prevSample.pressure + alpha * (currSample.pressure - m_prevSample.pressure);
+
+                    // Micro-jitter injection for intermediate sub-packets
+                    if (m_microJitterMm > 0.0f && i < K) {
+                        float jx = (static_cast<float>(std::rand()) / RAND_MAX - 0.5f) * 2.0f * m_microJitterMm;
+                        float jy = (static_cast<float>(std::rand()) / RAND_MAX - 0.5f) * 2.0f * m_microJitterMm;
+                        subX += jx;
+                        subY += jy;
+                    }
+
+                    // Simulated packet drop
+                    if (m_packetDropRate > 0.001f && i < K) {
+                        float r = static_cast<float>(std::rand()) / RAND_MAX;
+                        if (r < m_packetDropRate) {
+                            m_totalDroppedPackets++;
+                            continue;
+                        }
+                    }
+
+                    RawInputSample subPt{
+                        .x = subX,
+                        .y = subY,
+                        .pressure = subP,
+                        .tiltRad = m_currentTiltRad,
+                        .timestampSec = subTime
+                    };
+                    outBatch.push_back(subPt);
+                    m_activeSamples.push_back(subPt);
+                    m_totalIngestedPackets++;
+                }
+            } else {
+                outBatch.push_back(currSample);
+                m_activeSamples.push_back(currSample);
+                m_totalIngestedPackets++;
+            }
+
+            m_prevSample = currSample;
+            m_hasPrevSample = true;
+            m_lastBatchSize = static_cast<int>(outBatch.size());
             outEventType = 2;
         }
         return true;
@@ -110,17 +177,20 @@ bool RawSensorHUD::HandleEvent(const SDL_Event& event,
 
         if (m_penDown) {
             m_penDown = false;
-            outSample = RawInputSample{
+            m_hasPrevSample = false;
+            RawInputSample sample{
                 .x = m_currentX,
                 .y = m_currentY,
                 .pressure = 0.0f,
                 .tiltRad = m_currentTiltRad,
                 .timestampSec = nowSec
             };
-            m_activeSamples.push_back(outSample);
+            m_activeSamples.push_back(sample);
+            outBatch.push_back(sample);
             m_lastStrokeSamples = m_activeSamples;
             m_activeSamples.clear();
             m_currentPressure = 0.0f;
+            m_lastBatchSize = 1;
             outEventType = 3;
         }
         return true;
@@ -139,7 +209,7 @@ bool RawSensorHUD::HandleEvent(const SDL_Event& event,
             m_mouseDown = true;
             RecordTimestamp(nowSec);
 
-            outSample = RawInputSample{
+            RawInputSample sample{
                 .x = m_currentX,
                 .y = m_currentY,
                 .pressure = m_currentPressure,
@@ -147,7 +217,12 @@ bool RawSensorHUD::HandleEvent(const SDL_Event& event,
                 .timestampSec = nowSec
             };
             m_activeSamples.clear();
-            m_activeSamples.push_back(outSample);
+            m_activeSamples.push_back(sample);
+            outBatch.push_back(sample);
+            m_prevSample = sample;
+            m_hasPrevSample = true;
+            m_totalIngestedPackets++;
+            m_lastBatchSize = 1;
             outEventType = 1;
             return true;
         }
@@ -159,16 +234,62 @@ bool RawSensorHUD::HandleEvent(const SDL_Event& event,
             RecordTimestamp(nowSec);
 
             if (m_mouseDown) {
-                // Keep simulated pressure constant so testing width/velocity features isn't affected by mouse speed
                 m_currentPressure = 0.65f;
-                outSample = RawInputSample{
+                RawInputSample currSample{
                     .x = m_currentX,
                     .y = m_currentY,
                     .pressure = m_currentPressure,
                     .tiltRad = m_currentTiltRad,
                     .timestampSec = nowSec
                 };
-                m_activeSamples.push_back(outSample);
+
+                const int K = std::max(1, m_oversampleFactor);
+                if (K > 1 && m_hasPrevSample) {
+                    double dt = nowSec - m_prevSample.timestampSec;
+                    if (dt <= 0.0) dt = 0.002;
+
+                    for (int i = 1; i <= K; ++i) {
+                        float alpha = static_cast<float>(i) / static_cast<float>(K);
+                        double subTime = m_prevSample.timestampSec + alpha * dt;
+                        float subX = m_prevSample.x + alpha * (currSample.x - m_prevSample.x);
+                        float subY = m_prevSample.y + alpha * (currSample.y - m_prevSample.y);
+                        float subP = m_prevSample.pressure + alpha * (currSample.pressure - m_prevSample.pressure);
+
+                        if (m_microJitterMm > 0.0f && i < K) {
+                            float jx = (static_cast<float>(std::rand()) / RAND_MAX - 0.5f) * 2.0f * m_microJitterMm;
+                            float jy = (static_cast<float>(std::rand()) / RAND_MAX - 0.5f) * 2.0f * m_microJitterMm;
+                            subX += jx;
+                            subY += jy;
+                        }
+
+                        if (m_packetDropRate > 0.001f && i < K) {
+                            float r = static_cast<float>(std::rand()) / RAND_MAX;
+                            if (r < m_packetDropRate) {
+                                m_totalDroppedPackets++;
+                                continue;
+                            }
+                        }
+
+                        RawInputSample subPt{
+                            .x = subX,
+                            .y = subY,
+                            .pressure = subP,
+                            .tiltRad = m_currentTiltRad,
+                            .timestampSec = subTime
+                        };
+                        outBatch.push_back(subPt);
+                        m_activeSamples.push_back(subPt);
+                        m_totalIngestedPackets++;
+                    }
+                } else {
+                    outBatch.push_back(currSample);
+                    m_activeSamples.push_back(currSample);
+                    m_totalIngestedPackets++;
+                }
+
+                m_prevSample = currSample;
+                m_hasPrevSample = true;
+                m_lastBatchSize = static_cast<int>(outBatch.size());
                 outEventType = 2;
             }
             return true;
@@ -182,17 +303,20 @@ bool RawSensorHUD::HandleEvent(const SDL_Event& event,
 
             if (m_mouseDown) {
                 m_mouseDown = false;
-                outSample = RawInputSample{
+                m_hasPrevSample = false;
+                RawInputSample sample{
                     .x = m_currentX,
                     .y = m_currentY,
                     .pressure = 0.0f,
                     .tiltRad = m_currentTiltRad,
                     .timestampSec = nowSec
                 };
-                m_activeSamples.push_back(outSample);
+                m_activeSamples.push_back(sample);
+                outBatch.push_back(sample);
                 m_lastStrokeSamples = m_activeSamples;
                 m_activeSamples.clear();
                 m_currentPressure = 0.0f;
+                m_lastBatchSize = 1;
                 outEventType = 3;
             }
             return true;
@@ -200,6 +324,15 @@ bool RawSensorHUD::HandleEvent(const SDL_Event& event,
     }
 
     return false;
+}
+
+void RawSensorHUD::UpdateTelemetryTipLag(float rawX, float rawY, float modX, float modY, float predX, float predY) {
+    m_liveTipLagMm = std::hypot(rawX - modX, rawY - modY);
+    m_livePredLagMm = std::hypot(rawX - predX, rawY - predY);
+}
+
+void RawSensorHUD::RecordModelerTimeUs(float timeUs) {
+    m_lastModelerTimeUs = timeUs;
 }
 
 void RawSensorHUD::Render(ImDrawList* drawList) {
@@ -237,24 +370,24 @@ void RawSensorHUD::Render(ImDrawList* drawList, const CanvasTransform& transform
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     const float pad = 14.0f;
-    const float boxW = 275.0f;
-    const float boxH = 148.0f;
+    const float boxW = 285.0f;
+    const float boxH = 210.0f;
     const ImVec2 boxMin(vp->WorkPos.x + vp->WorkSize.x - boxW - pad, vp->WorkPos.y + pad);
     const ImVec2 boxMax(boxMin.x + boxW, boxMin.y + boxH);
 
-    drawList->AddRectFilled(boxMin, boxMax, IM_COL32(18, 20, 26, 225), 8.0f);
+    drawList->AddRectFilled(boxMin, boxMax, IM_COL32(18, 20, 26, 230), 8.0f);
     drawList->AddRect(boxMin, boxMax, IM_COL32(70, 80, 100, 200), 8.0f, 0, 1.2f);
 
     char buf[128];
     float yCursor = boxMin.y + 10.0f;
     const float xLeft = boxMin.x + 12.0f;
 
-    drawList->AddText(ImVec2(xLeft, yCursor), IM_COL32(110, 200, 255, 255), "RAW DIGITIZER TELEMETRY");
+    drawList->AddText(ImVec2(xLeft, yCursor), IM_COL32(110, 200, 255, 255), "DIGITIZER & MODELER TELEMETRY");
     yCursor += 22.0f;
 
-    std::snprintf(buf, sizeof(buf), "Pos (X, Y):  (%.2f, %.2f)", m_currentX, m_currentY);
+    std::snprintf(buf, sizeof(buf), "Pos (X, Y):  (%.1f, %.1f)", m_currentX, m_currentY);
     drawList->AddText(ImVec2(xLeft, yCursor), IM_COL32(235, 238, 245, 255), buf);
-    yCursor += 20.0f;
+    yCursor += 19.0f;
 
     // Pressure + visual progress bar
     float clampedP = std::clamp(m_currentPressure, 0.0f, 1.0f);
@@ -275,19 +408,37 @@ void RawSensorHUD::Render(ImDrawList* drawList, const CanvasTransform& transform
         drawList->AddRectFilled(barMin, ImVec2(barX + barW * clampedP, barMax.y), fillCol, 3.0f);
     }
     drawList->AddRect(barMin, barMax, IM_COL32(90, 100, 120, 200), 3.0f);
-    yCursor += 20.0f;
+    yCursor += 19.0f;
 
-    const float tiltDeg = m_currentTiltRad * (180.0f / static_cast<float>(M_PI));
-    std::snprintf(buf, sizeof(buf), "Tilt:        %.1f deg (%.2f rad)", tiltDeg, m_currentTiltRad);
-    drawList->AddText(ImVec2(xLeft, yCursor), IM_COL32(235, 238, 245, 255), buf);
-    yCursor += 20.0f;
-
-    std::snprintf(buf, sizeof(buf), "Polling:     %.1f Hz", m_pollingRateHz);
+    const float effectiveHz = (m_oversampleFactor > 1) ? (m_pollingRateHz * m_oversampleFactor) : m_pollingRateHz;
+    std::snprintf(buf, sizeof(buf), "Rate:        %.1f Hz (%dx burst, %d pkts)",
+                  effectiveHz, m_oversampleFactor, m_lastBatchSize);
     drawList->AddText(ImVec2(xLeft, yCursor), IM_COL32(130, 240, 160, 255), buf);
-    yCursor += 20.0f;
+    yCursor += 19.0f;
 
-    std::snprintf(buf, sizeof(buf), "Delta t:     %.2f ms", m_deltaTimeMs);
+    std::snprintf(buf, sizeof(buf), "Delta t:     %.2f ms", (m_oversampleFactor > 1 && m_deltaTimeMs > 0.0f)
+                  ? (m_deltaTimeMs / m_oversampleFactor) : m_deltaTimeMs);
     drawList->AddText(ImVec2(xLeft, yCursor), IM_COL32(255, 210, 120, 255), buf);
+    yCursor += 19.0f;
+
+    std::snprintf(buf, sizeof(buf), "Modeler CPU: %.1f us/batch", m_lastModelerTimeUs);
+    drawList->AddText(ImVec2(xLeft, yCursor), IM_COL32(200, 160, 255, 255), buf);
+    yCursor += 19.0f;
+
+    std::snprintf(buf, sizeof(buf), "Tip Lag:     %.2f mm (%.1f px)",
+                  m_liveTipLagMm, m_liveTipLagMm * transform.zoom);
+    drawList->AddText(ImVec2(xLeft, yCursor),
+                      (m_liveTipLagMm > 4.0f) ? IM_COL32(255, 110, 110, 255) : IM_COL32(120, 220, 255, 255),
+                      buf);
+    yCursor += 19.0f;
+
+    const uint64_t totalPkts = m_totalIngestedPackets + m_totalDroppedPackets;
+    const float retention = (totalPkts > 0) ? (100.0f * m_totalIngestedPackets / totalPkts) : 100.0f;
+    std::snprintf(buf, sizeof(buf), "Retention:   %.1f%% (%llu dropped)",
+                  retention, static_cast<unsigned long long>(m_totalDroppedPackets));
+    drawList->AddText(ImVec2(xLeft, yCursor),
+                      (m_totalDroppedPackets > 0) ? IM_COL32(255, 175, 90, 255) : IM_COL32(140, 230, 160, 255),
+                      buf);
 }
 
 bool RawSensorHUD::RenderControls(float baseRadius) {
@@ -295,9 +446,36 @@ bool RawSensorHUD::RenderControls(float baseRadius) {
     changed |= ImGui::Checkbox("Show Corner Sensor HUD", &m_showHudOverlay);
     changed |= ImGui::Checkbox("Draw Raw Hardware Crosshairs & Lines", &m_showRawCrosshairs);
 
-    const auto& stroke = GetActiveOrLastStroke();
-    ImGui::Text("Captured Raw Samples: %zu", stroke.size());
+    ImGui::Spacing();
+    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "High-Frequency Burst Generator (Desktop Simulation):");
+    ImGui::TextWrapped("Simulates 240Hz-480Hz digitizer packet bursts by oversampling input events between UI frames.");
 
+    ImGui::Text("Oversample Factor:");
+    ImGui::SameLine();
+    if (ImGui::RadioButton("1x (Native)", m_oversampleFactor == 1)) { m_oversampleFactor = 1; changed = true; }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("2x (~120Hz)", m_oversampleFactor == 2)) { m_oversampleFactor = 2; changed = true; }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("4x (~240Hz)", m_oversampleFactor == 4)) { m_oversampleFactor = 4; changed = true; }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("8x (~480Hz)", m_oversampleFactor == 8)) { m_oversampleFactor = 8; changed = true; }
+
+    changed |= ImGui::SliderFloat("Sub-Packet Micro-Jitter (mm)", &m_microJitterMm, 0.0f, 0.50f, "%.2f mm");
+    changed |= ImGui::SliderFloat("Simulated Hardware Drop Rate", &m_packetDropRate, 0.0f, 0.30f, "%.1f %%");
+
+    ImGui::Spacing();
+    const auto& stroke = GetActiveOrLastStroke();
+    ImGui::Text("Captured Raw Samples: %zu   |   Total Ingested: %llu   |   Dropped: %llu",
+                stroke.size(),
+                static_cast<unsigned long long>(m_totalIngestedPackets),
+                static_cast<unsigned long long>(m_totalDroppedPackets));
+
+    if (ImGui::Button("Reset Ingestion Counters")) {
+        m_totalIngestedPackets = 0;
+        m_totalDroppedPackets = 0;
+        changed = true;
+    }
+    ImGui::SameLine();
     if (ImGui::Button("Dump Stroke to .inc")) {
         if (DumpStrokeToInc("dumped_stroke.inc", baseRadius)) {
             m_lastDumpStatus = "Saved to dumped_stroke.inc (& copied to clipboard)";

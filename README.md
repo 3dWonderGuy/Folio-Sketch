@@ -68,6 +68,7 @@ Comprehensive design documents, mathematical proofs, and architectural details a
 - [**Computational Geometry & Mathematical Primitives**](docs/geometry.md): 2D segment intersection algebra, swallowtail loop removal, nib profiles, and normal derivations.
 - [**Vector Ribbon & Infill Generator**](docs/vector_generator.md): Miter bisectors, safe segment limits, corner sweep fans, watertight loop detection, and SVG debugging.
 - [**GPU Mesh Builder & Anti-Aliasing Skirts**](docs/mesh_builder.md): Direct indexed triangle mesh generation, dual-buffer core/skirt anti-aliasing, and vertex buffer layout.
+- [**Android Zero-Latency Inking Guide**](docs/android_low_latency_inking.md): Unbuffered 240Hz–480Hz digitizer packet harvesting, Jetpack `FrontBufferedRenderer` compositor bypass, and unified GPU Capsule SDF pipeline.
 
 ---
 

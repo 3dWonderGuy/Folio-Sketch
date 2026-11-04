@@ -233,9 +233,12 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/width_inspector.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/geometry_inspector.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/stroke_scrubber.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/digitizer_trace_replayer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/wet_dry_compositor.cpp"
     )
 
     if(ANDROID)
+        list(APPEND FOLIO_INSPECTOR_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/android/folio_android_jni.cpp")
         # Android SDLActivity loads libmain.so
         add_library(main SHARED ${FOLIO_INSPECTOR_SOURCES})
         set_target_properties(main PROPERTIES

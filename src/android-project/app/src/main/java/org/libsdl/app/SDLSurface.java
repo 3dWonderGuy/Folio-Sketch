@@ -283,6 +283,11 @@ public class SDLSurface extends SurfaceView implements SurfaceHolder.Callback,
 
                 SDLActivity.onNativeMouse(buttonState, action, x, y, relative);
             } else if (toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER) {
+                // Pillar 1: Request unbuffered dispatch from the OS InputDispatcher to eliminate VSYNC batching delay
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    requestUnbufferedDispatch(event);
+                }
+
                 pointerId = event.getPointerId(i);
                 int penDeviceType = SDLActivity.getMotionListener().getPenDeviceType(event.getDevice());
 

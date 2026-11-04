@@ -73,3 +73,4 @@ For comprehensive mathematical derivations, algorithm steps, and API details:
 * [**Geometry & Intersection Mathematics**](geometry.md)
 * [**Vector Ribbon & Infill Generator**](vector_generator.md)
 * [**GPU Mesh Builder & Anti-Aliasing Skirts**](mesh_builder.md)
+* [**Android Zero-Latency Inking & Digitizer Ingestion**](android_low_latency_inking.md)

@@ -26,6 +26,7 @@
 #include <imgui_impl_opengl3.h>
 
 #include <vector>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -44,6 +45,8 @@
 #include "debug/stroke_scrubber.hpp"
 #include "debug/gl_capsule_renderer.hpp"
 #include "debug/gl_shape_renderer.hpp"
+#include "debug/digitizer_trace_replayer.hpp"
+#include "debug/wet_dry_compositor.hpp"
 
 using namespace Folio;
 using namespace Folio::Debug;
@@ -852,6 +855,11 @@ int main(int argc, char* argv[]) {
     glShapeRenderer.Init();
     std::vector<GpuShapeInstance> liveGpuShapes;
 
+    WetDryCompositor wetDryCompositor;
+    wetDryCompositor.Init();
+    bool dryNeedsRedraw = true;
+    bool debugSeamHighlight = false;
+
     // Core Inking Engine & Lab Modules
     InkEngine         engine;
     RawSensorHUD      rawSensorHud;
@@ -859,6 +867,7 @@ int main(int argc, char* argv[]) {
     WidthInspector    widthInspector;
     GeometryInspector geometryInspector;
     StrokeScrubber    strokeScrubber;
+    DigitizerTraceReplayer traceReplayer;
     CanvasTransform   viewport{};
 
     // Mode 1 shows the modeled centerline + Kalman spine by default
@@ -931,6 +940,7 @@ int main(int argc, char* argv[]) {
             const auto& l = strokes.back();
             strokeScrubber.FreezeStroke(l.raw, l.modeled, l.style, viewport.zoom);
         }
+        dryNeedsRedraw = true;
     };
 
     // Light path: only brush look changed (color / opacity / grain / cap / pattern).
@@ -942,6 +952,7 @@ int main(int argc, char* argv[]) {
                 s.outline = InkEngine::BuildStrokeOutline(s.points, s.style.capType, s.style.pattern, s.snapped);
             }
         }
+        dryNeedsRedraw = true;
     };
 
     auto commitFinished = [&](FinishedStrokeData&& fin) {
@@ -956,6 +967,17 @@ int main(int argc, char* argv[]) {
         s.zoom      = viewport.zoom;
         s.wantSnap  = snapModeActive() && (snapLatched || (labMode == LabMode::Snapping && snapOnLift));
         if (s.wantSnap) s.snapped = ApplySnapToStroke(s, engine.GetConfig());
+
+        // Pillar 2 Commit: Render completed stroke into persistent Dry FBO
+        // using the identical GPU Capsule SDF shader for a 100% seamless transition!
+        if (renderPath == RenderPath::CapsuleSdf && labMode != LabMode::Centerline) {
+            wetDryCompositor.CommitStroke(glCapsuleRenderer, s.points,
+                                          PackPremultipliedGpuColor(s.style.color),
+                                          viewport, s.brush);
+        } else {
+            dryNeedsRedraw = true;
+        }
+
         strokes.push_back(std::move(s));
     };
 
@@ -971,6 +993,7 @@ int main(int argc, char* argv[]) {
         rebuildStroke(s);
         rawSensorHud.SetStrokeSamples(s.raw);
         strokes.push_back(std::move(s));
+        dryNeedsRedraw = true;
     };
 
     auto clearCanvas = [&]() {
@@ -982,6 +1005,7 @@ int main(int argc, char* argv[]) {
         strokeScrubber.Unfreeze();
         snapLatched = false;
         snapPreview = ShapeRecognitionResult{};
+        dryNeedsRedraw = true;
     };
 
     auto undoStroke = [&]() {
@@ -989,6 +1013,7 @@ int main(int argc, char* argv[]) {
         strokes.pop_back();
         strokeScrubber.Unfreeze();
         rawSensorHud.SetStrokeSamples(strokes.empty() ? std::vector<RawInputSample>{} : strokes.back().raw);
+        dryNeedsRedraw = true;
     };
 
     auto enterMode = [&](LabMode m) {
@@ -1086,6 +1111,7 @@ int main(int argc, char* argv[]) {
                 } else if (event.type == SDL_EVENT_MOUSE_MOTION && isPanning) {
                     viewport.panX += event.motion.xrel;
                     viewport.panY += event.motion.yrel;
+                    dryNeedsRedraw = true;
                 } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
                     float factor = (event.wheel.y > 0.0f) ? 1.15f : (1.0f / 1.15f);
                     float mouseX = io.MousePos.x;
@@ -1094,6 +1120,7 @@ int main(int argc, char* argv[]) {
                     viewport.zoom = std::clamp(viewport.zoom * factor, 0.2f, 40.0f);
                     viewport.panX = mouseX - beforeWorld.x * viewport.zoom;
                     viewport.panY = mouseY - beforeWorld.y * viewport.zoom;
+                    dryNeedsRedraw = true;
                 }
             } else {
                 isPanning = false;
@@ -1101,10 +1128,11 @@ int main(int argc, char* argv[]) {
 
             // Route stylus and mouse inputs through RawSensorHUD & InkEngine when ImGui does not capture mouse
             if (!io.WantCaptureMouse && !isPanning) {
-                RawInputSample sample{};
+                std::vector<RawInputSample> sampleBatch;
                 int strokeEvt = 0;
-                if (rawSensorHud.HandleEvent(event, viewport, sample, strokeEvt)) {
-                    if (strokeEvt == 1) {
+                if (rawSensorHud.HandleEventBatch(event, viewport, sampleBatch, strokeEvt)) {
+                    if (strokeEvt == 1 && !sampleBatch.empty()) {
+                        const auto& sample = sampleBatch.front();
                         // Pen/Mouse Down -> Start live stroke
                         if (!multiStroke) strokes.clear();
                         strokeScrubber.Unfreeze();
@@ -1118,18 +1146,33 @@ int main(int argc, char* argv[]) {
                                            rawSensorHud.GetCurrentTiltXRad(),
                                            rawSensorHud.GetCurrentTiltYRad());
                     } else if (strokeEvt == 2) {
-                        // Pen/Mouse Motion while down -> Append point
-                        engine.AppendPoint(sample.x, sample.y, sample.pressure, sample.timestampSec,
-                                           rawSensorHud.GetCurrentTiltXRad(),
-                                           rawSensorHud.GetCurrentTiltYRad());
-                        // Any movement beyond the dwell threshold restarts the hold timer
-                        if (!snapLatched) {
-                            const float thr = engine.GetConfig().shapeSnapping.movementThresholdMm;
-                            if (std::hypot(sample.x - holdAnchorX, sample.y - holdAnchorY) > thr) {
-                                holdAnchorX  = sample.x;
-                                holdAnchorY  = sample.y;
-                                holdStartSec = sample.timestampSec;
+                        // Pen/Mouse Motion while down -> Ingest multi-rate batch (1x, 2x, 4x, 8x burst)
+                        auto startCpu = std::chrono::high_resolution_clock::now();
+                        for (const auto& sample : sampleBatch) {
+                            engine.AppendPoint(sample.x, sample.y, sample.pressure, sample.timestampSec,
+                                               rawSensorHud.GetCurrentTiltXRad(),
+                                               rawSensorHud.GetCurrentTiltYRad());
+                            // Any movement beyond the dwell threshold restarts the hold timer
+                            if (!snapLatched) {
+                                const float thr = engine.GetConfig().shapeSnapping.movementThresholdMm;
+                                if (std::hypot(sample.x - holdAnchorX, sample.y - holdAnchorY) > thr) {
+                                    holdAnchorX  = sample.x;
+                                    holdAnchorY  = sample.y;
+                                    holdStartSec = sample.timestampSec;
+                                }
                             }
+                        }
+                        auto endCpu = std::chrono::high_resolution_clock::now();
+                        float elapsedUs = std::chrono::duration<float, std::micro>(endCpu - startCpu).count();
+                        rawSensorHud.RecordModelerTimeUs(elapsedUs);
+
+                        if (!sampleBatch.empty() && !engine.GetLiveModeledPoints().empty()) {
+                            const auto& rawLast = sampleBatch.back();
+                            const auto& modLast = engine.GetLiveModeledPoints().back();
+                            const auto& predPts = engine.GetPredictedPoints();
+                            float px = modLast.x, py = modLast.y;
+                            if (!predPts.empty()) { px = predPts.back().x; py = predPts.back().y; }
+                            rawSensorHud.UpdateTelemetryTipLag(rawLast.x, rawLast.y, modLast.x, modLast.y, px, py);
                         }
                     } else if (strokeEvt == 3) {
                         // Pen/Mouse Up -> Finish stroke and commit it to the canvas
@@ -1154,11 +1197,19 @@ int main(int argc, char* argv[]) {
 
         if (!running) break;
 
+        // Tick deterministic trace replayer if active
+        if (traceReplayer.IsPlaying()) {
+            const double nowSec = static_cast<double>(SDL_GetTicksNS()) * 1e-9;
+            if (traceReplayer.Tick(nowSec, engine, rawSensorHud, curStyle(), viewport.zoom, commitFinished)) {
+                dirtyFrames = 2;
+            }
+        }
+
         // Skip rendering if nothing is dirty and ImGui is not interacting
-        if (dirtyFrames <= 0 && !ImGui::IsAnyItemActive() && !engine.IsStrokeActive()) {
+        if (dirtyFrames <= 0 && !ImGui::IsAnyItemActive() && !engine.IsStrokeActive() && !traceReplayer.IsPlaying()) {
             continue;
         }
-        if (ImGui::IsAnyItemActive() || engine.IsStrokeActive()) {
+        if (ImGui::IsAnyItemActive() || engine.IsStrokeActive() || traceReplayer.IsPlaying()) {
             dirtyFrames = 2;
         } else {
             --dirtyFrames;
@@ -1249,6 +1300,10 @@ int main(int argc, char* argv[]) {
             }
             ImGui::Text("Zoom: %.2fx   Strokes on canvas: %zu", viewport.zoom, strokes.size());
             ImGui::Checkbox("Keep multiple strokes on canvas", &multiStroke);
+            ImGui::SameLine();
+            if (ImGui::Checkbox("Inspect Wet/Dry Seams", &debugSeamHighlight)) {
+                dirtyFrames = 2;
+            }
             ImGui::Spacing();
 
             if (ImGui::BeginTabBar("InkLabModeTabs", ImGuiTabBarFlags_None)) {
@@ -1275,8 +1330,14 @@ int main(int argc, char* argv[]) {
                         dirtyFrames = 2;
                     }
 
-                    if (ImGui::CollapsingHeader("Raw Sensor", ImGuiTreeNodeFlags_DefaultOpen)) {
+                    if (ImGui::CollapsingHeader("Raw Digitizer & Burst Generator", ImGuiTreeNodeFlags_DefaultOpen)) {
                         if (rawSensorHud.RenderControls(curStyle().baseWidth * 0.5f)) {
+                            dirtyFrames = 2;
+                        }
+                    }
+
+                    if (ImGui::CollapsingHeader("Trace Replayer & Benchmarking", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        if (traceReplayer.RenderUI(engine, rawSensorHud, curStyle(), viewport, commitFinished)) {
                             dirtyFrames = 2;
                         }
                     }
@@ -1920,7 +1981,32 @@ int main(int argc, char* argv[]) {
                     }
                 }
             }
+        } else if (renderPath == RenderPath::CapsuleSdf) {
+            // Pillar 2: Two-Phase Layer Compositor (Decoupled Dry FBO + Active Wet Layer)
+            wetDryCompositor.EnsureSize(winWidth, winHeight);
+            if (dryNeedsRedraw) {
+                wetDryCompositor.ClearDry();
+                for (const auto& s : strokes) {
+                    wetDryCompositor.CommitStroke(glCapsuleRenderer, s.points,
+                                                  PackPremultipliedGpuColor(s.style.color),
+                                                  viewport, s.brush);
+                }
+                dryNeedsRedraw = false;
+            }
+
+            // 1. Present persistent background Dry document FBO
+            wetDryCompositor.PresentDry(winWidth, winHeight, debugSeamHighlight);
+
+            // 2. Render active in-flight Wet stroke directly over the canvas
+            if (engine.IsStrokeActive()) {
+                const StrokeStyle&  st = curStyle();
+                const CapsuleBrush& br = curBrush();
+                wetDryCompositor.RenderWet(glCapsuleRenderer, engine.GetLiveModeledPoints(), predictedPts,
+                                           PackPremultipliedGpuColor(st.color), viewport, winWidth, winHeight,
+                                           br, debugSeamHighlight);
+            }
         } else {
+            // Fallback outline polygon rasterization
             for (const auto& s : strokes) {
                 drawInk(s.points, &s.outline, s.style, s.brush);
             }
@@ -1929,27 +2015,16 @@ int main(int argc, char* argv[]) {
                 const StrokeStyle&  st = curStyle();
                 const CapsuleBrush& br = curBrush();
                 if (snapLatched && snapPreview.syntheticPoints.size() >= 2) {
-                    // Hold-to-snap latched: show the fitted shape instead of the freehand stroke
-                    InkPath snapOutline;
-                    if (renderPath == RenderPath::FilledOutline) {
-                        snapOutline = InkEngine::BuildStrokeOutline(snapPreview.syntheticPoints,
-                                                                    st.capType, st.pattern, true);
-                    }
+                    InkPath snapOutline = InkEngine::BuildStrokeOutline(snapPreview.syntheticPoints,
+                                                                        st.capType, st.pattern, true);
                     drawInk(snapPreview.syntheticPoints, &snapOutline, st, br);
-                } else if (renderPath == RenderPath::FilledOutline) {
-                    // Live body + predicted tip as one outline so the join stays seamless
+                } else {
                     std::vector<StrokePoint> combined(engine.GetLiveModeledPoints());
                     if (config.prediction.enable && predictedPts.size() > 1) {
                         combined.insert(combined.end(), predictedPts.begin() + 1, predictedPts.end());
                     }
                     const InkPath liveOutline = InkEngine::BuildStrokeOutline(combined, st.capType, st.pattern);
                     drawInk(combined, &liveOutline, st, br);
-                } else {
-                    drawInk(engine.GetLiveModeledPoints(), nullptr, st, br);
-                    if (renderPath == RenderPath::CapsuleSdf && config.prediction.enable && !predictedPts.empty()) {
-                        glCapsuleRenderer.RenderStroke(predictedPts, PackPremultipliedGpuColor(st.color),
-                                                       viewport, winWidth, winHeight, br);
-                    }
                 }
             }
         }
@@ -1964,6 +2039,7 @@ int main(int argc, char* argv[]) {
         SDL_GL_SwapWindow(window);
     }
 
+    wetDryCompositor.Shutdown();
     glShapeRenderer.Shutdown();
     glCapsuleRenderer.Shutdown();
     glMeshRenderer.Shutdown();
