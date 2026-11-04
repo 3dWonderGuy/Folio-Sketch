@@ -105,20 +105,20 @@ void InkPhysicsBridge::UpdateConfig(const InkingConfig& config) {
         params.prediction_params = sm::DisabledPredictorParams{};
     } else if (config.prediction.durationMs > 0.0f) {
         sm::KalmanPredictorParams kalman;
-        kalman.process_noise = 0.067;
-        kalman.measurement_noise = 0.1;
-        kalman.min_stable_iteration = 4;
+        kalman.process_noise = static_cast<double>(config.prediction.processNoise);
+        kalman.measurement_noise = static_cast<double>(config.prediction.measurementNoise);
+        kalman.min_stable_iteration = std::max(1, config.prediction.minStableIteration);
         kalman.max_time_samples = 20;
-        kalman.min_catchup_velocity = 0.01f;
-        kalman.acceleration_weight = 0.5f;
-        kalman.jerk_weight = 0.1f;
+        kalman.min_catchup_velocity = config.prediction.minCatchupVelocity;
+        kalman.acceleration_weight = config.prediction.accelerationWeight;
+        kalman.jerk_weight = config.prediction.jerkWeight;
         kalman.prediction_interval = sm::Duration(std::max(0.001f, config.prediction.durationMs * 0.001f));
         kalman.confidence_params.desired_number_of_samples = 20;
         kalman.confidence_params.max_estimation_distance = 1.5f;
-        kalman.confidence_params.min_travel_speed = 1.0f;
+        kalman.confidence_params.min_travel_speed = std::max(1.0f, config.prediction.minSpeedMmPerSec * 0.1f);
         kalman.confidence_params.max_travel_speed = 25.0f;
         kalman.confidence_params.max_linear_deviation = 5.0f;
-        kalman.confidence_params.baseline_linearity_confidence = 0.4f;
+        kalman.confidence_params.baseline_linearity_confidence = 0.5f;
         params.prediction_params = kalman;
     } else {
         params.prediction_params = sm::StrokeEndPredictorParams{};

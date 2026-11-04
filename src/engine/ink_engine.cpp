@@ -280,6 +280,14 @@ void InkEngine::EnsurePrediction() const {
         return;
     }
 
+    // Dynamic suppression: If moving below minimum speed, or executing a sharp turn, suppress lookahead prediction
+    if (m_config.prediction.minSpeedMmPerSec > 0.0f && m_filteredSpeedMmPerSec < m_config.prediction.minSpeedMmPerSec) {
+        return;
+    }
+    if (m_config.prediction.suppressOnTurns && m_currentTurnAngleRad > m_config.prediction.turnSuppressionThresholdRad) {
+        return;
+    }
+
     if (!m_physicsBridge->Predict(m_predictionResultsBuffer)) {
         return;
     }
@@ -294,7 +302,19 @@ void InkEngine::EnsurePrediction() const {
         m_predictedPointsBuffer.push_back(pt);
     }
 
-    if (m_predictedPointsBuffer.size() >= 2) {
+    const size_t totalPredPts = m_predictedPointsBuffer.size();
+    if (totalPredPts >= 2) {
+        // Apply tip tapering to soften prediction snapping/flicker at the tip
+        if (m_config.prediction.taperTip && totalPredPts > 2) {
+            const float baseR = m_predictedPointsBuffer.front().r;
+            const float minRatio = std::clamp(m_config.prediction.tipTaperRatio, 0.0f, 1.0f);
+            for (size_t i = 1; i < totalPredPts; ++i) {
+                float t = static_cast<float>(i) / static_cast<float>(totalPredPts - 1);
+                float taperFactor = 1.0f - (1.0f - minRatio) * t;
+                m_predictedPointsBuffer[i].r = std::min(m_predictedPointsBuffer[i].r, baseR * taperFactor);
+            }
+        }
+
         CapsuleBuilder::BuildCapsuleInstances(
             m_predictedPointsBuffer, PackPremultipliedGpuColor(m_activeStyle.color), m_predictedCapsules);
     }

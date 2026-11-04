@@ -68,7 +68,20 @@ struct InkingConfig {
     // -------------------------------------------------------------------------
     struct Prediction {
         bool  enable                       = true;             // Predicts stroke trajectory ahead of physical digitizer events to reduce perceived latency
-        float durationMs                   = 16.0f;            // Lookahead time (milliseconds) for the Kalman forward predictor (~1 frame at 60Hz)
+        float durationMs                   = 10.0f;            // Lookahead time (milliseconds) for the Kalman forward predictor (default ~10ms for stable tracking)
+        float accelerationWeight           = 0.0f;             // Weight on acceleration (0.0 = constant velocity, suppresses wild overshoot on direction changes)
+        float jerkWeight                   = 0.0f;             // Weight on jerk (higher values induce high-frequency oscillations / jitter)
+        float processNoise                 = 0.067f;           // Process noise variance for Kalman filter
+        float measurementNoise             = 0.25f;            // Measurement noise variance (higher = filters out noisy digitizer jitters)
+        int   minStableIteration           = 4;                // Minimum iterations before predictor outputs extrapolation
+        float minCatchupVelocity           = 0.01f;            // Minimum catchup velocity (mm/s)
+        
+        // Dynamic suppression & stabilization
+        bool  suppressOnTurns              = true;             // Suppress/cut prediction lookahead during sharp angular direction changes
+        float turnSuppressionThresholdRad  = 0.52359877f;      // Angular turning delta (~30 deg) above which prediction is suppressed
+        float minSpeedMmPerSec             = 20.0f;            // Speed threshold (mm/s) below which prediction lookahead is faded out to prevent stationary jitter
+        bool  taperTip                     = true;             // Gradually tapers radius towards the predicted tip to eliminate visual popping/snapping
+        float tipTaperRatio                = 0.3f;             // Minimum radius multiplier at the tip of the prediction (relative to base radius)
     } prediction;
 
     // -------------------------------------------------------------------------
