@@ -6,7 +6,7 @@ on:
       branch:
         description: 'Branch or ref to build'
         required: true
-        default: 'feature/inking-diagnostic-playground'
+        default: 'main'
         type: string
       publish_release:
         description: 'Publish artifacts to GitHub Pre-Release (inspector-preview)'
