@@ -34,7 +34,7 @@
 #define ACTION_HOVER_ENTER  9
 #define ACTION_HOVER_EXIT   10
 
-void Android_OnPen(SDL_Window *window, int pen_id_in, SDL_PenDeviceType device_type, int button, int action, float x, float y, float p)
+void Android_OnPen(SDL_Window *window, int pen_id_in, SDL_PenDeviceType device_type, int button, int action, float x, float y, float p, float tilt_rad, float orientation_rad)
 {
     if (!window) {
         return;
@@ -45,10 +45,10 @@ void Android_OnPen(SDL_Window *window, int pen_id_in, SDL_PenDeviceType device_t
 
     SDL_PenID pen = SDL_FindPenByHandle((void *) (size_t) pen_id_in);
     if (!pen) {
-        // TODO: Query JNI for pen device info
+        // Query JNI for pen device info
         SDL_PenInfo peninfo;
         SDL_zero(peninfo);
-        peninfo.capabilities = SDL_PEN_CAPABILITY_PRESSURE | SDL_PEN_CAPABILITY_ERASER;
+        peninfo.capabilities = SDL_PEN_CAPABILITY_PRESSURE | SDL_PEN_CAPABILITY_XTILT | SDL_PEN_CAPABILITY_YTILT | SDL_PEN_CAPABILITY_ROTATION | SDL_PEN_CAPABILITY_ERASER;
         peninfo.num_buttons = 2;
         peninfo.subtype = SDL_PEN_TYPE_PEN;
         peninfo.device_type = device_type;
@@ -61,7 +61,23 @@ void Android_OnPen(SDL_Window *window, int pen_id_in, SDL_PenDeviceType device_t
 
     SDL_SendPenMotion(0, pen, window, x, y);
     SDL_SendPenAxis(0, pen, window, SDL_PEN_AXIS_PRESSURE, p);
-    // TODO: add more axis
+
+    // Convert polar tilt & orientation to Cartesian degrees [-90..90] for XTILT / YTILT
+    if (tilt_rad > 0.0f) {
+        const float sinTilt = SDL_sinf(tilt_rad);
+        const float degToRad = 180.0f / SDL_PI_F;
+        const float xtiltDeg = SDL_asinf(sinTilt * SDL_sinf(orientation_rad)) * degToRad;
+        const float ytiltDeg = -SDL_asinf(sinTilt * SDL_cosf(orientation_rad)) * degToRad;
+        SDL_SendPenAxis(0, pen, window, SDL_PEN_AXIS_XTILT, xtiltDeg);
+        SDL_SendPenAxis(0, pen, window, SDL_PEN_AXIS_YTILT, ytiltDeg);
+
+        float rotDeg = orientation_rad * degToRad;
+        if (rotDeg > 180.0f) rotDeg -= 360.0f;
+        SDL_SendPenAxis(0, pen, window, SDL_PEN_AXIS_ROTATION, rotDeg);
+    } else {
+        SDL_SendPenAxis(0, pen, window, SDL_PEN_AXIS_XTILT, 0.0f);
+        SDL_SendPenAxis(0, pen, window, SDL_PEN_AXIS_YTILT, 0.0f);
+    }
 
     SDL_PenInputFlags current = SDL_GetPenStatus(pen, NULL, 0);
     int diff = current ^ button;

@@ -32,12 +32,22 @@ bool WidthInspector::RenderUI(InkingConfig& config,
     widthDirty |= ImGui::SliderFloat("baseWidth", &style.baseWidth, 0.5f, 60.0f, "%.2f");
     widthDirty |= ImGui::SliderFloat("minWidthRatio", &config.dynamics.minWidthMultiplier, 0.05f, 1.0f, "%.2f");
     widthDirty |= ImGui::SliderFloat("maxWidthRatio", &config.dynamics.maxWidthMultiplier, 0.5f, 3.0f, "%.2f");
-    widthDirty |= ImGui::SliderFloat("velocityMaxClamp", &config.dynamics.velocityThinningMaxSpeed, 50.0f, 3500.0f, "%.0f");
-    widthDirty |= ImGui::SliderFloat("EMA Smoothing Factor", &config.dynamics.widthSmoothingEma, 0.01f, 1.0f, "%.2f");
+    widthDirty |= ImGui::SliderFloat("velocityMaxClamp (mm/s)", &config.dynamics.velocityThinningMaxSpeed, 50.0f, 3500.0f, "%.0f");
+    widthDirty |= ImGui::SliderFloat("Overall Width EMA", &config.dynamics.widthSmoothingEma, 0.01f, 1.0f, "%.2f");
+    widthDirty |= ImGui::SliderFloat("Velocity Thinning EMA (Noise Filter)", &config.dynamics.velocitySmoothingEma, 0.01f, 1.0f, "%.2f");
     widthDirty |= ImGui::Checkbox("enablePressureCurve", &config.calibration.enablePressureCurve);
     widthDirty |= ImGui::SliderFloat("Pressure Gamma", &config.calibration.pressureGamma, 0.25f, 3.0f, "%.2f");
     widthDirty |= ImGui::SliderFloat("Pressure Deadzone", &config.calibration.pressureDeadzoneMin, 0.0f, 0.25f, "%.3f");
     widthDirty |= ImGui::SliderFloat("Pressure Saturation", &config.calibration.pressureSaturationMax, 0.50f, 1.0f, "%.3f");
+
+    ImGui::SeparatorText("Spatial Slope Clamping & Blooming Prevention");
+    widthDirty |= ImGui::Checkbox("Enable Spatial Slope Clamping (dr/ds)", &config.dynamics.enableSpatialSlopeClamping);
+    if (config.dynamics.enableSpatialSlopeClamping) {
+        widthDirty |= ImGui::SliderFloat("maxRadiusSlopePerMm", &config.dynamics.maxRadiusSlopePerMm, 0.05f, 10.0f, "%.2f mm");
+        ImGui::TextDisabled("Lower (0.1-0.35) prevents blooming when stationary; Higher (>2.0) allows instant pressure pulses.");
+    } else {
+        ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.4f, 1.0f), "Spatial slope clamping disabled: Instantaneous pressure pulses active!");
+    }
 
     ImGui::SeparatorText("Acceleration & Corner Compensation");
     if (ImGui::Button("Reset Dynamics to Recommended Defaults")) {
@@ -46,7 +56,9 @@ bool WidthInspector::RenderUI(InkingConfig& config,
         config.dynamics.maxDecelerationMmPerSec2 = 2500.0f;
         config.dynamics.useCornerCompensation = true;
         config.dynamics.cornerCompensationThresholdRad = 0.52359877f;
+        config.dynamics.enableSpatialSlopeClamping = true;
         config.dynamics.maxRadiusSlopePerMm = 0.35f;
+        config.dynamics.velocitySmoothingEma = 0.25f;
         widthDirty = true;
     }
     widthDirty |= ImGui::Checkbox("useAccelerationFiltering", &config.dynamics.useAccelerationFiltering);
@@ -55,7 +67,6 @@ bool WidthInspector::RenderUI(InkingConfig& config,
     widthDirty |= ImGui::SliderFloat("maxAcceleration (mm/s^2)", &config.dynamics.maxAccelerationMmPerSec2, 500.0f, 10000.0f, "%.0f");
     widthDirty |= ImGui::SliderFloat("maxDeceleration (mm/s^2)", &config.dynamics.maxDecelerationMmPerSec2, 500.0f, 10000.0f, "%.0f");
     widthDirty |= ImGui::SliderFloat("cornerThresholdRad", &config.dynamics.cornerCompensationThresholdRad, 0.1f, 1.57f, "%.2f rad");
-    widthDirty |= ImGui::SliderFloat("maxRadiusSlopePerMm (dr/ds)", &config.dynamics.maxRadiusSlopePerMm, 0.05f, 1.0f, "%.2f");
 
     ImGui::SeparatorText("Gaussian Peak Smoothing (Rounds Sharp Spikes)");
     widthDirty |= ImGui::Checkbox("enableGaussianRadiusSmoothing", &config.dynamics.enableGaussianRadiusSmoothing);
@@ -83,9 +94,9 @@ bool WidthInspector::RenderUI(InkingConfig& config,
     }
 
     ImGui::SeparatorText("Tail Taper");
-    widthDirty |= ImGui::SliderFloat("tailTaperLength (mm)", &config.dynamics.tailTaperLengthMm, 0.0f, 40.0f, "%.1f mm");
+    widthDirty |= ImGui::SliderFloat("tailTaperLength (mm)", &config.dynamics.tailTaperLengthMm, 0.0f, 200.0f, "%.1f mm");
     if (config.dynamics.tailTaperLengthMm > 0.0f) {
-        widthDirty |= ImGui::SliderFloat("tailTaperPower", &config.dynamics.tailTaperPower, 0.5f, 4.0f, "%.2f");
+        widthDirty |= ImGui::SliderFloat("tailTaperPower", &config.dynamics.tailTaperPower, 0.2f, 6.0f, "%.2f");
     }
 
     ImGui::SeparatorText("Width Overlays & Curve Plot");

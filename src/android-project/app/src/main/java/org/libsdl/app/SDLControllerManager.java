@@ -869,7 +869,10 @@ class SDLGenericMotionListener_API14 implements View.OnGenericMotionListener {
                             buttons |= 0x08;
                         }
 
-                        SDLActivity.onNativePen(event.getPointerId(i), getPenDeviceType(event.getDevice()), buttons, action, x, y, p);
+                        float tilt = event.getAxisValue(MotionEvent.AXIS_TILT, i);
+                        float orientation = event.getAxisValue(MotionEvent.AXIS_ORIENTATION, i);
+
+                        SDLActivity.onNativePen(event.getPointerId(i), getPenDeviceType(event.getDevice()), buttons, action, x, y, p, tilt, orientation);
                         consumed = true;
                         break;
                 }

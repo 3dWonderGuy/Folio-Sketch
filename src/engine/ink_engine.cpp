@@ -414,7 +414,7 @@ void InkEngine::ProcessPhysicsResults(const std::vector<sm::Result>& results) {
         StrokePoint pt = ToStrokePoint(res, m_smoothedWidth);
 
         // 4. Clamp spatial radius slope (dr/ds) against previous point to prevent bloat during slow movements
-        if (!m_liveModeledPoints.empty()) {
+        if (m_evalConfig.dynamics.enableSpatialSlopeClamping && !m_liveModeledPoints.empty()) {
             float ds = static_cast<float>(std::hypot(pt.x - m_liveModeledPoints.back().x,
                                                      pt.y - m_liveModeledPoints.back().y));
             pt.r = StrokeWidthEvaluator::ClampSpatialRadiusSlope(

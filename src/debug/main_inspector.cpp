@@ -1291,13 +1291,7 @@ int main(int argc, char* argv[]) {
                         }
                     }
 
-                    if (ImGui::CollapsingHeader("Pressure, Width & Tilt Dynamics", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        if (widthInspector.RenderUI(config, curStyle(), resolveCenterPts())) {
-                            applyConfigChange();
-                            replayStrokes();
-                            dirtyFrames = 2;
-                        }
-                    }
+
 
                     if (ImGui::CollapsingHeader("Time-Travel Scrubber")) {
                         const std::vector<StrokePoint>& curModeled =
@@ -1454,11 +1448,11 @@ int main(int argc, char* argv[]) {
                     ImGui::SeparatorText("3. Tail Tapering");
                     postDirty |= ImGui::SliderFloat("Tail Taper Length (mm)",
                                                     &config.dynamics.tailTaperLengthMm,
-                                                    0.0f, 40.0f, "%.1f mm");
+                                                    0.0f, 200.0f, "%.1f mm");
                     if (config.dynamics.tailTaperLengthMm > 0.0f) {
                         postDirty |= ImGui::SliderFloat("Tail Taper Power",
                                                         &config.dynamics.tailTaperPower,
-                                                        0.5f, 4.0f, "%.2f");
+                                                        0.2f, 6.0f, "%.2f");
                     }
 
                     ImGui::SeparatorText("Visual Before vs After Overlays");

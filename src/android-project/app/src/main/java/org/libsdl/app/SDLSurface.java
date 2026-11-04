@@ -299,7 +299,10 @@ public class SDLSurface extends SurfaceView implements SurfaceHolder.Callback,
                     buttonState |= 0x08;
                 }
 
-                SDLActivity.onNativePen(pointerId, SDLActivity.getMotionListener().getPenDeviceType(event.getDevice()), buttonState, action, x, y, p);
+                float tilt = event.getAxisValue(MotionEvent.AXIS_TILT, i);
+                float orientation = event.getAxisValue(MotionEvent.AXIS_ORIENTATION, i);
+
+                SDLActivity.onNativePen(pointerId, SDLActivity.getMotionListener().getPenDeviceType(event.getDevice()), buttonState, action, x, y, p, tilt, orientation);
             } else { // MotionEvent.TOOL_TYPE_FINGER or MotionEvent.TOOL_TYPE_UNKNOWN
                 pointerId = event.getPointerId(i);
                 x = getNormalizedX(event.getX(i));

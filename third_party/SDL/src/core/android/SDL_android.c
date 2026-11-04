@@ -275,7 +275,7 @@ JNIEXPORT void JNICALL SDL_JAVA_INTERFACE(onNativeMouse)(
 
 JNIEXPORT void JNICALL SDL_JAVA_INTERFACE(onNativePen)(
     JNIEnv *env, jclass jcls,
-    jint pen_id_in, jint device_type, jint button, jint action, jfloat x, jfloat y, jfloat p);
+    jint pen_id_in, jint device_type, jint button, jint action, jfloat x, jfloat y, jfloat p, jfloat tilt, jfloat orientation);
 
 JNIEXPORT void JNICALL SDL_JAVA_INTERFACE(onNativeClipboardChanged)(
     JNIEnv *env, jclass jcls);
@@ -395,7 +395,7 @@ static JNINativeMethod SDLActivity_tab[] = {
     { "onNativePinchUpdate", "(FFFFF)V", SDL_JAVA_INTERFACE(onNativePinchUpdate) },
     { "onNativePinchEnd", "()V", SDL_JAVA_INTERFACE(onNativePinchEnd) },
     { "onNativeMouse", "(IIFFZ)V", SDL_JAVA_INTERFACE(onNativeMouse) },
-    { "onNativePen", "(IIIIFFF)V", SDL_JAVA_INTERFACE(onNativePen) },
+    { "onNativePen", "(IIIIFFFFF)V", SDL_JAVA_INTERFACE(onNativePen) },
     { "onNativeClipboardChanged", "()V", SDL_JAVA_INTERFACE(onNativeClipboardChanged) }
 #endif // !SDL_VIDEO_DISABLED
 };
@@ -1449,11 +1449,11 @@ JNIEXPORT void JNICALL SDL_JAVA_INTERFACE(onNativeMouse)(
 // Pen
 JNIEXPORT void JNICALL SDL_JAVA_INTERFACE(onNativePen)(
     JNIEnv *env, jclass jcls,
-    jint pen_id_in, jint device_type, jint button, jint action, jfloat x, jfloat y, jfloat p)
+    jint pen_id_in, jint device_type, jint button, jint action, jfloat x, jfloat y, jfloat p, jfloat tilt, jfloat orientation)
 {
     SDL_LockMutex(Android_ActivityMutex);
 
-    Android_OnPen(Android_Window, pen_id_in, device_type, button, action, x, y, p);
+    Android_OnPen(Android_Window, pen_id_in, device_type, button, action, x, y, p, tilt, orientation);
 
     SDL_UnlockMutex(Android_ActivityMutex);
 }

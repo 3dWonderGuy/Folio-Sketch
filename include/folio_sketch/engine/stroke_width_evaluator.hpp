@@ -157,11 +157,18 @@ public:
         }
 
         float pressureWidth = ScaleWidthByPressure(effBaseWidth, effPressure, config);
-        float velocityFactor = (config.dynamics.useCornerCompensation && turnAngleRad > 0.0f)
+        float rawVelocityFactor = (config.dynamics.useCornerCompensation && turnAngleRad > 0.0f)
                                    ? ComputeCompensatedVelocityThinning(effSpeed, turnAngleRad, zoomScale, config)
                                    : ComputeVelocityThinning(effSpeed, zoomScale, config);
+
+        float smoothedVelocityFactor = rawVelocityFactor;
+        if (previousWidth > 0.0f && pressureWidth > 0.0f) {
+            float previousVelFactor = std::clamp(previousWidth / pressureWidth, 0.01f, 1.0f);
+            smoothedVelocityFactor = ApplySmoothingEMA(previousVelFactor, rawVelocityFactor, config.dynamics.velocitySmoothingEma);
+        }
+
         float tiltFactor = ComputeTiltModulation(tiltRad, config);
-        float targetWidth = pressureWidth * velocityFactor * tiltFactor;
+        float targetWidth = pressureWidth * smoothedVelocityFactor * tiltFactor;
         return ApplySmoothingEMA(previousWidth, targetWidth, config.dynamics.widthSmoothingEma);
     }
 
