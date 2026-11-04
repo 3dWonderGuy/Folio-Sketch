@@ -533,6 +533,34 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
             setWindowStyle(false);
         }
 
+        // Request highest available display refresh rate (e.g. 120 Hz / 144 Hz) for ultra-low latency inking
+        try {
+            if (Build.VERSION.SDK_INT >= 30 /* Android 11 (R) */) {
+                Display display = getDisplay();
+                if (display != null) {
+                    Display.Mode[] modes = display.getSupportedModes();
+                    Display.Mode bestMode = null;
+                    float maxRate = 60.0f;
+                    for (Display.Mode mode : modes) {
+                        if (mode.getRefreshRate() > maxRate) {
+                            maxRate = mode.getRefreshRate();
+                            bestMode = mode;
+                        }
+                    }
+                    if (bestMode != null) {
+                        WindowManager.LayoutParams lp = getWindow().getAttributes();
+                        lp.preferredDisplayModeId = bestMode.getModeId();
+                        getWindow().setAttributes(lp);
+                    }
+                }
+            } else if (Build.VERSION.SDK_INT >= 23 /* Android 6.0 (M) */) {
+                WindowManager.LayoutParams lp = getWindow().getAttributes();
+                lp.preferredRefreshRate = 120.0f;
+                getWindow().setAttributes(lp);
+            }
+        } catch (Exception ignored) {
+        }
+
         getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(this);
 
         // Get filename from "Open with" of another application

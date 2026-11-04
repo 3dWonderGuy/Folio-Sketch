@@ -284,6 +284,30 @@ public class SDLSurface extends SurfaceView implements SurfaceHolder.Callback,
                 SDLActivity.onNativeMouse(buttonState, action, x, y, relative);
             } else if (toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER) {
                 pointerId = event.getPointerId(i);
+                int penDeviceType = SDLActivity.getMotionListener().getPenDeviceType(event.getDevice());
+
+                // BUTTON_STYLUS_PRIMARY is 2^5, so shift by 4, and apply SDL_PEN_INPUT_DOWN/SDL_PEN_INPUT_ERASER_TIP
+                int buttonState = (event.getButtonState() >> 4) | (1 << (toolType == MotionEvent.TOOL_TYPE_STYLUS ? 0 : 30));
+                if ((event.getButtonState() & MotionEvent.BUTTON_TERTIARY) != 0) {
+                    buttonState |= 0x08;
+                }
+
+                // Process high-frequency historical samples (e.g. 240 Hz stylus digitizer input batched between frames)
+                if (action == MotionEvent.ACTION_MOVE) {
+                    final int historySize = event.getHistorySize();
+                    for (int h = 0; h < historySize; ++h) {
+                        float hx = event.getHistoricalX(i, h);
+                        float hy = event.getHistoricalY(i, h);
+                        float hp = event.getHistoricalPressure(i, h);
+                        if (hp > 1.0f) {
+                            hp = 1.0f;
+                        }
+                        float htilt = event.getHistoricalAxisValue(MotionEvent.AXIS_TILT, i, h);
+                        float horient = event.getHistoricalAxisValue(MotionEvent.AXIS_ORIENTATION, i, h);
+                        SDLActivity.onNativePen(pointerId, penDeviceType, buttonState, MotionEvent.ACTION_MOVE, hx, hy, hp, htilt, horient);
+                    }
+                }
+
                 x = event.getX(i);
                 y = event.getY(i);
                 p = event.getPressure(i);
@@ -293,16 +317,10 @@ public class SDLSurface extends SurfaceView implements SurfaceHolder.Callback,
                     p = 1.0f;
                 }
 
-                // BUTTON_STYLUS_PRIMARY is 2^5, so shift by 4, and apply SDL_PEN_INPUT_DOWN/SDL_PEN_INPUT_ERASER_TIP
-                int buttonState = (event.getButtonState() >> 4) | (1 << (toolType == MotionEvent.TOOL_TYPE_STYLUS ? 0 : 30));
-                if ((event.getButtonState() & MotionEvent.BUTTON_TERTIARY) != 0) {
-                    buttonState |= 0x08;
-                }
-
                 float tilt = event.getAxisValue(MotionEvent.AXIS_TILT, i);
                 float orientation = event.getAxisValue(MotionEvent.AXIS_ORIENTATION, i);
 
-                SDLActivity.onNativePen(pointerId, SDLActivity.getMotionListener().getPenDeviceType(event.getDevice()), buttonState, action, x, y, p, tilt, orientation);
+                SDLActivity.onNativePen(pointerId, penDeviceType, buttonState, action, x, y, p, tilt, orientation);
             } else { // MotionEvent.TOOL_TYPE_FINGER or MotionEvent.TOOL_TYPE_UNKNOWN
                 pointerId = event.getPointerId(i);
                 x = getNormalizedX(event.getX(i));

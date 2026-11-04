@@ -13,9 +13,9 @@ bool ModelerInspector::RenderUI(InkingConfig& config) {
 
     ImGui::SeparatorText("Position Modeler (Spring-Mass-Damper)");
     physicsDirty |= ImGui::SliderFloat("spring_constant", &config.physics.springMassConstant,
-                                       0.00005f, 0.00500f, "%.5f");
+                                       0.00005f, 0.05000f, "%.5f", ImGuiSliderFlags_Logarithmic);
     physicsDirty |= ImGui::SliderFloat("drag_coefficient", &config.physics.dragConstant,
-                                       10.0f, 200.0f, "%.1f");
+                                       1.0f, 200.0f, "%.1f");
 
     ImGui::SeparatorText("Sampling & End-of-Stroke");
     physicsDirty |= ImGui::SliderFloat("min_output_rate (Hz)", &config.physics.minOutputRateHz,
