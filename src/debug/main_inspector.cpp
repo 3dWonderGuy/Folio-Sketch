@@ -17,6 +17,7 @@
  *   stroke_scrubber, and the OpenGL/GLES3 renderers in this file.
  */
 
+#include "debug/gl_loader.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #if defined(__ANDROID__)
@@ -825,6 +826,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     SDL_GL_SetSwapInterval(1);
+
+    if (!InitGlLoader()) {
+        std::cerr << "[folio_ink_inspector] Failed to initialize OpenGL functions via SDL_GL_GetProcAddress!" << std::endl;
+    }
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();

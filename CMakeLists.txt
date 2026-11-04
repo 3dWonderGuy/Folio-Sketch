@@ -225,6 +225,7 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
 
     set(FOLIO_INSPECTOR_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/main_inspector.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/gl_loader.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/gl_capsule_renderer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/gl_shape_renderer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/raw_sensor_layer.cpp"

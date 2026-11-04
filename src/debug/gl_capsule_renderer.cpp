@@ -6,6 +6,7 @@
  */
 
 #include "debug/gl_capsule_renderer.hpp"
+#include "debug/gl_loader.hpp"
 #include "folio_sketch/gpu/ink_mesh.hpp"
 
 #if defined(__ANDROID__)

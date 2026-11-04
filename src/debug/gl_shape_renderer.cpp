@@ -6,6 +6,7 @@
  */
 
 #include "debug/gl_shape_renderer.hpp"
+#include "debug/gl_loader.hpp"
 
 #if defined(__ANDROID__)
 #include <GLES3/gl3.h>
