@@ -5,27 +5,76 @@ on:
     branches: [ "main", "feature/**" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    name: ${{ matrix.os }} (${{ matrix.cpp_compiler }}, ${{ matrix.build_type }})
-    runs-on: ${{ matrix.os }}
-
+  # ============================================================================
+  # 1. Fedora Linux (Containerized)
+  # ============================================================================
+  build-fedora:
+    name: Fedora Linux (${{ matrix.compiler }}, Release)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        build_type: [Release]
         include:
-          - os: windows-latest
-            c_compiler: cl
-            cpp_compiler: cl
-          - os: ubuntu-latest
+          - compiler: gcc
             c_compiler: gcc
             cpp_compiler: g++
-          - os: ubuntu-latest
+          - compiler: clang
             c_compiler: clang
             cpp_compiler: clang++
+
+    steps:
+      - name: Install Fedora Build Dependencies
+        run: |
+          dnf -y update --setopt=install_weak_deps=False
+          dnf -y install --setopt=install_weak_deps=False \
+            git cmake ninja-build pkgconf \
+            gcc gcc-c++ clang \
+            mesa-libGL-devel mesa-libGLU-devel mesa-libEGL-devel mesa-libGLES-devel \
+            libX11-devel libXext-devel libXcursor-devel libXi-devel libXfixes-devel \
+            libXinerama-devel libXrandr-devel libXScrnSaver-devel libXtst-devel \
+            wayland-devel wayland-protocols-devel libxkbcommon-devel \
+            alsa-lib-devel pulseaudio-libs-devel dbus-devel systemd-devel
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Mark directory as safe for Git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Configure CMake (Fedora)
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
+            -DCMAKE_CXX_STANDARD=20 \
+            -DFOLIO_SKETCH_BUILD_INSPECTOR=ON \
+            -S .
+
+      - name: Build Targets
+        run: cmake --build build --config Release
+
+      - name: Run Headless Diagnostics
+        run: ./build/folio_ink_inspector --diagnose
+
+  # ============================================================================
+  # 2. Windows (MSVC Ninja)
+  # ============================================================================
+  build-windows:
+    name: Windows (MSVC cl, Release)
+    runs-on: windows-latest
 
     steps:
       - name: Checkout repository
@@ -34,59 +83,85 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Install Linux Dependencies (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            ninja-build \
-            libgl1-mesa-dev \
-            libglu1-mesa-dev \
-            libegl1-mesa-dev \
-            libgles2-mesa-dev \
-            libx11-dev \
-            libxext-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxinerama-dev \
-            libxrandr-dev \
-            libxss-dev \
-            libwayland-dev \
-            libxkbcommon-dev \
-            libasound2-dev \
-            libpulse-dev \
-            libdbus-1-dev \
-            libudev-dev
-
-      - name: Set reusable strings
-        id: strings
-        shell: bash
-        run: |
-          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
-
-      - name: Set up MSVC environment (Windows)
-        if: runner.os == 'Windows'
+      - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Set up Ninja (Windows)
-        if: runner.os == 'Windows'
+      - name: Set up CMake and Ninja
         uses: lukka/get-cmake@latest
 
-      - name: Configure CMake (Linux)
-        if: runner.os == 'Linux'
-        run: >
-          cmake -B ${{ steps.strings.outputs.build-output-dir }} -G Ninja
-          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          -S ${{ github.workspace }}
-
       - name: Configure CMake (Windows)
-        if: runner.os == 'Windows'
-        run: >
-          cmake -B ${{ steps.strings.outputs.build-output-dir }} -G Ninja
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          -S ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          cmake -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_CXX_STANDARD=20 `
+            -DFOLIO_SKETCH_BUILD_INSPECTOR=ON `
+            -S .
 
-      - name: Build
-        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+      - name: Build Targets
+        shell: pwsh
+        run: cmake --build build --config Release
+
+      - name: Run Headless Diagnostics (Windows)
+        shell: pwsh
+        run: |
+          $exe = if (Test-Path "build/folio_ink_inspector.exe") { "build/folio_ink_inspector.exe" }
+                 else {
+                   (Get-ChildItem -Path build -Recurse -Filter "folio_ink_inspector.exe" | Select-Object -First 1).FullName
+                 }
+          & $exe --diagnose
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  # ============================================================================
+  # 3. Android (Gradle NDK ARM64-v8a)
+  # ============================================================================
+  build-android:
+    name: Android (Gradle NDK ARM64-v8a)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: false
+
+      - name: Install Android NDK & CMake
+        run: |
+          ANDROID_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER=$(find "$ANDROID_ROOT/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort -V | tail -n 1)
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$ANDROID_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          echo "Using sdkmanager: $SDKMANAGER"
+          echo "$(dirname "$SDKMANAGER")" >> $GITHUB_PATH
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" --install "ndk;27.2.12479018" "cmake;3.30.3" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build Android APK
+        working-directory: src/android-project
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Verify APK Output
+        shell: bash
+        run: |
+          APK_PATH=$(find src/android-project/app/build/outputs/apk -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "Error: Android build succeeded but no APK output was generated!"
+            exit 1
+          fi
+          echo "Generated APK: $APK_PATH"
+          ls -lh "$APK_PATH"
