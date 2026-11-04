@@ -1,6 +1,44 @@
 #include "debug/gl_loader.hpp"
 
 #if defined(_WIN32)
+// Undefine the macro redirections from gl_loader.hpp so LOAD_GL can assign directly to g_gl member fields
+#undef glBindBuffer
+#undef glDeleteBuffers
+#undef glGenBuffers
+#undef glBufferData
+#undef glStencilOpSeparate
+#undef glAttachShader
+#undef glCompileShader
+#undef glCreateProgram
+#undef glCreateShader
+#undef glDeleteProgram
+#undef glDeleteShader
+#undef glEnableVertexAttribArray
+#undef glGetProgramiv
+#undef glGetProgramInfoLog
+#undef glGetShaderiv
+#undef glGetShaderInfoLog
+#undef glGetUniformLocation
+#undef glLinkProgram
+#undef glShaderSource
+#undef glUseProgram
+#undef glUniform1f
+#undef glUniform1i
+#undef glUniform2f
+#undef glUniform4f
+#undef glVertexAttribPointer
+#undef glBindVertexArray
+#undef glDeleteVertexArrays
+#undef glGenVertexArrays
+#undef glBlendEquation
+#undef glActiveTexture
+#undef glBindFramebuffer
+#undef glDeleteFramebuffers
+#undef glGenFramebuffers
+#undef glFramebufferTexture2D
+#undef glDrawArraysInstanced
+#undef glVertexAttribDivisor
+
 #include <SDL3/SDL_video.h>
 #include <iostream>
 
