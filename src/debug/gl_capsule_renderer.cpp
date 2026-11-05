@@ -111,13 +111,13 @@ bool GlCapsuleRenderer::Init() {
         "    fragColor = vColor * (edgeAlpha * tooth);\n"
         "}\n";
 
-    // Composite shader: fullscreen triangle sampling the per-stroke layer with a uniform opacity.
+    // Composite shader: fullscreen quad sampling the per-stroke layer with a uniform opacity.
     std::string cvSrc = std::string(glslHeader) +
+        "layout(location = 0) in vec2 aPos;\n"
         "out vec2 vUv;\n"
         "void main() {\n"
-        "    vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
-        "    vUv = p;\n"
-        "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
+        "    vUv = aPos * 0.5 + 0.5;\n"
+        "    gl_Position = vec4(aPos, 0.0, 1.0);\n"
         "}\n";
     std::string cfSrc = std::string(glslHeader) +
         "in vec2 vUv;\n"
@@ -137,7 +137,24 @@ bool GlCapsuleRenderer::Init() {
         glDeleteShader(cfs);
         m_locCompLayer   = glGetUniformLocation(m_compositeProgram, "uLayer");
         m_locCompOpacity = glGetUniformLocation(m_compositeProgram, "uOpacity");
-        glGenVertexArrays(1, &m_emptyVao);
+
+        static constexpr float kCompQuad[12] = {
+            -1.0f, -1.0f,
+             1.0f, -1.0f,
+             1.0f,  1.0f,
+            -1.0f, -1.0f,
+             1.0f,  1.0f,
+            -1.0f,  1.0f
+        };
+        glGenVertexArrays(1, &m_compositeVao);
+        glGenBuffers(1, &m_compositeQuadVbo);
+        glBindVertexArray(m_compositeVao);
+        glBindBuffer(GL_ARRAY_BUFFER, m_compositeQuadVbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(kCompQuad), kCompQuad, GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 
     GLuint vs = CompileShader(GL_VERTEX_SHADER, vSrc.c_str());
@@ -222,7 +239,8 @@ bool GlCapsuleRenderer::Init() {
 void GlCapsuleRenderer::Shutdown() {
     if (m_layerTex)         { glDeleteTextures(1, &m_layerTex);         m_layerTex = 0; }
     if (m_layerFbo)         { glDeleteFramebuffers(1, &m_layerFbo);     m_layerFbo = 0; }
-    if (m_emptyVao)         { glDeleteVertexArrays(1, &m_emptyVao);     m_emptyVao = 0; }
+    if (m_compositeQuadVbo) { glDeleteBuffers(1, &m_compositeQuadVbo);  m_compositeQuadVbo = 0; }
+    if (m_compositeVao)     { glDeleteVertexArrays(1, &m_compositeVao); m_compositeVao = 0; }
     if (m_compositeProgram) { glDeleteProgram(m_compositeProgram);      m_compositeProgram = 0; }
     m_layerW = m_layerH = 0;
     if (m_instanceVbo) { glDeleteBuffers(1, &m_instanceVbo); m_instanceVbo = 0; }
@@ -316,8 +334,8 @@ void GlCapsuleRenderer::Render(const CanvasTransform& transform, int vpWidth, in
     glBindTexture(GL_TEXTURE_2D, m_layerTex);
     glUniform1i(m_locCompLayer, 0);
     glUniform1f(m_locCompOpacity, brush.opacity);
-    glBindVertexArray(m_emptyVao);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(m_compositeVao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);

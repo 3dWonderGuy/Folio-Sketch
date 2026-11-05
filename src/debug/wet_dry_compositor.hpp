@@ -97,7 +97,8 @@ private:
     int          m_height     = 0;
 
     unsigned int m_blitProgram = 0;
-    unsigned int m_emptyVao    = 0;
+    unsigned int m_quadVbo     = 0;
+    unsigned int m_vao         = 0;
     int          m_locTexture  = -1;
     int          m_locTint     = -1;
 

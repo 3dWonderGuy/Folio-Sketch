@@ -38,12 +38,11 @@ bool WetDryCompositor::Init() {
 #endif
 
     std::string vSrc = std::string(glslHeader) +
+        "layout(location = 0) in vec2 aPos;\n"
         "out vec2 vUv;\n"
         "void main() {\n"
-        "    float x = -1.0 + float((gl_VertexID & 1) << 2);\n"
-        "    float y = -1.0 + float((gl_VertexID & 2) << 1);\n"
-        "    vUv = vec2(x * 0.5 + 0.5, y * 0.5 + 0.5);\n"
-        "    gl_Position = vec4(x, y, 0.0, 1.0);\n"
+        "    vUv = aPos * 0.5 + 0.5;\n"
+        "    gl_Position = vec4(aPos, 0.0, 1.0);\n"
         "}\n";
 
     std::string fSrc = std::string(glslHeader) +
@@ -85,12 +84,33 @@ bool WetDryCompositor::Init() {
     m_locTexture = glGetUniformLocation(m_blitProgram, "uTexture");
     m_locTint    = glGetUniformLocation(m_blitProgram, "uTint");
 
-    glGenVertexArrays(1, &m_emptyVao);
+    // Static fullscreen quad [-1.0, 1.0]
+    static constexpr float kFullscreenQuad[12] = {
+        -1.0f, -1.0f,
+         1.0f, -1.0f,
+         1.0f,  1.0f,
+        -1.0f, -1.0f,
+         1.0f,  1.0f,
+        -1.0f,  1.0f
+    };
+
+    glGenVertexArrays(1, &m_vao);
+    glGenBuffers(1, &m_quadVbo);
+
+    glBindVertexArray(m_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_quadVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(kFullscreenQuad), kFullscreenQuad, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
     return true;
 }
 
 void WetDryCompositor::Shutdown() {
-    if (m_emptyVao)    { glDeleteVertexArrays(1, &m_emptyVao); m_emptyVao = 0; }
+    if (m_quadVbo)     { glDeleteBuffers(1, &m_quadVbo);       m_quadVbo = 0; }
+    if (m_vao)         { glDeleteVertexArrays(1, &m_vao);       m_vao = 0; }
     if (m_blitProgram) { glDeleteProgram(m_blitProgram);       m_blitProgram = 0; }
     if (m_dryTex)      { glDeleteTextures(1, &m_dryTex);       m_dryTex = 0; }
     if (m_dryFbo)      { glDeleteFramebuffers(1, &m_dryFbo);   m_dryFbo = 0; }
@@ -180,8 +200,8 @@ void WetDryCompositor::PresentDry(int vpWidth, int vpHeight, bool debugTintSeams
         glUniform4f(m_locTint, 1.0f, 1.0f, 1.0f, 1.0f);
     }
 
-    glBindVertexArray(m_emptyVao);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(m_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);

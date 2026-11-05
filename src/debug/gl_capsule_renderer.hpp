@@ -103,7 +103,8 @@ private:
                        const CapsuleBrush& brush) const;
 
     unsigned int m_compositeProgram = 0;
-    unsigned int m_emptyVao   = 0;
+    unsigned int m_compositeQuadVbo = 0;
+    unsigned int m_compositeVao     = 0;
     unsigned int m_layerFbo   = 0;
     unsigned int m_layerTex   = 0;
     int          m_layerW     = 0;
