@@ -8,8 +8,13 @@ on:
         required: true
         default: 'main'
         type: string
+      tag_name:
+        description: 'Release tag name (leave empty for auto-generated nightly-YYYYMMDD-HHMM or inspector-preview)'
+        required: false
+        default: ''
+        type: string
       publish_release:
-        description: 'Publish artifacts to GitHub Pre-Release (inspector-preview)'
+        description: 'Publish artifacts to GitHub Release'
         required: false
         default: true
         type: boolean
@@ -232,14 +237,21 @@ jobs:
         id: release_meta
         shell: bash
         run: |
-          echo "SHA=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          SHA=$(git rev-parse HEAD)
           SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "SHA=${SHA}" >> $GITHUB_OUTPUT
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+
+          INPUT_TAG="${{ inputs.tag_name }}"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG_NAME="$INPUT_TAG"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG_NAME="${GITHUB_REF#refs/tags/}"
           else
-            TAG_NAME="inspector-preview"
+            # Default to a unique timestamped tag to prevent GitHub Ruleset/tag immutability collisions
+            TAG_NAME="preview-$(date +'%Y%m%d-%H%M%S')"
           fi
+
           echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_OUTPUT
           mkdir -p release-artifacts
 
@@ -261,24 +273,12 @@ jobs:
           name: FolioInkInspector-Android-APK
           path: release-artifacts
 
-      - name: Prune Previous Rolling Release Assets
-        if: steps.release_meta.outputs.TAG_NAME == 'inspector-preview'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          OLD_ASSETS=$(gh release view inspector-preview --json assets --jq '.assets[].name' 2>/dev/null || true)
-          if [ -n "$OLD_ASSETS" ]; then
-            for asset in $OLD_ASSETS; do
-              gh release delete-asset inspector-preview "$asset" --yes 2>/dev/null || true
-            done
-          fi
-
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_meta.outputs.TAG_NAME }}
-          name: "Folio Ink Inspector Build (${{ steps.release_meta.outputs.SHORT_SHA }})"
+          target_commitish: ${{ steps.release_meta.outputs.SHA }}
+          name: "Folio Ink Inspector Build (${{ steps.release_meta.outputs.TAG_NAME }})"
           body: |
             ## Folio-Sketch Inking Diagnostic Playground & Inspector
             - **Branch / Ref:** `${{ inputs.branch || github.ref_name }}`
@@ -289,6 +289,7 @@ jobs:
             - **Windows (x64):** `FolioInkInspector-Windows-x86_64.zip`
             - **Android (ARM64-v8a):** `FolioInkInspector-Android-arm64-v8a.apk`
           prerelease: true
+          make_latest: false
           files: release-artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
