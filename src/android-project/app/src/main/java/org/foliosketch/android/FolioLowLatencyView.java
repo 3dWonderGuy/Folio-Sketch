@@ -9,7 +9,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.graphics.lowlatency.BufferInfo;
 import androidx.graphics.lowlatency.GLFrontBufferedRenderer;
-import androidx.graphics.opengl.EGLManager;
+import androidx.graphics.opengl.egl.EGLManager;
 import java.util.Collection;
 
 /**
@@ -32,24 +32,28 @@ public class FolioLowLatencyView extends SurfaceView {
             @Override
             public void onDrawFrontBufferedLayer(
                 @NonNull EGLManager eglManager,
+                int width,
+                int height,
                 @NonNull BufferInfo bufferInfo,
                 @NonNull float[] transform,
                 @NonNull Object param
             ) {
                 if (mEngineHandle != 0) {
-                    FolioNativeBridge.nativeRenderWet(mEngineHandle, bufferInfo.getWidth(), bufferInfo.getHeight());
+                    FolioNativeBridge.nativeRenderWet(mEngineHandle, width, height);
                 }
             }
 
             @Override
-            public void onDrawMultiDoubleBufferedLayer(
+            public void onDrawMultiBufferedLayer(
                 @NonNull EGLManager eglManager,
+                int width,
+                int height,
                 @NonNull BufferInfo bufferInfo,
                 @NonNull float[] transform,
-                @NonNull Collection<Object> params
+                @NonNull Collection<? extends Object> params
             ) {
                 if (mEngineHandle != 0) {
-                    FolioNativeBridge.nativeRenderDry(mEngineHandle, bufferInfo.getWidth(), bufferInfo.getHeight());
+                    FolioNativeBridge.nativeRenderDry(mEngineHandle, width, height);
                 }
             }
         };

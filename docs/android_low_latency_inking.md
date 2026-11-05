@@ -204,7 +204,7 @@ import android.opengl.GLES30
 import android.view.SurfaceView
 import androidx.graphics.lowlatency.BufferInfo
 import androidx.graphics.lowlatency.GLFrontBufferedRenderer
-import androidx.graphics.opengl.EGLManager
+import androidx.graphics.opengl.egl.EGLManager
 
 /**
  * Manages dual-target front-buffered and multi-buffered rendering for Folio-Sketch.
@@ -220,28 +220,32 @@ class FolioLowLatencyRenderer(
          */
         override fun onDrawFrontBufferedLayer(
             eglManager: EGLManager,
+            width: Int,
+            height: Int,
             bufferInfo: BufferInfo,
             transform: FloatArray,
             param: Any
         ) {
-            GLES30.glViewport(0, 0, bufferInfo.width, bufferInfo.height)
+            GLES30.glViewport(0, 0, width, height)
             // Render active stroke directly to front buffer via Folio GPU Capsule SDF
-            nativeRenderWetStroke(nativeEngineHandle, bufferInfo.width, bufferInfo.height)
+            nativeRenderWetStroke(nativeEngineHandle, width, height)
         }
 
         /**
          * Invoked when a stroke completes (pen-up) or the document canvas is panned/zoomed.
          * Renders the persistent background document FBO + newly committed strokes.
          */
-        override fun onDrawMultiDoubleBufferedLayer(
+        override fun onDrawMultiBufferedLayer(
             eglManager: EGLManager,
+            width: Int,
+            height: Int,
             bufferInfo: BufferInfo,
             transform: FloatArray,
             params: Collection<Any>
         ) {
-            GLES30.glViewport(0, 0, bufferInfo.width, bufferInfo.height)
+            GLES30.glViewport(0, 0, width, height)
             // Render persistent Dry document FBO
-            nativeRenderDryDocument(nativeEngineHandle, bufferInfo.width, bufferInfo.height)
+            nativeRenderDryDocument(nativeEngineHandle, width, height)
         }
     }
 
