@@ -1,130 +1,0 @@
-C/C++ Structured Log?
-=
-;/home/odysseus/Documents/GitHub/Folio-Sketch/CMakeLists.txtC
-A
-?com.android.build.gradle.internal.cxx.io.EncodedFileFingerPrint	Çº÷š4äg ×µËöš4N
-L
-J/home/odysseus/Documents/GitHub/Folio-Sketch/folio_backends/CMakeLists.txt	Çº÷š4Ê Šúõš4„
-
-/home/odysseus/Documents/GitHub/Folio-Sketch/src/android-project/app/.cxx/Debug/w6c1x4r2/arm64-v8a/additional_project_files.txt	Çº÷š4®Î ÜùËöš4€
-~
-|/home/odysseus/Documents/GitHub/Folio-Sketch/src/android-project/app/.cxx/Debug/w6c1x4r2/arm64-v8a/android_gradle_build.json	Çº÷š4úÜ åùËöš4‡
-„
-/home/odysseus/Documents/GitHub/Folio-Sketch/src/android-project/app/.cxx/Debug/w6c1x4r2/arm64-v8a/android_gradle_build_mini.json	Çº÷š4Ô ‘üËöš4r
-p
-n/home/odysseus/Documents/GitHub/Folio-Sketch/src/android-project/app/.cxx/Debug/w6c1x4r2/arm64-v8a/build.ninja	Çº÷š4Â×S ô÷Ëöš4v
-t
-r/home/odysseus/Documents/GitHub/Folio-Sketch/src/android-project/app/.cxx/Debug/w6c1x4r2/arm64-v8a/build.ninja.txt	Çº÷š4{
-y
-w/home/odysseus/Documents/GitHub/Folio-Sketch/src/android-project/app/.cxx/Debug/w6c1x4r2/arm64-v8a/build_file_index.txt	Çº÷š4	ü$ §ºöš4|
-z
-x/home/odysseus/Documents/GitHub/Folio-Sketch/src/android-project/app/.cxx/Debug/w6c1x4r2/arm64-v8a/compile_commands.json	Çº÷š4
-Ó—5 ò÷Ëöš4€
-~
-|/home/odysseus/Documents/GitHub/Folio-Sketch/src/android-project/app/.cxx/Debug/w6c1x4r2/arm64-v8a/compile_commands.json.bin	Çº÷š4öö ò÷Ëöš4ˆ
-…
-‚/home/odysseus/Documents/GitHub/Folio-Sketch/src/android-project/app/.cxx/Debug/w6c1x4r2/arm64-v8a/metadata_generation_command.txt	Çº÷š4»	 ¥ºöš4y
-w
-u/home/odysseus/Documents/GitHub/Folio-Sketch/src/android-project/app/.cxx/Debug/w6c1x4r2/arm64-v8a/prefab_config.json	Çº÷š4( ¦ºöš4~
-|
-z/home/odysseus/Documents/GitHub/Folio-Sketch/src/android-project/app/.cxx/Debug/w6c1x4r2/arm64-v8a/symbol_folder_index.txt	Çº÷š4y ¦ºöš4O
-M
-K/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/CMakeLists.txt	Çº÷š4Á·	 üÕØ¡š4U
-S
-Q/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/3rdparty.cmake	Çº÷š4 ıÕØ¡š4W
-U
-S/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/FindLibUSB.cmake	Çº÷š4… ıÕØ¡š4f
-d
-b/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/GetGitRevisionDescription.cmake	Çº÷š4áN ıÕØ¡š4i
-g
-e/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/GetGitRevisionDescription.cmake.in	Çº÷š4š ıÕØ¡š4\
-Z
-X/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/PreseedDOSCache.cmake	Çº÷š4º  şÕØ¡š4c
-a
-_/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/PreseedEmscriptenCache.cmake	Çº÷š4—š şÕØ¡š4^
-\
-Z/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/PreseedHaikuCache.cmake	Çº÷š4Ğª şÕØ¡š4]
-[
-Y/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/PreseedMSVCCache.cmake	Çº÷š4ª şÕØ¡š4c
-a
-_/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/PreseedNokiaNGageCache.cmake	Çº÷š4é” şÕØ¡š4Z
-X
-V/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/SDL3Config.cmake.in	Çº÷š4ä ÿÕØ¡š4S
-Q
-O/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/macros.cmake	Çº÷š4Ü‹ ÿÕØ¡š4V
-T
-R/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/sdlchecks.cmake	Çº÷š4˜œ €ÖØ¡š4X
-V
-T/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/sdlcommands.cmake	Çº÷š4Ğ €ÖØ¡š4Y
-W
-U/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/sdlcompilers.cmake	Çº÷š4¡D €ÖØ¡š4S
-Q
-O/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/sdlcpu.cmake	Çº÷š4Â+ ÖØ¡š4X
-V
-T/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/sdlmanpages.cmake	Çº÷š4— ÖØ¡š4X
-V
-T/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/cmake/sdlplatform.cmake	Çº÷š4 ï ÖØ¡š4n
-l
-j/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/include/build_config/SDL_build_config.h.cmake	Çº÷š4!  œÖØ¡š4j
-h
-f/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/SDL/include/build_config/SDL_revision.h.cmake	Çº÷š4"…
- ÖØ¡š4^
-\
-Z/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/ink-stroke-modeler/CMakeLists.txt	Çº÷š4#Ÿ& ›ë‚ç”4o
-m
-k/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/ink-stroke-modeler/cmake/InkBazelEquivalents.cmake	Çº÷š4$ ›ë‚ç”4q
-o
-m/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/ink-stroke-modeler/ink_stroke_modeler/CMakeLists.txt	Çº÷š4%› œë‚ç”4z
-x
-v/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/ink-stroke-modeler/ink_stroke_modeler/internal/CMakeLists.txt	Çº÷š4&â œë‚ç”4‡
-„
-/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/ink-stroke-modeler/ink_stroke_modeler/internal/prediction/CMakeLists.txt	Çº÷š4'Â œë‚ç”4•
-’
-/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/ink-stroke-modeler/ink_stroke_modeler/internal/prediction/kalman_filter/CMakeLists.txt	Çº÷š4(— œë‚ç”4S
-Q
-O/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/CMakeLists.txt	Çº÷š4)¸P ´şÛ³4X
-V
-T/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/CMakeLists.txt	Çº÷š4*…
- µşÛ³4b
-`
-^/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/algorithm/CMakeLists.txt	Çº÷š4+» µşÛ³4]
-[
-Y/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/base/CMakeLists.txt	Çº÷š4,òu ¶şÛ³4`
-^
-\/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/cleanup/CMakeLists.txt	Çº÷š4-¹	 ¾şÛ³4b
-`
-^/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/container/CMakeLists.txt	Çº÷š4.¡² ¾şÛ³4\
-Z
-X/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/crc/CMakeLists.txt	Çº÷š4/Ë ÉşÛ³4b
-`
-^/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/debugging/CMakeLists.txt	Çº÷š40¦< ËşÛ³4^
-\
-Z/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/flags/CMakeLists.txt	Çº÷š41áC ÏşÛ³4c
-a
-_/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/functional/CMakeLists.txt	Çº÷š42 ÓşÛ³4]
-[
-Y/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/hash/CMakeLists.txt	Çº÷š43ä ÔşÛ³4\
-Z
-X/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/log/CMakeLists.txt	Çº÷š44á¦ ÖşÛ³4_
-]
-[/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/memory/CMakeLists.txt	Çº÷š45‰ ÜşÛ³4]
-[
-Y/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/meta/CMakeLists.txt	Çº÷š46Ú ÜşÛ³4`
-^
-\/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/numeric/CMakeLists.txt	Çº÷š47ö İşÛ³4b
-`
-^/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/profiling/CMakeLists.txt	Çº÷š48³ ŞşÛ³4_
-]
-[/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/random/CMakeLists.txt	Çº÷š49áÆ ßşÛ³4_
-]
-[/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/status/CMakeLists.txt	Çº÷š4:ˆ# çşÛ³4`
-^
-\/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/strings/CMakeLists.txt	Çº÷š4;‹µ éşÛ³4h
-f
-d/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/synchronization/CMakeLists.txt	Çº÷š4<À* øşÛ³4]
-[
-Y/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/time/CMakeLists.txt	Çº÷š4=è# ûşÛ³4^
-\
-Z/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/types/CMakeLists.txt	Çº÷š4>Å" ÿÛ³4`
-^
-\/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/utility/CMakeLists.txt	Çº÷š4?û ’ÿÛ³4

@@ -231,16 +231,10 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
     endif()
 
     set(FOLIO_INSPECTOR_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/main_inspector.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/main.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/input_manager.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/layer_manager.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspector/gl_loader.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/gl_shape_renderer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/raw_sensor_layer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/modeler_inspector.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/width_inspector.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/geometry_inspector.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/stroke_scrubber.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/digitizer_trace_replayer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/wet_dry_compositor.cpp"
     )
 
     if(ANDROID)
@@ -263,6 +257,7 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
         "${CMAKE_CURRENT_SOURCE_DIR}/folio_backends"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspector"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0"
     )
     if(ANDROID)
         target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch -Wl,--whole-archive folio_backends -Wl,--no-whole-archive SDL3::SDL3 imgui)

@@ -1,1 +1,0 @@
-/home/odysseus/Documents/GitHub/Folio-Sketch/src/android-project/app/build/intermediates/cxx/Debug/506o5n1j/obj/arm64-v8a

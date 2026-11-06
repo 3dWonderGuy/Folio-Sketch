@@ -35,6 +35,7 @@ target_include_directories(folio_backends
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../src"
         "${CMAKE_CURRENT_SOURCE_DIR}/../inspector"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../inspectorV2.0"
 )
 
 target_link_libraries(folio_backends

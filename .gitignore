@@ -6,9 +6,22 @@ lib/
 out/
 .cache/
 
+# Android Studio & Gradle build artifacts
+.gradle/
+.cxx/
+*.apk
+*.aab
+*.ap_
+local.properties
+**/app/build/
+**/app/.cxx/
+**/build/
+**/.gradle/
+
 # IDE & Editor files
 .vscode/
 .idea/
+*.iml
 *.swp
 *~
 *.user
