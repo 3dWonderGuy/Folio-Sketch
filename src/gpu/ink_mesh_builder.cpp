@@ -27,17 +27,29 @@ void CapsuleBuilder::BuildCapsuleInstances(std::span<const StrokePoint> points,
             CapsuleVec2(x0, y0),
             CapsuleVec2(x0, y0),
             CapsuleVec2(r0, r0),
-            colorRgba
+            colorRgba,
+            1.0f
         });
         return;
     }
 
+    AppendCapsuleInstances(points, 0, colorRgba, outInstances);
+}
+
+void CapsuleBuilder::AppendCapsuleInstances(std::span<const StrokePoint> points,
+                                            size_t fromSegment,
+                                            uint32_t colorRgba,
+                                            std::vector<CapsuleInstance>& outInstances) {
+    const size_t n = points.size();
+    if (n < 2) return;
+
     const size_t segCount = n - 1;
+    if (fromSegment >= segCount) return;
     outInstances.resize(segCount);
     const StrokePoint* src = points.data();
     CapsuleInstance* dst = outInstances.data();
 
-    for (size_t i = 0; i < segCount; ++i) {
+    for (size_t i = fromSegment; i < segCount; ++i) {
         const StrokePoint& pA = src[i];
         const StrokePoint& pB = src[i + 1];
         dst[i].pointA.x  = static_cast<float>(pA.x);
@@ -47,6 +59,7 @@ void CapsuleBuilder::BuildCapsuleInstances(std::span<const StrokePoint> points,
         dst[i].radii.x   = pA.r > 0.0f ? pA.r : 0.0f;
         dst[i].radii.y   = pB.r > 0.0f ? pB.r : 0.0f;
         dst[i].colorRgba = colorRgba;
+        dst[i].alphaFade = 1.0f;
     }
 }
 

@@ -1,4 +1,4 @@
-#include "debug/stroke_scrubber.hpp"
+#include "inspector/stroke_scrubber.hpp"
 #include "folio_sketch/engine/ink_engine.hpp"
 #include "folio_sketch/vector/ink_generator.hpp"
 #include <algorithm>
@@ -22,7 +22,7 @@ void StrokeScrubber::LoadRepro114(StrokeStyle& style,
                                   std::vector<RawInputSample>& outRawSamples,
                                   CanvasTransform* optionalViewportToCenter) {
     static const std::vector<StrokePoint> kRepro114Points = {
-#include "debug/repro114.inc"
+#include "inspector/repro114.inc"
     };
 
     m_frozenModeledPoints = kRepro114Points;

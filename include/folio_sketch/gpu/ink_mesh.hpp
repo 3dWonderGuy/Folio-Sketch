@@ -10,6 +10,7 @@
 #include <vector>
 #include <span>
 #include <algorithm>
+#include <type_traits>
 #include "folio_sketch/core/ink_stroke_data.hpp"
 
 namespace Folio {
@@ -61,7 +62,10 @@ struct CapsuleInstance {
     CapsuleVec2 pointB{};                ///< Segment end in world coordinates (mm)
     CapsuleVec2 radii{};                 ///< (radiusA, radiusB) for smooth tapering
     uint32_t    colorRgba = 0xFF000000u; ///< Packed 32-bit premultiplied RGBA
+    float       alphaFade = 1.0f;        ///< Per-instance alpha multiplier (distance-attenuated prediction tail)
 };
+static_assert(sizeof(CapsuleInstance) == 32, "CapsuleInstance must stay a tightly packed 32-byte POD");
+static_assert(std::is_trivially_copyable_v<CapsuleInstance>, "CapsuleInstance must be a plain POD");
 
 // =============================================================================
 // 3. GPU SHAPE SDF INSTANCE TYPES
@@ -206,6 +210,17 @@ public:
     static void BuildCapsuleInstances(std::span<const StrokePoint> points,
                                       uint32_t colorRgba,
                                       std::vector<CapsuleInstance>& outInstances);
+
+    /**
+     * @brief Incremental variant: appends only the segments [fromSegment, points.size() - 1).
+     *
+     * `outInstances` must already hold exactly `fromSegment` valid segment instances (or be empty
+     * when fromSegment == 0). Used by the live stroke so each new modeled point costs O(1).
+     */
+    static void AppendCapsuleInstances(std::span<const StrokePoint> points,
+                                       size_t fromSegment,
+                                       uint32_t colorRgba,
+                                       std::vector<CapsuleInstance>& outInstances);
 };
 
 using InkMeshBuilder = CapsuleBuilder;

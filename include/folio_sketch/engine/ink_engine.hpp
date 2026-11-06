@@ -21,6 +21,7 @@
 #include "folio_sketch/vector/ink_generator.hpp"
 #include "folio_sketch/core/ink_stroke_data.hpp"
 #include "folio_sketch/core/ink_config.hpp"
+#include "folio_sketch/core/raw_input.hpp"
 #include "folio_sketch/gpu/ink_mesh.hpp"
 
 namespace ink::stroke_model {
@@ -92,6 +93,27 @@ public:
                      float tiltX = 0.0f, float tiltY = 0.0f);
 
     /**
+     * @brief Packet-oriented entry point: begins a stroke from a raw digitizer packet.
+     */
+    void BeginStroke(const RawInputSample& sample, const StrokeStyle& style, float zoomScale = 1.0f) {
+        BeginStroke(sample.x, sample.y, sample.pressure, sample.TimeSec(), style, zoomScale,
+                    sample.tiltX, sample.tiltY);
+    }
+
+    /**
+     * @brief Packet-oriented entry point: ingests a whole batch of raw digitizer packets
+     *        (e.g. an Android MotionEvent's historical samples plus its current sample).
+     *
+     * Every sample is fed to the modeler in order, so no hardware sample is dropped. Capsule
+     * and prediction geometry is rebuilt lazily once per batch, not once per sample.
+     */
+    void IngestSamples(std::span<const RawInputSample> samples) {
+        for (const RawInputSample& s : samples) {
+            AppendPoint(s.x, s.y, s.pressure, s.TimeSec(), s.tiltX, s.tiltY);
+        }
+    }
+
+    /**
      * @brief Finalizes the active stroke gesture upon pointer lift.
      * @return FinishedStrokeData The completed stroke package ready for layer commitment.
      */
@@ -111,6 +133,10 @@ public:
     [[nodiscard]] const std::vector<StrokePoint>& GetPredictedPoints() const noexcept;
     [[nodiscard]] const std::vector<CapsuleInstance>& GetLiveCapsules() const noexcept;
     [[nodiscard]] const std::vector<CapsuleInstance>& GetPredictedCapsules() const noexcept;
+
+    /// Zero-copy POD views handed straight to a GPU backend (see folio_backends/).
+    [[nodiscard]] std::span<const CapsuleInstance> LiveCapsuleSpan() const noexcept { return GetLiveCapsules(); }
+    [[nodiscard]] std::span<const CapsuleInstance> PredictedCapsuleSpan() const noexcept { return GetPredictedCapsules(); }
     [[nodiscard]] const StrokeStyle& GetActiveStyle() const noexcept { return m_activeStyle; }
 
     // -------------------------------------------------------------------------
@@ -178,6 +204,7 @@ private:
 
     mutable std::vector<CapsuleInstance> m_liveCapsules;
     mutable std::vector<CapsuleInstance> m_predictedCapsules;
+    mutable size_t m_validLiveSegments = 0; ///< Leading live capsules that are final (incremental build cursor)
     mutable bool m_capsulesDirty = false;
     mutable bool m_predictionDirty = false;
 

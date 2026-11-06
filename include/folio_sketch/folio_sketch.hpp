@@ -1,6 +1,7 @@
 #pragma once
 
 // 1. Core Foundations & Data Types
+#include "folio_sketch/core/raw_input.hpp"
 #include "folio_sketch/core/ink_stroke_data.hpp"
 #include "folio_sketch/core/ink_config.hpp"
 #include "folio_sketch/core/stroke_collision.hpp"

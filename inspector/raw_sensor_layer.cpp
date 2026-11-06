@@ -1,4 +1,4 @@
-#include "debug/raw_sensor_layer.hpp"
+#include "inspector/raw_sensor_layer.hpp"
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -86,6 +86,9 @@ bool RawSensorHUD::HandleEventBatch(const SDL_Event& event,
             .x = m_currentX,
             .y = m_currentY,
             .pressure = m_currentPressure,
+            .tiltX = m_tiltXRad,
+            .tiltY = m_tiltYRad,
+            .timeNs = static_cast<int64_t>(nowSec * 1e9),
             .tiltRad = m_currentTiltRad,
             .timestampSec = nowSec
         };
@@ -111,6 +114,9 @@ bool RawSensorHUD::HandleEventBatch(const SDL_Event& event,
                 .x = m_currentX,
                 .y = m_currentY,
                 .pressure = m_currentPressure,
+                .tiltX = m_tiltXRad,
+                .tiltY = m_tiltYRad,
+                .timeNs = static_cast<int64_t>(nowSec * 1e9),
                 .tiltRad = m_currentTiltRad,
                 .timestampSec = nowSec
             };
@@ -148,6 +154,9 @@ bool RawSensorHUD::HandleEventBatch(const SDL_Event& event,
                         .x = subX,
                         .y = subY,
                         .pressure = subP,
+                        .tiltX = m_tiltXRad,
+                        .tiltY = m_tiltYRad,
+                        .timeNs = static_cast<int64_t>(subTime * 1e9),
                         .tiltRad = m_currentTiltRad,
                         .timestampSec = subTime
                     };
@@ -182,6 +191,9 @@ bool RawSensorHUD::HandleEventBatch(const SDL_Event& event,
                 .x = m_currentX,
                 .y = m_currentY,
                 .pressure = 0.0f,
+                .tiltX = m_tiltXRad,
+                .tiltY = m_tiltYRad,
+                .timeNs = static_cast<int64_t>(nowSec * 1e9),
                 .tiltRad = m_currentTiltRad,
                 .timestampSec = nowSec
             };
@@ -213,6 +225,9 @@ bool RawSensorHUD::HandleEventBatch(const SDL_Event& event,
                 .x = m_currentX,
                 .y = m_currentY,
                 .pressure = m_currentPressure,
+                .tiltX = 0.0f,
+                .tiltY = 0.0f,
+                .timeNs = static_cast<int64_t>(nowSec * 1e9),
                 .tiltRad = m_currentTiltRad,
                 .timestampSec = nowSec
             };
@@ -239,6 +254,9 @@ bool RawSensorHUD::HandleEventBatch(const SDL_Event& event,
                     .x = m_currentX,
                     .y = m_currentY,
                     .pressure = m_currentPressure,
+                    .tiltX = 0.0f,
+                    .tiltY = 0.0f,
+                    .timeNs = static_cast<int64_t>(nowSec * 1e9),
                     .tiltRad = m_currentTiltRad,
                     .timestampSec = nowSec
                 };
@@ -274,6 +292,9 @@ bool RawSensorHUD::HandleEventBatch(const SDL_Event& event,
                             .x = subX,
                             .y = subY,
                             .pressure = subP,
+                            .tiltX = 0.0f,
+                            .tiltY = 0.0f,
+                            .timeNs = static_cast<int64_t>(subTime * 1e9),
                             .tiltRad = m_currentTiltRad,
                             .timestampSec = subTime
                         };
@@ -308,6 +329,9 @@ bool RawSensorHUD::HandleEventBatch(const SDL_Event& event,
                     .x = m_currentX,
                     .y = m_currentY,
                     .pressure = 0.0f,
+                    .tiltX = 0.0f,
+                    .tiltY = 0.0f,
+                    .timeNs = static_cast<int64_t>(nowSec * 1e9),
                     .tiltRad = m_currentTiltRad,
                     .timestampSec = nowSec
                 };

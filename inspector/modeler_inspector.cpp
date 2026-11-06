@@ -1,4 +1,4 @@
-#include "debug/modeler_inspector.hpp"
+#include "inspector/modeler_inspector.hpp"
 #include <cmath>
 #include <algorithm>
 

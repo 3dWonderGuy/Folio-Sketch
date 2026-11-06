@@ -14,7 +14,7 @@
 #include "folio_sketch/geometry/shape_recognizer.hpp"
 #include "folio_sketch/gpu/ink_mesh.hpp"
 #include "folio_sketch/vector/ink_path.hpp"
-#include "debug/raw_sensor_layer.hpp"
+#include "inspector/raw_sensor_layer.hpp"
 
 namespace Folio::Debug {
 

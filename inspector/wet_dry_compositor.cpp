@@ -5,8 +5,8 @@
  * =========================================================================================
  */
 
-#include "debug/wet_dry_compositor.hpp"
-#include "debug/gl_loader.hpp"
+#include "inspector/wet_dry_compositor.hpp"
+#include "inspector/gl_loader.hpp"
 #include <iostream>
 #include <string>
 #include <algorithm>
@@ -225,16 +225,17 @@ void WetDryCompositor::RenderWet(GlCapsuleRenderer& renderer,
         wetColor = (a << 24) | 0x0033B4FF; // Orange
     }
 
-    renderer.RenderStroke(livePoints, wetColor, transform, vpWidth, vpHeight, brush);
+    // Single-pass rendering mode for live wet stroke: bypasses layer-FBO self-intersection clears
+    renderer.RenderStroke(livePoints, wetColor, transform, vpWidth, vpHeight, brush, true);
 
-    // Forward Kalman predicted tip
+    // Forward Kalman predicted tip (rendered single-pass with distance alpha fading)
     if (!predictedPoints.empty()) {
         uint32_t predColor = wetColor;
         if (debugTintSeams || m_debugSeamHighlight) {
             uint32_t a = (color >> 24) & 0xFF;
             predColor = (a << 24) | 0x00FF3080; // Bright magenta/pink for predicted tip
         }
-        renderer.RenderStroke(predictedPoints, predColor, transform, vpWidth, vpHeight, brush);
+        renderer.RenderStroke(predictedPoints, predColor, transform, vpWidth, vpHeight, brush, true);
     }
 }
 

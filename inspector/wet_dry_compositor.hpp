@@ -15,7 +15,7 @@
 #include <span>
 #include <vector>
 #include "folio_sketch/core/ink_stroke_data.hpp"
-#include "debug/gl_capsule_renderer.hpp"
+#include "inspector/gl_capsule_renderer.hpp"
 
 namespace Folio::Debug {
 

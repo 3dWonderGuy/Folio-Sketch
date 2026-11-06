@@ -17,7 +17,7 @@
  *   stroke_scrubber, and the OpenGL/GLES3 renderers in this file.
  */
 
-#include "debug/gl_loader.hpp"
+#include "inspector/gl_loader.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
@@ -38,15 +38,16 @@
 #include "folio_sketch/folio_sketch.hpp"
 #include "geometry/ink_stroke_filter.hpp"
 #include "geometry/ink_geometry_utils.hpp"
-#include "debug/raw_sensor_layer.hpp"
-#include "debug/modeler_inspector.hpp"
-#include "debug/width_inspector.hpp"
-#include "debug/geometry_inspector.hpp"
-#include "debug/stroke_scrubber.hpp"
-#include "debug/gl_capsule_renderer.hpp"
-#include "debug/gl_shape_renderer.hpp"
-#include "debug/digitizer_trace_replayer.hpp"
-#include "debug/wet_dry_compositor.hpp"
+#include "inspector/raw_sensor_layer.hpp"
+#include "inspector/modeler_inspector.hpp"
+#include "inspector/width_inspector.hpp"
+#include "inspector/geometry_inspector.hpp"
+#include "inspector/stroke_scrubber.hpp"
+#include "inspector/gl_capsule_renderer.hpp"
+#include "inspector/gl_shape_renderer.hpp"
+#include "inspector/digitizer_trace_replayer.hpp"
+#include "inspector/wet_dry_compositor.hpp"
+#include "folio_backends/android/android_frontbuffer.hpp"
 
 using namespace Folio;
 using namespace Folio::Debug;
@@ -827,6 +828,20 @@ int main(int argc, char* argv[]) {
         std::cerr << "[folio_ink_inspector] Failed to initialize OpenGL functions via SDL_GL_GetProcAddress!" << std::endl;
     }
 
+#if defined(__ANDROID__)
+    Folio::Backends::AndroidFrontBuffer androidFrontBuffer;
+    ANativeWindow* nativeWindow = static_cast<ANativeWindow*>(
+        SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr));
+    bool frontBufferActive = false;
+    if (nativeWindow) {
+        frontBufferActive = androidFrontBuffer.Init(nativeWindow);
+        if (frontBufferActive) {
+            std::cout << "[folio_ink_inspector] AndroidFrontBuffer direct scanout active ("
+                      << androidFrontBuffer.GetWidth() << "x" << androidFrontBuffer.GetHeight() << ")" << std::endl;
+        }
+    }
+#endif
+
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -977,6 +992,12 @@ int main(int argc, char* argv[]) {
         } else {
             dryNeedsRedraw = true;
         }
+
+#if defined(__ANDROID__)
+        if (frontBufferActive) {
+            androidFrontBuffer.Clear();
+        }
+#endif
 
         strokes.push_back(std::move(s));
     };
@@ -1148,18 +1169,15 @@ int main(int argc, char* argv[]) {
                     } else if (strokeEvt == 2) {
                         // Pen/Mouse Motion while down -> Ingest multi-rate batch (1x, 2x, 4x, 8x burst)
                         auto startCpu = std::chrono::high_resolution_clock::now();
-                        for (const auto& sample : sampleBatch) {
-                            engine.AppendPoint(sample.x, sample.y, sample.pressure, sample.timestampSec,
-                                               rawSensorHud.GetCurrentTiltXRad(),
-                                               rawSensorHud.GetCurrentTiltYRad());
-                            // Any movement beyond the dwell threshold restarts the hold timer
-                            if (!snapLatched) {
-                                const float thr = engine.GetConfig().shapeSnapping.movementThresholdMm;
-                                if (std::hypot(sample.x - holdAnchorX, sample.y - holdAnchorY) > thr) {
-                                    holdAnchorX  = sample.x;
-                                    holdAnchorY  = sample.y;
-                                    holdStartSec = sample.timestampSec;
-                                }
+                        engine.IngestSamples(sampleBatch);
+                        // Any movement beyond the dwell threshold restarts the hold timer
+                        if (!snapLatched && !sampleBatch.empty()) {
+                            const auto& sample = sampleBatch.back();
+                            const float thr = engine.GetConfig().shapeSnapping.movementThresholdMm;
+                            if (std::hypot(sample.x - holdAnchorX, sample.y - holdAnchorY) > thr) {
+                                holdAnchorX  = sample.x;
+                                holdAnchorY  = sample.y;
+                                holdStartSec = sample.timestampSec;
                             }
                         }
                         auto endCpu = std::chrono::high_resolution_clock::now();
@@ -2001,9 +2019,23 @@ int main(int argc, char* argv[]) {
             if (engine.IsStrokeActive()) {
                 const StrokeStyle&  st = curStyle();
                 const CapsuleBrush& br = curBrush();
-                wetDryCompositor.RenderWet(glCapsuleRenderer, engine.GetLiveModeledPoints(), predictedPts,
-                                           PackPremultipliedGpuColor(st.color), viewport, winWidth, winHeight,
-                                           br, debugSeamHighlight);
+#if defined(__ANDROID__)
+                if (frontBufferActive) {
+                    int fbW = 0, fbH = 0;
+                    if (androidFrontBuffer.BeginWetDraw(&fbW, &fbH)) {
+                        glCapsuleRenderer.RenderStroke(engine.GetLiveModeledPoints(),
+                                                       PackPremultipliedGpuColor(st.color),
+                                                       viewport, fbW > 0 ? fbW : winWidth, fbH > 0 ? fbH : winHeight,
+                                                       br, /*singlePassWet=*/true);
+                        androidFrontBuffer.EndWetDraw();
+                    }
+                } else
+#endif
+                {
+                    wetDryCompositor.RenderWet(glCapsuleRenderer, engine.GetLiveModeledPoints(), predictedPts,
+                                               PackPremultipliedGpuColor(st.color), viewport, winWidth, winHeight,
+                                               br, debugSeamHighlight);
+                }
             }
         } else {
             // Fallback outline polygon rasterization
@@ -2039,6 +2071,11 @@ int main(int argc, char* argv[]) {
         SDL_GL_SwapWindow(window);
     }
 
+#if defined(__ANDROID__)
+    if (frontBufferActive) {
+        androidFrontBuffer.Shutdown();
+    }
+#endif
     wetDryCompositor.Shutdown();
     glShapeRenderer.Shutdown();
     glCapsuleRenderer.Shutdown();

@@ -16,7 +16,7 @@
 #include <span>
 #include <cstdint>
 #include "folio_sketch/gpu/ink_mesh.hpp"
-#include "debug/raw_sensor_layer.hpp"
+#include "inspector/raw_sensor_layer.hpp"
 
 namespace Folio {
 

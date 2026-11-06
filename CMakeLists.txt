@@ -101,8 +101,8 @@ set(FOLIO_SKETCH_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/vector/ink_generator_infill.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/vector/ink_ribbon_corner.cpp"
 
-    # Diagnostics & Debug
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/ink_generator_debug.cpp"
+    # Vector Generator Introspection & Diagnostics
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/vector/ink_generator_debug.cpp"
 
     # GPU Mesh Builder
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/ink_mesh_builder.cpp"
@@ -180,6 +180,11 @@ else()
 endif()
 
 # ==============================================================================
+# FolioBackends (Optional Hardware Rendering & Compositor Plugs)
+# ==============================================================================
+add_subdirectory(folio_backends)
+
+# ==============================================================================
 # Interactive Inking Diagnostic Playground & Inspector (folio_ink_inspector)
 # Standalone demo + test app. SDL3 and Dear ImGui are vendored in third_party/.
 # Defined BEFORE the test suite so it is the primary/default runnable target.
@@ -224,21 +229,19 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
     endif()
 
     set(FOLIO_INSPECTOR_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/main_inspector.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/gl_loader.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/gl_capsule_renderer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/gl_shape_renderer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/raw_sensor_layer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/modeler_inspector.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/width_inspector.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/geometry_inspector.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/stroke_scrubber.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/digitizer_trace_replayer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/debug/wet_dry_compositor.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/main_inspector.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/gl_loader.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/gl_shape_renderer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/raw_sensor_layer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/modeler_inspector.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/width_inspector.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/geometry_inspector.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/stroke_scrubber.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/digitizer_trace_replayer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/wet_dry_compositor.cpp"
     )
 
     if(ANDROID)
-        list(APPEND FOLIO_INSPECTOR_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/android/folio_android_jni.cpp")
         # Android SDLActivity loads libmain.so
         add_library(main SHARED ${FOLIO_INSPECTOR_SOURCES})
         set_target_properties(main PROPERTIES
@@ -253,10 +256,13 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
     endif()
 
     target_include_directories(${INSPECTOR_TARGET} PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/folio_backends"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspector"
     )
-    target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch SDL3::SDL3 imgui)
+    target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch folio_backends SDL3::SDL3 imgui)
     if(ANDROID)
         find_library(ANDROID_LOG_LIB log)
         find_library(ANDROID_LIB android)

@@ -11,7 +11,7 @@
 #include <vector>
 #include "folio_sketch/core/ink_config.hpp"
 #include "folio_sketch/core/ink_stroke_data.hpp"
-#include "debug/raw_sensor_layer.hpp"
+#include "inspector/raw_sensor_layer.hpp"
 
 namespace Folio::Debug {
 

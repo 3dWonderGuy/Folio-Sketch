@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <functional>
 #include <imgui.h>
-#include "debug/raw_sensor_layer.hpp"
+#include "inspector/raw_sensor_layer.hpp"
 #include "folio_sketch/engine/ink_engine.hpp"
 
 namespace Folio::Debug {
@@ -27,7 +27,9 @@ namespace Folio::Debug {
 enum class DigitizerTraceType : int {
     CursiveLoop = 0,     ///< Bernoulli lemniscate / multi-lobe loops with alternating tight curvature (1500-2500 px/s)
     ZigZag90 = 1,        ///< Rapid 90-degree directional inflections testing corner overshoot vs clipping (1200 mm/s)
-    TipLagBenchmark = 2  ///< Constant-speed straight stroke to accurately measure Euclidean tip-following distance
+    TipLagBenchmark = 2, ///< Constant-speed straight stroke to accurately measure Euclidean tip-following distance
+    CuspInflection = 3,  ///< High-velocity cusps and hairpin reversals testing Kalman filter stability and overshoot
+    SlowLoop = 4         ///< Slow tight loops (~100 mm/s) testing low-speed ODE stability and tremor filter
 };
 
 /**

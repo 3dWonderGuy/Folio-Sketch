@@ -1,4 +1,4 @@
-#include "debug/gl_loader.hpp"
+#include "inspector/gl_loader.hpp"
 
 #if defined(_WIN32)
 // Undefine the macro redirections from gl_loader.hpp so LOAD_GL can assign directly to g_gl member fields

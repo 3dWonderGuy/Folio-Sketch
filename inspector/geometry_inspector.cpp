@@ -1,5 +1,5 @@
-#include "debug/geometry_inspector.hpp"
-#include "folio_sketch/gpu/gl_capsule_renderer.hpp"
+#include "inspector/geometry_inspector.hpp"
+#include "inspector/gl_capsule_renderer.hpp"
 #include "geometry/ink_stroke_filter.hpp"
 #include "geometry/ink_geometry_utils.hpp"
 #include <chrono>

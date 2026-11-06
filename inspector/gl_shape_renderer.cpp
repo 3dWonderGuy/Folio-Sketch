@@ -5,8 +5,8 @@
  * =========================================================================================
  */
 
-#include "debug/gl_shape_renderer.hpp"
-#include "debug/gl_loader.hpp"
+#include "inspector/gl_shape_renderer.hpp"
+#include "inspector/gl_loader.hpp"
 
 #include <iostream>
 #include <string>

@@ -51,6 +51,5 @@ android {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
-    implementation 'androidx.graphics:graphics-core:1.0.2'
     implementation 'androidx.core:core:1.15.0'
 }

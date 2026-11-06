@@ -1,76 +1,71 @@
-# Architecture Overview
+# Architecture Overview: Two-Tier Decoupled Design
 
-**Folio-Sketch** is a modular, high-performance C++20 vector inking and geometric processing engine. It is partitioned into clear functional layers with strict boundary separation between **raw hardware input handling**, **predictive modeling**, **pure computational geometry & vector path generation**, **direct GPU mesh tessellation**, and **spatial collision queries**.
+**Folio-Sketch** is a modular, high-performance C++20 vector inking and geometric processing engine. It is strictly partitioned into a two-tier architecture plus an isolated diagnostics and reference playground:
 
 ```mermaid
 graph TD
-    A[Digitizer Input: Stylus / Touch / Mouse] --> B[InkEngine]
-    B --> C[InkStrokeFilter: Decimation & Slope Limiting]
-    C --> D[Google Ink Modeler / Kalman Predictor]
-    D --> E{Rendering Target}
-    
-    subgraph "Vector Contours (Pure Geometry)"
-        E -->|Vector Path & ThorSVG| F[InkGenerator]
-        F --> G[BuildSolidRibbon: Miters & Corner Sweep]
-        F --> H[DetectStrokeSelfLoop: Watertight Cavity Infill]
-        F --> I[InkPath: Beziers & TVG Shape Converter]
+    subgraph "Tier 1: folio_sketch (Pure C++20 Headless Core)"
+        A[Raw Input Packets: x, y, pressure, tilt, time] --> B[InkEngine]
+        B --> C[InkStrokeFilter: Decimation & Slope Limiting]
+        C --> D[Mass-Spring ODE Modeler]
+        D --> E[Kalman Lookahead Predictor]
+        E --> F[Anisotropic Chisel / Nib Dynamics]
+        F --> G[POD CapsuleInstance Streaming Spans]
+        F --> H[Vector Ribbon Contours & Bezier InkPath]
     end
 
-    subgraph "GPU Hardware Rasterization"
-        E -->|Direct Mesh| J[InkMeshBuilder]
-        J --> K[Core Ribbon Quads]
-        J --> L[Hairpin Domes & Corner Fans]
-        J --> M[1-Pixel Soft AA Exterior Skirt]
-        K & L & M --> N[InkMesh: Indexed Triangles]
+    subgraph "Tier 2: folio_backends (Optional Hardware Compositor Plugs)"
+        G --> I[GlCapsuleRenderer: Persistent VBO glBufferSubData]
+        I --> J[Single-Pass Wet Live Mode]
+        J --> K[AndroidFrontBuffer: Direct Hardware Scanout]
     end
 
-    subgraph "Spatial & Collision Subsystem"
-        D --> O[StrokeCollisionTree: Two-Tier Capsule BVH]
-        O --> P[Capsule Narrowphase Intersect]
-        P --> Q[Stroke Slicing & Eraser]
+    subgraph "Tier 3: inspector/ (Isolated Lab & Reference App)"
+        L[main_inspector.cpp] --> B
+        L --> I
+        L --> K
+    end
+
+    subgraph "Host Application (FolioNote)"
+        M[FolioNote Document Tree & UI: SDL_gpu] -. Comitted Strokes .-> H
+        M -. Live In-Flight Overlay .-> K
     end
 ```
 
 ---
 
-## 1. Subsystem Directory Breakdown
+## 1. The Three Tiers
 
-| Directory | Responsibilities | Key Components |
+### Tier 1: `folio_sketch` Core (Headless C++20 Library)
+- **Zero OS / Graphics Dependencies**: No OpenGL, GLES, Vulkan, Android NDK, or SDL headers in `include/folio_sketch/`.
+- **Pure Mathematics & Geometry**: Mass-spring ODE smoothing, Kalman tip lookahead prediction with distance-attenuated alpha fading, anisotropic calligraphy/chisel nib angle evaluation.
+- **Data Generation**: Generates 32-byte trivially copyable POD `CapsuleInstance` spans for GPU rasterizers and continuous cubic Bézier `InkPath` vector ribbons for static storage.
+
+### Tier 2: `folio_backends` (Optional Hardware Plugs)
+- **Low-Latency Compositor Bypass**: Plugs into native OS display subsystems to achieve sub-4ms perceived inking latency by bypassing the OS window compositor (e.g. SurfaceFlinger on Android, DWM on Windows, Wayland on Linux).
+- **100% Pure C++**: Zero Java or Kotlin code, zero JNI bindings. Uses `ANativeWindow` and `EGL_FRONT_BUFFER_AUTO_REFRESH_ANDROID` on Android.
+- **GlCapsuleRenderer**: Standalone GLES 3.0 / GL 3.3 instanced Euclidean SDF quad renderer with persistent dynamic VBO streaming (`glBufferSubData`) and single-pass live wet stroke mode.
+
+### Tier 3: `inspector/` (Diagnostic Playground & Living Reference)
+- Isolated diagnostic tool and interactive playground (moved from `src/debug/`).
+- Exercises raw sensor telemetry, modeler curves, nib geometry, RDP post-processing simplification, hold-to-snap shapes, and front-buffer wet/dry presentation.
+
+---
+
+## 2. Host Application Integration (FolioNote)
+
+Host applications like **FolioNote** use a two-layer rendering model:
+1. **Static Document Canvas & UI**: Rendered via `SDL_gpu` (Vulkan/Metal/GLES) through the standard double/triple-buffered presentation swapchain.
+2. **Live In-Flight Wet Stroke**: Rendered via `folio_backends` (`AndroidFrontBuffer`) directly to the front scanout buffer, bypassing the compositor queue.
+3. **On Pen Lift**: The stroke commits into FolioNote's static document tree, and the live overlay is cleared with `AndroidFrontBuffer::Clear()`.
+
+---
+
+## 3. Directory Breakdown
+
+| Directory | Layer | Description |
 | :--- | :--- | :--- |
-| [`include/folio_sketch/`](../include/folio_sketch/) | Public headers and core API facade | [`ink_engine.hpp`](../include/folio_sketch/ink_engine.hpp), [`ink_generator.hpp`](../include/folio_sketch/ink_generator.hpp), [`ink_mesh.hpp`](../include/folio_sketch/ink_mesh.hpp), [`ink_config.hpp`](../include/folio_sketch/ink_config.hpp), [`ink_stroke_data.hpp`](../include/folio_sketch/ink_stroke_data.hpp) |
-| [`src/engine/`](../src/engine/) | Inking engine lifecycle, live point accumulation, physics updates, pen-up finalization | [`ink_engine.cpp`](../src/engine/ink_engine.cpp) |
-| [`src/geometry/`](../src/geometry/) | Mathematical primitives, segment evaluation, 2D intersection algebra, nib profiles, point decimation | [`ink_geometry_utils.cpp`](../src/geometry/ink_geometry_utils.cpp), [`ink_stroke_filter.cpp`](../src/geometry/ink_stroke_filter.cpp), [`ink_nib_geometry.hpp`](../src/geometry/ink_nib_geometry.hpp) |
-| [`src/generator/`](../src/generator/) | Vector contour generation, bisector miter computation, corner fillet fans, loop infill extraction | [`ink_generator_ribbon.cpp`](../src/generator/ink_generator_ribbon.cpp), [`ink_ribbon_corner.cpp`](../src/generator/ink_ribbon_corner.cpp), [`ink_generator_infill.cpp`](../src/generator/ink_generator_infill.cpp), [`ink_generator_caps.cpp`](../src/generator/ink_generator_caps.cpp) |
-| [`src/mesh/`](../src/mesh/) | Direct GPU triangle strip and index generation with dual-buffer anti-aliasing skirts | [`ink_mesh_builder.cpp`](../src/mesh/ink_mesh_builder.cpp) |
-
----
-
-## 2. Inking Lifecycle Pipeline
-
-1. **Input Phase (`InkEngine::AddPoint`)**:
-   - Stylus reports `(x, y, pressure, tiltX, tiltY, timestamp)`.
-   - Incoming coordinates pass through `InkStrokeFilter::DecimatePoints` to reject sub-pixel jitter ($< 0.05\text{ mm}$).
-   - `InkStrokeFilter::EnforceSlopeLimit` enforces Lipschitz continuity to prevent unrealistic step-function spikes in stylus pressure.
-
-2. **Modeling & Prediction Phase**:
-   - Points are passed to the physical modeler (`InkModeler` or internal spring-mass physics).
-   - Kalman filter predicts 1–3 forward points along the instantaneous motion vector to compensate for OS display latency (~16–30 ms).
-
-3. **Geometry Generation Phase**:
-   - **Vector Generation (`InkGenerator`)**: Builds continuous 2D boundary polygons (`InkPath`) containing cubic Béziers, round endcaps, and corner fillets. Clean rails are verified via `PruneSwallowtailLoops` to eliminate interior pinch loops.
-   - **GPU Mesh Generation (`InkMeshBuilder`)**: Builds indexed triangle strips (`InkMesh`) partitioned into core geometry (`coreIndices`) and soft exterior anti-aliasing boundary skirts (`skirtIndices`).
-
-4. **Pen-Up Finalization (`InkEngine::PenUp`)**:
-   - Flushes remaining physics springs.
-   - Generates the final high-precision stroke contours.
-   - Dispatches closed loop tests (`DetectStrokeSelfLoop`) if vector flood infill is requested.
-
----
-
-## 3. Detailed Component Documentation
-
-For comprehensive mathematical derivations, algorithm steps, and API details:
-* [**Geometry & Intersection Mathematics**](geometry.md)
-* [**Vector Ribbon & Infill Generator**](vector_generator.md)
-* [**GPU Mesh Builder & Anti-Aliasing Skirts**](mesh_builder.md)
-* [**Android Zero-Latency Inking & Digitizer Ingestion**](android_low_latency_inking.md)
+| [`include/folio_sketch/`](../include/folio_sketch/) | Core Public API | Headless C++20 API (`ink_engine.hpp`, `raw_input.hpp`, `ink_mesh.hpp`, etc.). |
+| [`src/`](../src/) | Core Implementation | Pure C++20 math, geometry, and mesh building (`engine/`, `geometry/`, `gpu/`, `mesh/`, `vector/`). |
+| [`folio_backends/`](../folio_backends/) | Hardware Plugs | Hardware bypass backends (`common/gl_capsule_renderer`, `android/android_frontbuffer`). |
+| [`inspector/`](../inspector/) | Reference Playground | Standalone interactive inspector and testbench. |

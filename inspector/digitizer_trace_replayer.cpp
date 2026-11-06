@@ -5,7 +5,7 @@
  * =========================================================================================
  */
 
-#include "debug/digitizer_trace_replayer.hpp"
+#include "inspector/digitizer_trace_replayer.hpp"
 #include <chrono>
 #include <cmath>
 #include <algorithm>
@@ -57,6 +57,9 @@ std::vector<RawInputSample> DigitizerTraceReplayer::GenerateTrace(
                 .x = x,
                 .y = y,
                 .pressure = std::clamp(pressure, 0.1f, 1.0f),
+                .tiltX = 0.0f,
+                .tiltY = 0.0f,
+                .timeNs = static_cast<int64_t>(timeSec * 1e9),
                 .tiltRad = 0.0f,
                 .timestampSec = timeSec
             });
@@ -112,6 +115,84 @@ std::vector<RawInputSample> DigitizerTraceReplayer::GenerateTrace(
                 .x = px,
                 .y = py,
                 .pressure = 0.65f,
+                .tiltX = 0.0f,
+                .tiltY = 0.0f,
+                .timeNs = static_cast<int64_t>(timeSec * 1e9),
+                .tiltRad = 0.0f,
+                .timestampSec = timeSec
+            });
+        }
+    }
+    else if (type == DigitizerTraceType::CuspInflection) {
+        // High-velocity hairpin / cusp reversal testing Kalman filter prediction stability
+        const float segLenMm = 60.0f * scale;
+        const float totalDistanceMm = segLenMm * 4.0f;
+        const float durationSec = totalDistanceMm / speedMmPerSec;
+        const int numSamples = std::max(10, static_cast<int>(std::ceil(durationSec * rateHz)));
+        const double dt = durationSec / static_cast<double>(numSamples);
+
+        trace.reserve(numSamples + 1);
+        for (int i = 0; i <= numSamples; ++i) {
+            double tNorm = static_cast<double>(i) / static_cast<double>(numSamples);
+            double timeSec = static_cast<double>(i) * dt;
+            float px, py;
+
+            // Two acute hairpin loops: 0..0.5 out and back, 0.5..1.0 down and back
+            if (tNorm < 0.25) {
+                float localT = static_cast<float>(tNorm / 0.25);
+                px = originX + localT * segLenMm;
+                py = originY;
+            } else if (tNorm < 0.5) {
+                float localT = static_cast<float>((tNorm - 0.25) / 0.25);
+                px = originX + (1.0f - localT) * segLenMm;
+                py = originY + localT * (segLenMm * 0.35f);
+            } else if (tNorm < 0.75) {
+                float localT = static_cast<float>((tNorm - 0.5) / 0.25);
+                px = originX + localT * (segLenMm * 0.5f);
+                py = originY + (segLenMm * 0.35f) + localT * segLenMm;
+            } else {
+                float localT = static_cast<float>((tNorm - 0.75) / 0.25);
+                px = originX + (1.0f - localT) * (segLenMm * 0.5f);
+                py = originY + (segLenMm * 0.35f) + (1.0f - localT) * segLenMm;
+            }
+
+            trace.push_back(RawInputSample{
+                .x = px,
+                .y = py,
+                .pressure = 0.75f,
+                .tiltX = 0.0f,
+                .tiltY = 0.0f,
+                .timeNs = static_cast<int64_t>(timeSec * 1e9),
+                .tiltRad = 0.0f,
+                .timestampSec = timeSec
+            });
+        }
+    }
+    else if (type == DigitizerTraceType::SlowLoop) {
+        // Slow tight loops (~100 mm/s) testing low-speed ODE stability and tremor filter
+        const float radiusMm = 18.0f * scale;
+        const float effectiveSpeed = std::min(speedMmPerSec, 120.0f);
+        const float perimeterMm = 2.0f * static_cast<float>(M_PI) * radiusMm;
+        const float durationSec = perimeterMm / effectiveSpeed;
+        const int numSamples = std::max(10, static_cast<int>(std::ceil(durationSec * rateHz)));
+        const double dt = durationSec / static_cast<double>(numSamples);
+
+        trace.reserve(numSamples + 1);
+        for (int i = 0; i <= numSamples; ++i) {
+            double tNorm = static_cast<double>(i) / static_cast<double>(numSamples);
+            double theta = tNorm * 2.0 * M_PI;
+            double timeSec = static_cast<double>(i) * dt;
+
+            float x = originX + static_cast<float>(radiusMm * std::cos(theta));
+            float y = originY + static_cast<float>(radiusMm * std::sin(theta));
+
+            trace.push_back(RawInputSample{
+                .x = x,
+                .y = y,
+                .pressure = 0.5f,
+                .tiltX = 0.0f,
+                .tiltY = 0.0f,
+                .timeNs = static_cast<int64_t>(timeSec * 1e9),
                 .tiltRad = 0.0f,
                 .timestampSec = timeSec
             });
@@ -132,6 +213,9 @@ std::vector<RawInputSample> DigitizerTraceReplayer::GenerateTrace(
                 .x = originX + static_cast<float>(tNorm * lengthMm),
                 .y = originY,
                 .pressure = 0.7f,
+                .tiltX = 0.0f,
+                .tiltY = 0.0f,
+                .timeNs = static_cast<int64_t>(timeSec * 1e9),
                 .tiltRad = 0.0f,
                 .timestampSec = timeSec
             });
@@ -332,7 +416,9 @@ bool DigitizerTraceReplayer::RenderUI(Folio::InkEngine& engine, RawSensorHUD& hu
     const char* traceNames[] = {
         "Cursive Loop (Lemniscate 1500 px/s)",
         "Sharp 90-Deg Zig-Zag (1200 mm/s)",
-        "Straight Tip-Lag Benchmark (1000 mm/s)"
+        "Straight Tip-Lag Benchmark (1000 mm/s)",
+        "High-Velocity Cusp Reversals (Hairpin Inflections)",
+        "Slow Fine-Control Loop (100 mm/s, Low-Speed Stability)"
     };
     int currentType = static_cast<int>(m_selectedType);
     if (ImGui::Combo("Geometric Pattern", &currentType, traceNames, IM_ARRAYSIZE(traceNames))) {

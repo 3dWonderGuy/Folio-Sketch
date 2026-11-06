@@ -25,6 +25,28 @@ namespace Folio {
 class StrokeWidthEvaluator {
 public:
     // =========================================================================
+    // 0. ANISOTROPIC (ELLIPTICAL) NIB EVALUATOR
+    // =========================================================================
+
+    /**
+     * @brief Width multiplier of an elliptical nib for a given direction of travel.
+     *
+     * The nib has a major semi-axis along `nibAngleRad` and a minor semi-axis of
+     * `aspect * major`. The ink swath is the nib's extent perpendicular to travel, which for
+     * θ = travelHeading - nibAngle evaluates to  sqrt(sin²θ + aspect²·cos²θ).
+     * Travelling along the major axis gives the thin hairline (`aspect`); travelling across it
+     * gives the full width (1.0). aspect >= 1 returns 1 (round nib).
+     */
+    [[nodiscard]] static float NibWidthFactor(float travelHeadingRad, float nibAngleRad, float aspect) noexcept {
+        if (aspect >= 0.999f) return 1.0f;
+        const float a = aspect < 0.02f ? 0.02f : aspect;
+        const float th = travelHeadingRad - nibAngleRad;
+        const float s = std::sin(th);
+        const float c = std::cos(th);
+        return std::sqrt(s * s + a * a * c * c);
+    }
+
+    // =========================================================================
     // 1. INERTIAL ACCELERATION & CORNER COMPENSATION EVALUATORS
     // =========================================================================
 

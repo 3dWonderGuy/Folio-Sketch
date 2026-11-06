@@ -1,22 +1,36 @@
 /**
  * =========================================================================================
- * @file src/debug/gl_capsule_renderer.cpp
- * @brief GPU-Driven Analytic Segment Signed Distance Field (Capsule SDF) Instanced Renderer
+ * @file folio_backends/common/gl_capsule_renderer.cpp
+ * @brief Standalone OpenGL ES 3.0 / Core 3.3 Analytic Capsule SDF Instanced Renderer
  * =========================================================================================
  */
 
-#include "debug/gl_capsule_renderer.hpp"
+#include "folio_backends/common/gl_capsule_renderer.hpp"
+
+#if __has_include("gl_loader.hpp")
+#include "gl_loader.hpp"
+#elif __has_include("inspector/gl_loader.hpp")
+#include "inspector/gl_loader.hpp"
+#elif __has_include("debug/gl_loader.hpp")
 #include "debug/gl_loader.hpp"
-#include "folio_sketch/gpu/ink_mesh.hpp"
+#elif defined(__ANDROID__)
+#include <GLES3/gl3.h>
+#else
+#include <GL/gl.h>
+#endif
 
 #include <chrono>
 #include <cmath>
-#include <cstddef>
 #include <iostream>
 #include <string>
+#include <algorithm>
 
-namespace Folio {
-using Debug::CanvasTransform;
+namespace Folio::Backends {
+
+GlCapsuleRenderer::GlCapsuleRenderer() = default;
+GlCapsuleRenderer::~GlCapsuleRenderer() {
+    Shutdown();
+}
 
 bool GlCapsuleRenderer::Init() {
 #if defined(__ANDROID__)
@@ -35,6 +49,7 @@ bool GlCapsuleRenderer::Init() {
         "layout(location = 2) in vec2 aPointB;\n"
         "layout(location = 3) in vec2 aRadii;\n"
         "layout(location = 4) in vec4 aColor;\n"
+        "layout(location = 5) in float aAlphaFade;\n"
         "uniform vec4 uTransform; // (panX, panY, zoom, unused)\n"
         "uniform vec2 uViewport;  // (width, height)\n"
         "out vec2 vWorldPos;\n"
@@ -42,6 +57,7 @@ bool GlCapsuleRenderer::Init() {
         "flat out vec2 vPointB;\n"
         "flat out vec2 vRadii;\n"
         "flat out vec4 vColor;\n"
+        "flat out float vAlphaFade;\n"
         "void main() {\n"
         "    vec2 delta = aPointB - aPointA;\n"
         "    float segLen = length(delta);\n"
@@ -59,23 +75,24 @@ bool GlCapsuleRenderer::Init() {
         "        1.0 - (screenPos.y / uViewport.y) * 2.0\n"
         "    );\n"
         "    gl_Position = vec4(ndc, 0.0, 1.0);\n"
-        "    vWorldPos = worldPos;\n"
-        "    vPointA   = aPointA;\n"
-        "    vPointB   = aPointB;\n"
-        "    vRadii    = aRadii;\n"
-        "    vColor    = aColor;\n"
+        "    vWorldPos   = worldPos;\n"
+        "    vPointA     = aPointA;\n"
+        "    vPointB     = aPointB;\n"
+        "    vRadii      = aRadii;\n"
+        "    vColor      = aColor;\n"
+        "    vAlphaFade  = aAlphaFade;\n"
         "}\n";
 
     // Fragment Shader (Analytic Capsule SDF):
-    // Evaluates exact Euclidean distance from vWorldPos to segment [vPointA, vPointB],
-    // linearly interpolates radius r(t) = mix(rA, rB, t), and applies a 1.0-pixel
-    // screen-space smoothstep falloff across all zoom levels.
+    // Evaluates Euclidean distance to segment [vPointA, vPointB],
+    // linearly interpolates radius r(t) = mix(rA, rB, t), and applies smoothstep falloff.
     std::string fSrc = std::string(glslHeader) +
         "in vec2 vWorldPos;\n"
         "flat in vec2 vPointA;\n"
         "flat in vec2 vPointB;\n"
         "flat in vec2 vRadii;\n"
         "flat in vec4 vColor;\n"
+        "flat in float vAlphaFade;\n"
         "uniform vec4 uTransform; // (panX, panY, zoom, unused)\n"
         "uniform vec2 uGrain;     // (grain strength 0..1, grain cells per world unit)\n"
         "out vec4 fragColor;\n"
@@ -102,16 +119,14 @@ bool GlCapsuleRenderer::Init() {
         "    }\n"
         "    float tooth = 1.0;\n"
         "    if (uGrain.x > 0.0) {\n"
-        "        // Paper tooth is a function of world position only, so every overlapping capsule\n"
-        "        // sees identical grain and the stroke-layer MAX union stays seamless.\n"
         "        vec2 gp = vWorldPos * uGrain.y;\n"
         "        float n = 0.6 * vnoise(gp) + 0.4 * vnoise(gp * 2.7 + 17.0);\n"
         "        tooth = mix(1.0, smoothstep(0.25, 0.75, n), uGrain.x);\n"
         "    }\n"
-        "    fragColor = vColor * (edgeAlpha * tooth);\n"
+        "    fragColor = (vColor * vAlphaFade) * (edgeAlpha * tooth);\n"
         "}\n";
 
-    // Composite shader: fullscreen quad sampling the per-stroke layer with a uniform opacity.
+    // Composite shader: fullscreen quad sampling offscreen layer with brush opacity
     std::string cvSrc = std::string(glslHeader) +
         "layout(location = 0) in vec2 aPos;\n"
         "out vec2 vUv;\n"
@@ -125,6 +140,7 @@ bool GlCapsuleRenderer::Init() {
         "uniform float uOpacity;\n"
         "out vec4 fragColor;\n"
         "void main() { fragColor = texture(uLayer, vUv) * uOpacity; }\n";
+
     {
         GLuint cvs = CompileShader(GL_VERTEX_SHADER, cvSrc.c_str());
         GLuint cfs = CompileShader(GL_FRAGMENT_SHADER, cfSrc.c_str());
@@ -181,7 +197,7 @@ bool GlCapsuleRenderer::Init() {
     m_locViewport  = glGetUniformLocation(m_program, "uViewport");
     m_locGrain     = glGetUniformLocation(m_program, "uGrain");
 
-    // Static unit quad [-1.0, 1.0] composed of 2 triangles (6 vertices)
+    // Static unit quad [-1.0, 1.0]
     static constexpr float kUnitQuadVertices[12] = {
         -1.0f, -1.0f,
          1.0f, -1.0f,
@@ -204,8 +220,12 @@ bool GlCapsuleRenderer::Init() {
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
     glVertexAttribDivisor(0, 0);
 
-    // 2. Dynamic Instance VBO (divisor 1)
+    // 2. Persistent Dynamic Instance VBO (divisor 1)
+    // Pre-allocate initial capacity for 4096 segments (128 KB)
+    m_vboCapacity = 4096;
     glBindBuffer(GL_ARRAY_BUFFER, m_instanceVbo);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_vboCapacity * sizeof(CapsuleInstance)),
+                 nullptr, GL_DYNAMIC_DRAW);
 
     // Attribute 1: vec2 pointA
     glEnableVertexAttribArray(1);
@@ -219,17 +239,23 @@ bool GlCapsuleRenderer::Init() {
                           reinterpret_cast<const void*>(offsetof(CapsuleInstance, pointB)));
     glVertexAttribDivisor(2, 1);
 
-    // Attribute 3: vec2 radii (radiusA, radiusB)
+    // Attribute 3: vec2 radii
     glEnableVertexAttribArray(3);
     glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, sizeof(CapsuleInstance),
                           reinterpret_cast<const void*>(offsetof(CapsuleInstance, radii)));
     glVertexAttribDivisor(3, 1);
 
-    // Attribute 4: uint32 colorRgba (unpacked as normalized vec4)
+    // Attribute 4: uint32 colorRgba
     glEnableVertexAttribArray(4);
     glVertexAttribPointer(4, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(CapsuleInstance),
                           reinterpret_cast<const void*>(offsetof(CapsuleInstance, colorRgba)));
     glVertexAttribDivisor(4, 1);
+
+    // Attribute 5: float alphaFade
+    glEnableVertexAttribArray(5);
+    glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, sizeof(CapsuleInstance),
+                          reinterpret_cast<const void*>(offsetof(CapsuleInstance, alphaFade)));
+    glVertexAttribDivisor(5, 1);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
@@ -247,22 +273,53 @@ void GlCapsuleRenderer::Shutdown() {
     if (m_quadVbo)     { glDeleteBuffers(1, &m_quadVbo);     m_quadVbo = 0; }
     if (m_vao)         { glDeleteVertexArrays(1, &m_vao);    m_vao = 0; }
     if (m_program)     { glDeleteProgram(m_program);         m_program = 0; }
+    m_vboCapacity = 0;
+    m_instanceCount = 0;
+}
+
+void GlCapsuleRenderer::EnsureCapacity(size_t requiredCount) {
+    if (requiredCount <= m_vboCapacity) return;
+    m_vboCapacity = std::max(m_vboCapacity * 2, requiredCount + 1024);
+    glBindBuffer(GL_ARRAY_BUFFER, m_instanceVbo);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_vboCapacity * sizeof(CapsuleInstance)),
+                 nullptr, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 void GlCapsuleRenderer::UploadStroke(std::span<const StrokePoint> points, uint32_t color) {
     auto t0 = std::chrono::steady_clock::now();
-    InkMeshBuilder::BuildCapsuleInstances(points, color, m_instances);
+    CapsuleBuilder::BuildCapsuleInstances(points, color, m_instances);
     auto t1 = std::chrono::steady_clock::now();
     m_lastCpuIngestionMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-    if (!m_instanceVbo || m_instances.empty()) return;
+    UploadInstances(m_instances);
+}
+
+void GlCapsuleRenderer::UploadInstances(std::span<const CapsuleInstance> instances) {
+    m_instanceCount = instances.size();
+    if (m_instanceCount == 0 || !m_instanceVbo) return;
+
+    EnsureCapacity(m_instanceCount);
 
     glBindBuffer(GL_ARRAY_BUFFER, m_instanceVbo);
-    glBufferData(GL_ARRAY_BUFFER,
-                 static_cast<GLsizeiptr>(m_instances.size() * sizeof(CapsuleInstance)),
-                 m_instances.data(),
-                 GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0,
+                    static_cast<GLsizeiptr>(m_instanceCount * sizeof(CapsuleInstance)),
+                    instances.data());
     glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+void GlCapsuleRenderer::AppendInstances(std::span<const CapsuleInstance> newInstances, size_t fromIndex) {
+    if (newInstances.empty() || !m_instanceVbo) return;
+    const size_t total = fromIndex + newInstances.size();
+    EnsureCapacity(total);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_instanceVbo);
+    glBufferSubData(GL_ARRAY_BUFFER,
+                    static_cast<GLintptr>(fromIndex * sizeof(CapsuleInstance)),
+                    static_cast<GLsizeiptr>(newInstances.size() * sizeof(CapsuleInstance)),
+                    newInstances.data());
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    m_instanceCount = total;
 }
 
 void GlCapsuleRenderer::EnsureLayer(int w, int h) {
@@ -288,29 +345,27 @@ void GlCapsuleRenderer::DrawInstances(const CanvasTransform& transform, int vpWi
     glUniform2f(m_locViewport, static_cast<float>(vpWidth), static_cast<float>(vpHeight));
     glUniform2f(m_locGrain, brush.grain, brush.grainScale);
     glBindVertexArray(m_vao);
-    glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(m_instances.size()));
+    glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(m_instanceCount));
     glBindVertexArray(0);
 }
 
 void GlCapsuleRenderer::Render(const CanvasTransform& transform, int vpWidth, int vpHeight,
-                               const CapsuleBrush& brush) {
-    if (!m_program || !m_vao || m_instances.empty() || vpWidth <= 0 || vpHeight <= 0) return;
+                               const CapsuleBrush& brush, bool singlePassWet) {
+    if (!m_program || !m_vao || m_instanceCount == 0 || vpWidth <= 0 || vpHeight <= 0) return;
 
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
 
-    // Direct path: straight premultiplied "over" per capsule. Translucent overlaps accumulate,
-    // which is exactly the double-darkening artifact the stroke-layer path exists to remove.
-    if (!brush.unionOverlap && brush.opacity >= 0.999f) {
+    // Live wet stroke or direct solid pass: bypass layer FBO allocations, clears and blits
+    if (singlePassWet || (!brush.unionOverlap && brush.opacity >= 0.999f)) {
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         DrawInstances(transform, vpWidth, vpHeight, brush);
         glUseProgram(0);
         return;
     }
 
-    // Stroke-layer path: rasterize all capsules into an offscreen layer with MAX blending
-    // (set union of coverage, no accumulation), then composite once with the brush opacity.
+    // Committed stroke with union overlap: offscreen MAX union pass then composite
     GLint prevFbo = 0;
     GLint vp[4] = {0, 0, vpWidth, vpHeight};
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
@@ -346,11 +401,13 @@ void GlCapsuleRenderer::RenderStroke(std::span<const StrokePoint> points,
                                      const CanvasTransform& transform,
                                      int vpWidth,
                                      int vpHeight,
-                                     const CapsuleBrush& brush) {
+                                     const CapsuleBrush& brush,
+                                     bool singlePassWet) {
     UploadStroke(points, color);
-    Render(transform, vpWidth, vpHeight, brush);
+    Render(transform, vpWidth, vpHeight, brush, singlePassWet);
 }
 
+#if defined(FOLIO_BACKENDS_HAS_IMGUI)
 void GlCapsuleRenderer::RenderBoundingQuadsWireframe(ImDrawList* drawList,
                                                      const CanvasTransform& transform) const {
     if (!drawList || m_instances.empty()) return;
@@ -387,6 +444,7 @@ void GlCapsuleRenderer::RenderBoundingQuadsWireframe(ImDrawList* drawList,
         drawList->AddLine(c0, c2, diagCol, 1.0f);
     }
 }
+#endif
 
 double GlCapsuleRenderer::BenchmarkCpuIngestionMs(size_t pointCount, int iterations) {
     if (pointCount == 0 || iterations <= 0) return 0.0;
@@ -404,7 +462,7 @@ double GlCapsuleRenderer::BenchmarkCpuIngestionMs(size_t pointCount, int iterati
 
     auto t0 = std::chrono::steady_clock::now();
     for (int it = 0; it < iterations; ++it) {
-        InkMeshBuilder::BuildCapsuleInstances(syntheticPts, 0xFF41A5FFu, outInstances);
+        CapsuleBuilder::BuildCapsuleInstances(syntheticPts, 0xFF41A5FFu, outInstances);
     }
     auto t1 = std::chrono::steady_clock::now();
     return std::chrono::duration<double, std::milli>(t1 - t0).count() / static_cast<double>(iterations);
@@ -426,4 +484,4 @@ unsigned int GlCapsuleRenderer::CompileShader(unsigned int type, const char* src
     return s;
 }
 
-} // namespace Folio
+} // namespace Folio::Backends

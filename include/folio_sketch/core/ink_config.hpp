@@ -82,6 +82,11 @@ struct InkingConfig {
         float minSpeedMmPerSec             = 20.0f;            // Speed threshold (mm/s) below which prediction lookahead is faded out to prevent stationary jitter
         bool  taperTip                     = true;             // Gradually tapers radius towards the predicted tip to eliminate visual popping/snapping
         float tipTaperRatio                = 0.3f;             // Minimum radius multiplier at the tip of the prediction (relative to base radius)
+
+        // Distance-attenuated alpha fade of the predicted tail (the further ahead, the less confident)
+        bool  fadeEnable                   = true;             // Fades the predicted tail's alpha with distance from the confirmed tip
+        float fadeStartMm                  = 0.4f;             // Predicted travel (mm) before the fade begins (avoids a jarring fade on short predictions)
+        float fadeEndAlpha                 = 0.0f;             // Alpha multiplier reached at the far end of the prediction
     } prediction;
 
     // -------------------------------------------------------------------------

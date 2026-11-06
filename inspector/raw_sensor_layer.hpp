@@ -12,38 +12,13 @@
 #include <deque>
 #include <string>
 #include <algorithm>
+#include "folio_sketch/core/raw_input.hpp"
+#include "folio_backends/common/gl_capsule_renderer.hpp"
 
 namespace Folio::Debug {
 
-/**
- * @struct RawInputSample
- * @brief Raw hardware digitizer or mouse telemetry sample captured prior to physics modeling.
- */
-struct RawInputSample {
-    float x, y;
-    float pressure;
-    float tiltRad;
-    double timestampSec;
-};
-
-/**
- * @struct CanvasTransform
- * @brief 2D view transform mapping world/canvas coordinates to screen pixels.
- */
-struct CanvasTransform {
-    float panX = 0.0f;
-    float panY = 0.0f;
-    float zoom = 1.0f;
-
-    [[nodiscard]] ImVec2 WorldToScreen(float wx, float wy) const noexcept {
-        return ImVec2(wx * zoom + panX, wy * zoom + panY);
-    }
-
-    [[nodiscard]] ImVec2 ScreenToWorld(float sx, float sy) const noexcept {
-        float invZ = (zoom > 1e-5f) ? (1.0f / zoom) : 1.0f;
-        return ImVec2((sx - panX) * invZ, (sy - panY) * invZ);
-    }
-};
+using RawInputSample = Folio::RawInputSample;
+using CanvasTransform = Folio::Backends::CanvasTransform;
 
 /**
  * @class RawSensorHUD

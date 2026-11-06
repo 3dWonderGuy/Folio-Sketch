@@ -81,6 +81,7 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
         PackPremultipliedGpuColor(m_activeStyle.color),
         m_liveCapsules);
     m_capsulesDirty = false;
+    m_validLiveSegments = 0;
 
     // 5. Seed the touchdown event into physics solver
     m_physicsBridge->Reset();
@@ -230,6 +231,7 @@ void InkEngine::CancelStroke() {
     m_predictedPointsBuffer.clear();
     m_liveCapsules.clear();
     m_predictedCapsules.clear();
+    m_validLiveSegments = 0;
     m_capsulesDirty = false;
     m_predictionDirty = false;
     m_smoothedWidth = -1.0f;
@@ -270,8 +272,21 @@ const std::vector<StrokePoint>& InkEngine::GetPredictedPoints() const noexcept {
 void InkEngine::EnsureLiveCapsules() const {
     if (!m_capsulesDirty) return;
     m_capsulesDirty = false;
-    CapsuleBuilder::BuildCapsuleInstances(
-        m_liveModeledPoints, PackPremultipliedGpuColor(m_activeStyle.color), m_liveCapsules);
+    if (m_liveModeledPoints.empty()) {
+        m_liveCapsules.clear();
+        m_validLiveSegments = 0;
+        return;
+    }
+    if (m_liveModeledPoints.size() == 1) {
+        CapsuleBuilder::BuildCapsuleInstances(
+            m_liveModeledPoints, PackPremultipliedGpuColor(m_activeStyle.color), m_liveCapsules);
+        m_validLiveSegments = 0;
+        return;
+    }
+    // Incremental build from m_validLiveSegments for O(1) per-packet append efficiency
+    CapsuleBuilder::AppendCapsuleInstances(
+        m_liveModeledPoints, m_validLiveSegments, PackPremultipliedGpuColor(m_activeStyle.color), m_liveCapsules);
+    m_validLiveSegments = m_liveCapsules.size();
 }
 
 void InkEngine::EnsurePrediction() const {
@@ -321,6 +336,36 @@ void InkEngine::EnsurePrediction() const {
 
         CapsuleBuilder::BuildCapsuleInstances(
             m_predictedPointsBuffer, PackPremultipliedGpuColor(m_activeStyle.color), m_predictedCapsules);
+
+        // Distance-attenuated alpha fading: confidence degrades with lookahead distance
+        if (m_config.prediction.fadeEnable && !m_predictedCapsules.empty()) {
+            float totalDist = 0.0f;
+            for (const auto& cap : m_predictedCapsules) {
+                float dx = cap.pointB.x - cap.pointA.x;
+                float dy = cap.pointB.y - cap.pointA.y;
+                totalDist += std::hypot(dx, dy);
+            }
+
+            const float fadeStart = std::max(0.0f, m_config.prediction.fadeStartMm);
+            if (totalDist > fadeStart) {
+                float fadeSpan = totalDist - fadeStart;
+                float accumDist = 0.0f;
+                for (auto& cap : m_predictedCapsules) {
+                    float dx = cap.pointB.x - cap.pointA.x;
+                    float dy = cap.pointB.y - cap.pointA.y;
+                    float segLen = std::hypot(dx, dy);
+                    float midDist = accumDist + 0.5f * segLen;
+                    accumDist += segLen;
+
+                    if (midDist <= fadeStart) {
+                        cap.alphaFade = 1.0f;
+                    } else {
+                        float t = std::clamp((midDist - fadeStart) / fadeSpan, 0.0f, 1.0f);
+                        cap.alphaFade = std::lerp(1.0f, m_config.prediction.fadeEndAlpha, t);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -331,8 +376,12 @@ void InkEngine::EnsurePrediction() const {
 float InkEngine::EvaluateTapWidth(float pressure, float tiltX, float tiltY) const noexcept {
     const bool isPencil = (m_activeStyle.pattern == StrokePattern::TexturedPencil);
     float pForEval = m_evalConfig.dynamics.usePressure ? pressure : -1.0f;
-    return StrokeWidthEvaluator::CalculateDynamicWidth(
+    float w = StrokeWidthEvaluator::CalculateDynamicWidth(
         m_activeStyle.baseWidth, pForEval, 0.0f, tiltX, tiltY, -1.0f, m_zoomScale, m_evalConfig, isPencil);
+    if (m_activeStyle.nibAspect < 0.999f) {
+        w *= m_activeStyle.nibAspect;
+    }
+    return w;
 }
 
 StrokePoint InkEngine::ToStrokePoint(const sm::Result& res, float previousWidth) const {
@@ -357,6 +406,12 @@ StrokePoint InkEngine::ToStrokePoint(const sm::Result& res, float previousWidth)
     float dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidthWithTiltRad(
         m_activeStyle.baseWidth, pForEval, vForEval, tiltRad,
         previousWidth, m_zoomScale, m_evalConfig, isPencil, m_currentTurnAngleRad);
+
+    // Anisotropic nib width evaluation (calligraphy / chisel pen)
+    if (m_activeStyle.nibAspect < 0.999f && (res.velocity.x != 0.0f || res.velocity.y != 0.0f)) {
+        float travelHeading = std::atan2(static_cast<float>(res.velocity.y), static_cast<float>(res.velocity.x));
+        dynamicWidth *= StrokeWidthEvaluator::NibWidthFactor(travelHeading, m_activeStyle.nibAngleRad, m_activeStyle.nibAspect);
+    }
 
     return StrokePoint(res.position.x, res.position.y, dynamicWidth * 0.5f, effectivePressure, tiltX, tiltY);
 }

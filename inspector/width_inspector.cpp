@@ -1,4 +1,4 @@
-#include "debug/width_inspector.hpp"
+#include "inspector/width_inspector.hpp"
 #include "folio_sketch/engine/stroke_width_evaluator.hpp"
 #include "folio_sketch/engine/stroke_post_processor.hpp"
 #include <cmath>

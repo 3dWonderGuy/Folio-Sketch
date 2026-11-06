@@ -146,6 +146,8 @@ struct StrokeStyle {
     bool          usePressure = true;                             // Modulate width by stylus pressure
     bool          useVelocity = false;                            // Fountain pen hydrodynamic thinning
     bool          useTilt     = false;                            // Shading spread via stylus tilt
+    float         nibAngleRad = 0.0f;                             // Orientation of the nib's major axis (radians, canvas space)
+    float         nibAspect   = 1.0f;                             // Minor/major axis ratio of the elliptical nib; 1 = round (isotropic)
 };
 
 // =============================================================================
