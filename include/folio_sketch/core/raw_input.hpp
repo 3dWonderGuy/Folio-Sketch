@@ -26,17 +26,13 @@ struct RawInputSample {
     double  x            = 0.0;   ///< Canvas X (mm)
     double  y            = 0.0;   ///< Canvas Y (mm)
     float   pressure     = 1.0f;  ///< Contact pressure [0, 1]; < 0 when unavailable
-    float   tiltRad      = 0.0f;  ///< Stylus tilt (radians)
-    double  timestampSec = 0.0;   ///< Monotonic timestamp (seconds)
     float   tiltX        = 0.0f;  ///< Stylus tilt along X (radians)
     float   tiltY        = 0.0f;  ///< Stylus tilt along Y (radians)
     int64_t timeNs       = 0;     ///< Monotonic hardware timestamp (nanoseconds)
 
-    constexpr RawInputSample() = default;
-    constexpr RawInputSample(double px, double py, float p = 1.0f, float tilt = 0.0f, double tSec = 0.0,
-                             float tx = 0.0f, float ty = 0.0f, int64_t tNano = 0)
-        : x(px), y(py), pressure(p), tiltRad(tilt), timestampSec(tSec),
-          tiltX(tx), tiltY(ty), timeNs(tNano) {}
+    // Compatibility fields for inspector telemetry
+    float   tiltRad      = 0.0f;
+    double  timestampSec = 0.0;
 
     [[nodiscard]] constexpr double TimeSec() const noexcept {
         if (timestampSec > 0.0) return timestampSec;
