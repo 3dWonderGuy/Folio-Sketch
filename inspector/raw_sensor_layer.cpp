@@ -135,15 +135,15 @@ bool RawSensorHUD::HandleEventBatch(const SDL_Event& event,
 
                     // Micro-jitter injection for intermediate sub-packets
                     if (m_microJitterMm > 0.0f && i < K) {
-                        float jx = (static_cast<float>(std::rand()) / RAND_MAX - 0.5f) * 2.0f * m_microJitterMm;
-                        float jy = (static_cast<float>(std::rand()) / RAND_MAX - 0.5f) * 2.0f * m_microJitterMm;
+                        float jx = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) - 0.5f) * 2.0f * m_microJitterMm;
+                        float jy = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) - 0.5f) * 2.0f * m_microJitterMm;
                         subX += jx;
                         subY += jy;
                     }
 
                     // Simulated packet drop
                     if (m_packetDropRate > 0.001f && i < K) {
-                        float r = static_cast<float>(std::rand()) / RAND_MAX;
+                        float r = static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
                         if (r < m_packetDropRate) {
                             m_totalDroppedPackets++;
                             continue;
@@ -274,14 +274,14 @@ bool RawSensorHUD::HandleEventBatch(const SDL_Event& event,
                         float subP = m_prevSample.pressure + alpha * (currSample.pressure - m_prevSample.pressure);
 
                         if (m_microJitterMm > 0.0f && i < K) {
-                            float jx = (static_cast<float>(std::rand()) / RAND_MAX - 0.5f) * 2.0f * m_microJitterMm;
-                            float jy = (static_cast<float>(std::rand()) / RAND_MAX - 0.5f) * 2.0f * m_microJitterMm;
+                            float jx = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) - 0.5f) * 2.0f * m_microJitterMm;
+                            float jy = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) - 0.5f) * 2.0f * m_microJitterMm;
                             subX += jx;
                             subY += jy;
                         }
 
                         if (m_packetDropRate > 0.001f && i < K) {
-                            float r = static_cast<float>(std::rand()) / RAND_MAX;
+                            float r = static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
                             if (r < m_packetDropRate) {
                                 m_totalDroppedPackets++;
                                 continue;

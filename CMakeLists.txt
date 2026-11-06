@@ -179,18 +179,8 @@ else()
     )
 endif()
 
-# ==============================================================================
-# FolioBackends (Optional Hardware Rendering & Compositor Plugs)
-# ==============================================================================
-add_subdirectory(folio_backends)
-
-# ==============================================================================
-# Interactive Inking Diagnostic Playground & Inspector (folio_ink_inspector)
-# Standalone demo + test app. SDL3 and Dear ImGui are vendored in third_party/.
-# Defined BEFORE the test suite so it is the primary/default runnable target.
-# ==============================================================================
+# --- Vendored SDL3 (static) ---
 if(FOLIO_SKETCH_BUILD_INSPECTOR)
-    # --- Vendored SDL3 (static) ---
     if(NOT TARGET SDL3::SDL3)
         set(SDL_SHARED OFF CACHE BOOL "" FORCE)
         set(SDL_STATIC ON CACHE BOOL "" FORCE)
@@ -205,7 +195,19 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
             add_library(SDL3::SDL3 ALIAS SDL3-static)
         endif()
     endif()
+endif()
 
+# ==============================================================================
+# FolioBackends (Optional Hardware Rendering & Compositor Plugs)
+# ==============================================================================
+add_subdirectory(folio_backends)
+
+# ==============================================================================
+# Interactive Inking Diagnostic Playground & Inspector (folio_ink_inspector)
+# Standalone demo + test app. SDL3 and Dear ImGui are vendored in third_party/.
+# Defined BEFORE the test suite so it is the primary/default runnable target.
+# ==============================================================================
+if(FOLIO_SKETCH_BUILD_INSPECTOR)
     # --- Vendored Dear ImGui (SDL3 + OpenGL3 backends) ---
     set(FOLIO_IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
     add_library(imgui STATIC

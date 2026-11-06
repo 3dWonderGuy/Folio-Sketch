@@ -467,7 +467,9 @@ std::vector<RawInputSample> MakeTestShapeSamples(int kind, float cx, float cy) {
     };
     auto push = [&](float x, float y) {
         const int i = static_cast<int>(out.size());
-        out.push_back({ x + jitter(i, 1.4f), y + jitter(i + 977, 1.4f), 0.7f, 0.0f, t });
+        out.push_back({ static_cast<double>(x + jitter(i, 1.4f)),
+                        static_cast<double>(y + jitter(i + 977, 1.4f)),
+                        0.7f, 0.0f, t });
         t += dt;
     };
     auto pushPolygon = [&](const std::vector<ImVec2>& verts, int samplesPerEdge) {
@@ -644,13 +646,13 @@ int RunHeadlessDiagnostics() {
             double step = (i >= 12) ? 2.5 : 8.0;
             x += step * std::cos(a1);
             y += step * std::sin(a1);
-            samples.push_back({ static_cast<float>(x), static_cast<float>(y), 0.65f, 0.0f, t });
+            samples.push_back({ x, y, 0.65f, 0.0f, t });
             t += dt;
         }
         for (int p = 0; p < cornerPauseSteps; ++p) {
             x += 0.4 * std::cos(a1);
             y += 0.4 * std::sin(a1);
-            samples.push_back({ static_cast<float>(x), static_cast<float>(y), 0.65f, 0.0f, t });
+            samples.push_back({ x, y, 0.65f, 0.0f, t });
             t += dt;
         }
         // Second leg turning down by angleDeg
@@ -659,7 +661,7 @@ int RunHeadlessDiagnostics() {
             double step = (i < 3) ? 2.5 : 8.0;
             x += step * std::cos(a2);
             y += step * std::sin(a2);
-            samples.push_back({ static_cast<float>(x), static_cast<float>(y), 0.65f, 0.0f, t });
+            samples.push_back({ x, y, 0.65f, 0.0f, t });
             t += dt;
         }
         samples.back().pressure = 0.0f;
@@ -687,8 +689,7 @@ int RunHeadlessDiagnostics() {
         auto addSeg = [&](double x0, double y0, double x1, double y1, int steps) {
             for (int i = 0; i < steps; ++i) {
                 double u = static_cast<double>(i) / steps;
-                samples.push_back({ static_cast<float>(x0 + (x1 - x0) * u),
-                                    static_cast<float>(y0 + (y1 - y0) * u), 0.7f, 0.0f, t });
+                samples.push_back({ x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, 0.7f, 0.0f, t });
                 t += dt;
             }
         };

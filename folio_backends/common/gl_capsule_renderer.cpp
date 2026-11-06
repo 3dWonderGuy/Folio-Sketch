@@ -7,16 +7,20 @@
 
 #include "folio_backends/common/gl_capsule_renderer.hpp"
 
+#if defined(__ANDROID__)
+#include <GLES3/gl3.h>
+#elif defined(_WIN32)
 #if __has_include("gl_loader.hpp")
 #include "gl_loader.hpp"
 #elif __has_include("inspector/gl_loader.hpp")
 #include "inspector/gl_loader.hpp"
-#elif __has_include("debug/gl_loader.hpp")
-#include "debug/gl_loader.hpp"
-#elif defined(__ANDROID__)
-#include <GLES3/gl3.h>
 #else
 #include <GL/gl.h>
+#endif
+#else
+#define GL_GLEXT_PROTOTYPES 1
+#include <GL/gl.h>
+#include <GL/glext.h>
 #endif
 
 #include <chrono>

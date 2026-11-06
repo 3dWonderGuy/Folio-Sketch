@@ -6,6 +6,7 @@
 #undef glDeleteBuffers
 #undef glGenBuffers
 #undef glBufferData
+#undef glBufferSubData
 #undef glStencilOpSeparate
 #undef glAttachShader
 #undef glCompileShader
@@ -62,6 +63,7 @@ bool InitGlLoader() {
     LOAD_GL(glDeleteBuffers, PFNGLDELETEBUFFERSPROC);
     LOAD_GL(glGenBuffers, PFNGLGENBUFFERSPROC);
     LOAD_GL(glBufferData, PFNGLBUFFERDATAPROC);
+    LOAD_GL(glBufferSubData, PFNGLBUFFERSUBDATAPROC);
     LOAD_GL(glStencilOpSeparate, PFNGLSTENCILOPSEPARATEPROC);
     LOAD_GL(glAttachShader, PFNGLATTACHSHADERPROC);
     LOAD_GL(glCompileShader, PFNGLCOMPILESHADERPROC);

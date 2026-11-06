@@ -34,6 +34,7 @@ struct GlFuncs {
     PFNGLDELETEBUFFERSPROC glDeleteBuffers = nullptr;
     PFNGLGENBUFFERSPROC glGenBuffers = nullptr;
     PFNGLBUFFERDATAPROC glBufferData = nullptr;
+    PFNGLBUFFERSUBDATAPROC glBufferSubData = nullptr;
     PFNGLSTENCILOPSEPARATEPROC glStencilOpSeparate = nullptr;
     PFNGLATTACHSHADERPROC glAttachShader = nullptr;
     PFNGLCOMPILESHADERPROC glCompileShader = nullptr;
@@ -79,6 +80,7 @@ bool InitGlLoader();
 #define glDeleteBuffers               (::Folio::Debug::g_gl.glDeleteBuffers)
 #define glGenBuffers                  (::Folio::Debug::g_gl.glGenBuffers)
 #define glBufferData                  (::Folio::Debug::g_gl.glBufferData)
+#define glBufferSubData               (::Folio::Debug::g_gl.glBufferSubData)
 #define glStencilOpSeparate           (::Folio::Debug::g_gl.glStencilOpSeparate)
 #define glAttachShader                (::Folio::Debug::g_gl.glAttachShader)
 #define glCompileShader               (::Folio::Debug::g_gl.glCompileShader)
