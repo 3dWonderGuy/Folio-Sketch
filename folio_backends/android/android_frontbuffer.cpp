@@ -34,19 +34,50 @@ AndroidFrontBuffer::~AndroidFrontBuffer() {
 }
 
 bool AndroidFrontBuffer::Init(ANativeWindow* window) {
-    if (!window) return false;
     Shutdown();
     m_window = window;
 
 #if defined(__ANDROID__)
-    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    EGLDisplay display = eglGetCurrentDisplay();
+    EGLSurface surface = eglGetCurrentSurface(EGL_DRAW);
+    EGLContext context = eglGetCurrentContext();
+
+    // 1. Re-use existing active EGL context/surface initialized by windowing framework (SDL3)
+    if (display != EGL_NO_DISPLAY && surface != EGL_NO_SURFACE && context != EGL_NO_CONTEXT) {
+        LOGI("Obtained active EGLDisplay %p, EGLSurface %p, EGLContext %p", display, surface, context);
+
+        // Enable hardware front buffer auto refresh (bypasses SurfaceFlinger multi-buffer swapchain latency)
+        EGLBoolean res = eglSurfaceAttrib(display, surface, EGL_FRONT_BUFFER_AUTO_REFRESH_ANDROID, 1);
+        if (res == EGL_TRUE) {
+            LOGI("SUCCESS: Enabled EGL_FRONT_BUFFER_AUTO_REFRESH_ANDROID (1) on active surface!");
+        } else {
+            EGLint err = eglGetError();
+            LOGE("Notice: eglSurfaceAttrib EGL_FRONT_BUFFER_AUTO_REFRESH_ANDROID returned 0x%04x. Proceeding with active surface scanout.", err);
+        }
+
+        m_display = display;
+        m_surface = surface;
+        m_context = context;
+        m_ownsContext = false;
+
+        eglQuerySurface(display, surface, EGL_WIDTH, &m_width);
+        eglQuerySurface(display, surface, EGL_HEIGHT, &m_height);
+
+        m_initialized = true;
+        LOGI("AndroidFrontBuffer successfully initialized on active surface (%dx%d)", m_width, m_height);
+        return true;
+    }
+
+    if (!window) return false;
+
+    display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (display == EGL_NO_DISPLAY) {
-        LOGE("eglGetDisplay failed");
+        LOGE("eglGetDisplay failed: 0x%04x", eglGetError());
         return false;
     }
 
     if (!eglInitialize(display, nullptr, nullptr)) {
-        LOGE("eglInitialize failed");
+        LOGE("eglInitialize failed: 0x%04x", eglGetError());
         return false;
     }
 
@@ -65,7 +96,7 @@ bool AndroidFrontBuffer::Init(ANativeWindow* window) {
     EGLConfig config = nullptr;
     EGLint numConfigs = 0;
     if (!eglChooseConfig(display, configAttribs, &config, 1, &numConfigs) || numConfigs <= 0) {
-        LOGE("eglChooseConfig failed");
+        LOGE("eglChooseConfig failed: 0x%04x", eglGetError());
         return false;
     }
 
@@ -75,40 +106,33 @@ bool AndroidFrontBuffer::Init(ANativeWindow* window) {
         EGL_NONE
     };
 
-    EGLSurface surface = eglCreateWindowSurface(display, config, window, surfaceAttribs);
+    LOGI("Attempting eglCreateWindowSurface on ANativeWindow %p (single-buffered)...", window);
+    surface = eglCreateWindowSurface(display, config, window, surfaceAttribs);
     if (surface == EGL_NO_SURFACE) {
-        // Fallback to default window surface
+        EGLint err = eglGetError();
+        LOGE("eglCreateWindowSurface (single-buffered) FAILED: 0x%04x", err);
         surface = eglCreateWindowSurface(display, config, window, nullptr);
     }
 
     if (surface == EGL_NO_SURFACE) {
-        LOGE("eglCreateWindowSurface failed");
+        LOGE("eglCreateWindowSurface failed: 0x%04x", eglGetError());
         return false;
     }
 
-    // Enable front buffer auto refresh (bypasses swapchain compositor latency)
+    // Enable front buffer auto refresh
     eglSurfaceAttrib(display, surface, EGL_FRONT_BUFFER_AUTO_REFRESH_ANDROID, 1);
 
-    // Share active context if one exists, otherwise create dedicated GLES3 context
-    EGLContext currentContext = eglGetCurrentContext();
-    EGLContext context = EGL_NO_CONTEXT;
-    if (currentContext != EGL_NO_CONTEXT) {
-        context = currentContext;
-        m_ownsContext = false;
-    } else {
-        const EGLint contextAttribs[] = {
-            EGL_CONTEXT_CLIENT_VERSION, 3,
-            EGL_NONE
-        };
-        context = eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttribs);
-        m_ownsContext = true;
-    }
-
+    const EGLint contextAttribs[] = {
+        EGL_CONTEXT_CLIENT_VERSION, 3,
+        EGL_NONE
+    };
+    context = eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttribs);
     if (context == EGL_NO_CONTEXT) {
-        LOGE("Failed to obtain EGL context for front buffer");
+        LOGE("Failed to obtain EGL context for front buffer: 0x%04x", eglGetError());
         eglDestroySurface(display, surface);
         return false;
     }
+    m_ownsContext = true;
 
     m_display = display;
     m_surface = surface;
@@ -165,6 +189,7 @@ bool AndroidFrontBuffer::BeginWetDraw(int* outWidth, int* outHeight) {
     EGLContext context = static_cast<EGLContext>(m_context);
 
     if (!eglMakeCurrent(display, surface, surface, context)) {
+        LOGE("BeginWetDraw eglMakeCurrent FAILED: 0x%04x", eglGetError());
         return false;
     }
 

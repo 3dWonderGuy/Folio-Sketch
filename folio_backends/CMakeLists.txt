@@ -10,6 +10,10 @@ set(FOLIO_BACKENDS_SOURCES
     android/android_frontbuffer.cpp
 )
 
+if(ANDROID)
+    list(APPEND FOLIO_BACKENDS_SOURCES android/folio_android_jni.cpp)
+endif()
+
 set(FOLIO_BACKENDS_HEADERS
     common/gl_capsule_renderer.hpp
     android/android_frontbuffer.hpp

@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId "org.foliosketch.inspector"
-        minSdk 28
+        minSdk 29
         targetSdk 35
         versionCode 1
         versionName "1.0"
@@ -40,16 +40,26 @@ android {
     externalNativeBuild {
         cmake {
             path file("../../../CMakeLists.txt")
-            version "3.30.3"
+            version "3.22.1"
         }
     }
 
     lint {
         abortOnError false
     }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs << "-Xlint:deprecation"
 }
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation 'androidx.core:core:1.15.0'
+    implementation 'androidx.graphics:graphics-core:1.0.2'
 }

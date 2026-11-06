@@ -56,6 +56,7 @@ bool GlCapsuleRenderer::Init() {
         "layout(location = 5) in float aAlphaFade;\n"
         "uniform vec4 uTransform; // (panX, panY, zoom, unused)\n"
         "uniform vec2 uViewport;  // (width, height)\n"
+        "uniform mat4 uSurfaceTransform;\n"
         "out vec2 vWorldPos;\n"
         "flat out vec2 vPointA;\n"
         "flat out vec2 vPointB;\n"
@@ -75,7 +76,7 @@ bool GlCapsuleRenderer::Init() {
         "    vec2 worldPos = mid + u * (aQuadPos.x * halfSpanU) + n * (aQuadPos.y * maxR);\n"
         "    vec2 screenPos = worldPos * zoom + uTransform.xy;\n"
         "    vec2 ndc = vec2(\n"
-        "        (screenPos.x / uViewport.x) * 2.0 - 1.0,\n"
+        "        1.0 - (screenPos.x / uViewport.x) * 2.0,\n"
         "        1.0 - (screenPos.y / uViewport.y) * 2.0\n"
         "    );\n"
         "    gl_Position = vec4(ndc, 0.0, 1.0);\n"
@@ -200,6 +201,7 @@ bool GlCapsuleRenderer::Init() {
     m_locTransform = glGetUniformLocation(m_program, "uTransform");
     m_locViewport  = glGetUniformLocation(m_program, "uViewport");
     m_locGrain     = glGetUniformLocation(m_program, "uGrain");
+    m_locSurfaceTransform = glGetUniformLocation(m_program, "uSurfaceTransform");
 
     // Static unit quad [-1.0, 1.0]
     static constexpr float kUnitQuadVertices[12] = {
@@ -343,18 +345,34 @@ void GlCapsuleRenderer::EnsureLayer(int w, int h) {
 }
 
 void GlCapsuleRenderer::DrawInstances(const CanvasTransform& transform, int vpWidth, int vpHeight,
-                                      const CapsuleBrush& brush) const {
+                                      const CapsuleBrush& brush, const float* surfaceTransform) const {
     glUseProgram(m_program);
     glUniform4f(m_locTransform, transform.panX, transform.panY, transform.zoom, 0.0f);
     glUniform2f(m_locViewport, static_cast<float>(vpWidth), static_cast<float>(vpHeight));
     glUniform2f(m_locGrain, brush.grain, brush.grainScale);
+
+    if (m_locSurfaceTransform >= 0) {
+        if (surfaceTransform != nullptr) {
+            glUniformMatrix4fv(m_locSurfaceTransform, 1, GL_FALSE, surfaceTransform);
+        } else {
+            static const float identity[16] = {
+                1.0f, 0.0f, 0.0f, 0.0f,
+                0.0f, 1.0f, 0.0f, 0.0f,
+                0.0f, 0.0f, 1.0f, 0.0f,
+                0.0f, 0.0f, 0.0f, 1.0f
+            };
+            glUniformMatrix4fv(m_locSurfaceTransform, 1, GL_FALSE, identity);
+        }
+    }
+
     glBindVertexArray(m_vao);
     glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(m_instanceCount));
     glBindVertexArray(0);
 }
 
 void GlCapsuleRenderer::Render(const CanvasTransform& transform, int vpWidth, int vpHeight,
-                               const CapsuleBrush& brush, bool singlePassWet) {
+                               const CapsuleBrush& brush, bool singlePassWet,
+                               const float* surfaceTransform) {
     if (!m_program || !m_vao || m_instanceCount == 0 || vpWidth <= 0 || vpHeight <= 0) return;
 
     glDisable(GL_CULL_FACE);
@@ -364,7 +382,7 @@ void GlCapsuleRenderer::Render(const CanvasTransform& transform, int vpWidth, in
     // Live wet stroke or direct solid pass: bypass layer FBO allocations, clears and blits
     if (singlePassWet || (!brush.unionOverlap && brush.opacity >= 0.999f)) {
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-        DrawInstances(transform, vpWidth, vpHeight, brush);
+        DrawInstances(transform, vpWidth, vpHeight, brush, surfaceTransform);
         glUseProgram(0);
         return;
     }
@@ -382,7 +400,7 @@ void GlCapsuleRenderer::Render(const CanvasTransform& transform, int vpWidth, in
     glClear(GL_COLOR_BUFFER_BIT);
     glBlendEquation(GL_MAX);
     glBlendFunc(GL_ONE, GL_ONE);
-    DrawInstances(transform, vpWidth, vpHeight, brush);
+    DrawInstances(transform, vpWidth, vpHeight, brush, surfaceTransform);
     glBlendEquation(GL_FUNC_ADD);
 
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
@@ -406,9 +424,10 @@ void GlCapsuleRenderer::RenderStroke(std::span<const StrokePoint> points,
                                      int vpWidth,
                                      int vpHeight,
                                      const CapsuleBrush& brush,
-                                     bool singlePassWet) {
+                                     bool singlePassWet,
+                                     const float* surfaceTransform) {
     UploadStroke(points, color);
-    Render(transform, vpWidth, vpHeight, brush, singlePassWet);
+    Render(transform, vpWidth, vpHeight, brush, singlePassWet, surfaceTransform);
 }
 
 #if defined(FOLIO_BACKENDS_HAS_IMGUI)

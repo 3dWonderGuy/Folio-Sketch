@@ -106,7 +106,8 @@ public:
      * @param singlePassWet When true, bypasses offscreen layer FBO allocations/clears for minimum latency live wet strokes.
      */
     void Render(const CanvasTransform& transform, int vpWidth, int vpHeight,
-                const CapsuleBrush& brush = {}, bool singlePassWet = false);
+                const CapsuleBrush& brush = {}, bool singlePassWet = false,
+                const float* surfaceTransform = nullptr);
 
     /**
      * @brief Convenience helper: uploads points and immediately renders them.
@@ -117,7 +118,8 @@ public:
                       int vpWidth,
                       int vpHeight,
                       const CapsuleBrush& brush = {},
-                      bool singlePassWet = false);
+                      bool singlePassWet = false,
+                      const float* surfaceTransform = nullptr);
 
 #if defined(FOLIO_BACKENDS_HAS_IMGUI)
     /**
@@ -140,18 +142,19 @@ private:
     void EnsureCapacity(size_t requiredCount);
     void EnsureLayer(int w, int h);
     void DrawInstances(const CanvasTransform& transform, int vpWidth, int vpHeight,
-                       const CapsuleBrush& brush) const;
+                       const CapsuleBrush& brush, const float* surfaceTransform = nullptr) const;
 
     // Shader programs & locations
-    unsigned int m_program         = 0;
-    unsigned int m_vao             = 0;
-    unsigned int m_quadVbo         = 0;
-    unsigned int m_instanceVbo     = 0;
-    size_t       m_vboCapacity     = 0;
-    size_t       m_instanceCount   = 0;
-    int          m_locTransform    = -1;
-    int          m_locViewport     = -1;
-    int          m_locGrain        = -1;
+    unsigned int m_program               = 0;
+    unsigned int m_vao                   = 0;
+    unsigned int m_quadVbo               = 0;
+    unsigned int m_instanceVbo           = 0;
+    size_t       m_vboCapacity           = 0;
+    size_t       m_instanceCount         = 0;
+    int          m_locTransform          = -1;
+    int          m_locViewport           = -1;
+    int          m_locGrain              = -1;
+    int          m_locSurfaceTransform   = -1;
 
     // Stroke-layer FBO (for unionOverlap multi-pass composite)
     unsigned int m_compositeProgram = 0;

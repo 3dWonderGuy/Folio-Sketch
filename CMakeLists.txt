@@ -264,7 +264,11 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/folio_backends"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspector"
     )
-    target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch folio_backends SDL3::SDL3 imgui)
+    if(ANDROID)
+        target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch -Wl,--whole-archive folio_backends -Wl,--no-whole-archive SDL3::SDL3 imgui)
+    else()
+        target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch folio_backends SDL3::SDL3 imgui)
+    endif()
     if(ANDROID)
         find_library(ANDROID_LOG_LIB log)
         find_library(ANDROID_LIB android)
