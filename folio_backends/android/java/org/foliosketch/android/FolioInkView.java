@@ -77,6 +77,19 @@ public class FolioInkView extends SurfaceView {
         getHolder().setFormat(PixelFormat.TRANSLUCENT);
         mEngineHandle = FolioNativeBridge.nativeCreateEngine();
         mFrontBufferedRenderer = new GLFrontBufferedRenderer<>(this, mRendererCallback);
+        post(this::requestRedraw);
+    }
+
+    public void requestRedraw() {
+        if (mFrontBufferedRenderer != null) {
+            mFrontBufferedRenderer.renderMultiBufferedLayer(java.util.Collections.emptyList());
+        }
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        post(this::requestRedraw);
     }
 
     public void clearCanvas() {
@@ -101,6 +114,7 @@ public class FolioInkView extends SurfaceView {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        final int action = event.getActionMasked();
         final int actionIndex = event.getActionIndex();
         final int toolType = (actionIndex >= 0 && actionIndex < event.getPointerCount())
             ? event.getToolType(actionIndex)
@@ -109,18 +123,93 @@ public class FolioInkView extends SurfaceView {
         final boolean isStylus = (toolType == MotionEvent.TOOL_TYPE_STYLUS ||
                                   toolType == MotionEvent.TOOL_TYPE_ERASER);
 
+        // 1. Offer event to Dear ImGui first (both finger touch and stylus)
+        if (mEngineHandle != 0) {
+            boolean captured = FolioNativeBridge.nativeTouch(
+                mEngineHandle, event.getX(), event.getY(), action
+            );
+            if (captured) {
+                requestRedraw();
+                return true;
+            }
+        }
+
+        // 2. If not captured by ImGui, route finger touch to canvas pan & zoom
         if (!isStylus) {
+            if (mEngineHandle != 0) {
+                final int pointerCount = event.getPointerCount();
+                final long eventTimeNs = event.getEventTime() * 1_000_000L;
+
+                switch (action) {
+                    case MotionEvent.ACTION_DOWN:
+                    case MotionEvent.ACTION_POINTER_DOWN: {
+                        int idx = event.getActionIndex();
+                        FolioNativeBridge.nativeIngestPacket(
+                            mEngineHandle,
+                            event.getX(idx), event.getY(idx), event.getPressure(idx),
+                            0f, 0f, eventTimeNs,
+                            true, false, false,
+                            event.getPointerId(idx)
+                        );
+                        return true;
+                    }
+                    case MotionEvent.ACTION_MOVE: {
+                        for (int i = 0; i < pointerCount; ++i) {
+                            FolioNativeBridge.nativeIngestPacket(
+                                mEngineHandle,
+                                event.getX(i), event.getY(i), event.getPressure(i),
+                                0f, 0f, eventTimeNs,
+                                false, false, false,
+                                event.getPointerId(i)
+                            );
+                        }
+                        if (pointerCount >= 2 && mFrontBufferedRenderer != null) {
+                            requestRedraw();
+                        }
+                        return true;
+                    }
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_POINTER_UP: {
+                        int idx = event.getActionIndex();
+                        FolioNativeBridge.nativeIngestPacket(
+                            mEngineHandle,
+                            event.getX(idx), event.getY(idx), event.getPressure(idx),
+                            0f, 0f, eventTimeNs,
+                            false, true, false,
+                            event.getPointerId(idx)
+                        );
+                        if (mFrontBufferedRenderer != null) {
+                            requestRedraw();
+                        }
+                        return true;
+                    }
+                    case MotionEvent.ACTION_CANCEL: {
+                        for (int i = 0; i < pointerCount; ++i) {
+                            FolioNativeBridge.nativeIngestPacket(
+                                mEngineHandle,
+                                event.getX(i), event.getY(i), 0f,
+                                0f, 0f, eventTimeNs,
+                                false, true, false,
+                                event.getPointerId(i)
+                            );
+                        }
+                        if (mFrontBufferedRenderer != null) {
+                            requestRedraw();
+                        }
+                        return true;
+                    }
+                }
+            }
             return false;
         }
 
-        // Request unbuffered dispatch for stylus (bypasses 60Hz OS VSYNC batching)
+        // 3. Stylus inking fast path (zero-latency front-buffered scanout)
         requestUnbufferedDispatch(event);
 
         if (mEngineHandle == 0 || mFrontBufferedRenderer == null) {
             return super.onTouchEvent(event);
         }
 
-        final int action = event.getActionMasked();
         final float tiltX = event.getAxisValue(MotionEvent.AXIS_TILT);
         final float tiltY = event.getAxisValue(MotionEvent.AXIS_ORIENTATION);
 
@@ -131,7 +220,8 @@ public class FolioInkView extends SurfaceView {
                     event.getX(), event.getY(), event.getPressure(),
                     tiltX, tiltY,
                     event.getEventTime() * 1_000_000L,
-                    true, false, isStylus
+                    true, false, isStylus,
+                    event.getPointerId(0)
                 );
                 if (isStylus) {
                     mFrontBufferedRenderer.renderFrontBufferedLayer(this);
@@ -153,7 +243,8 @@ public class FolioInkView extends SurfaceView {
                         hp > 1.0f ? 1.0f : hp,
                         hTiltX, hTiltY,
                         event.getHistoricalEventTime(h) * 1_000_000L,
-                        false, false, isStylus
+                        false, false, isStylus,
+                        event.getPointerId(0)
                     );
                 }
 
@@ -164,7 +255,8 @@ public class FolioInkView extends SurfaceView {
                     p > 1.0f ? 1.0f : p,
                     tiltX, tiltY,
                     event.getEventTime() * 1_000_000L,
-                    false, false, isStylus
+                    false, false, isStylus,
+                    event.getPointerId(0)
                 );
                 mFrontBufferedRenderer.renderFrontBufferedLayer(this);
                 return true;
@@ -179,7 +271,8 @@ public class FolioInkView extends SurfaceView {
                     p > 1.0f ? 1.0f : p,
                     tiltX, tiltY,
                     event.getEventTime() * 1_000_000L,
-                    false, true, isStylus
+                    false, true, isStylus,
+                    event.getPointerId(0)
                 );
                 mFrontBufferedRenderer.commit();
                 return true;

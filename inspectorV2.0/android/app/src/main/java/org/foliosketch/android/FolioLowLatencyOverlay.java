@@ -123,6 +123,8 @@ public class FolioLowLatencyOverlay extends SurfaceView {
         final float tiltX = event.getAxisValue(MotionEvent.AXIS_TILT);
         final float tiltY = event.getAxisValue(MotionEvent.AXIS_ORIENTATION);
 
+        final int pointerId = event.getPointerId(0);
+
         switch (action) {
             case MotionEvent.ACTION_DOWN: {
                 FolioNativeBridge.nativeIngestPacket(
@@ -130,7 +132,8 @@ public class FolioLowLatencyOverlay extends SurfaceView {
                     event.getX(), event.getY(), event.getPressure(),
                     tiltX, tiltY,
                     event.getEventTime() * 1_000_000L,
-                    true, false, isStylus
+                    true, false, isStylus,
+                    pointerId
                 );
                 mFrontBufferedRenderer.renderFrontBufferedLayer(this);
                 break;
@@ -150,7 +153,8 @@ public class FolioLowLatencyOverlay extends SurfaceView {
                         hp > 1.0f ? 1.0f : hp,
                         hTiltX, hTiltY,
                         event.getHistoricalEventTime(h) * 1_000_000L,
-                        false, false, isStylus
+                        false, false, isStylus,
+                        pointerId
                     );
                 }
 
@@ -161,7 +165,8 @@ public class FolioLowLatencyOverlay extends SurfaceView {
                     p > 1.0f ? 1.0f : p,
                     tiltX, tiltY,
                     event.getEventTime() * 1_000_000L,
-                    false, false, isStylus
+                    false, false, isStylus,
+                    pointerId
                 );
                 mFrontBufferedRenderer.renderFrontBufferedLayer(this);
                 break;
@@ -176,7 +181,8 @@ public class FolioLowLatencyOverlay extends SurfaceView {
                     p > 1.0f ? 1.0f : p,
                     tiltX, tiltY,
                     event.getEventTime() * 1_000_000L,
-                    false, true, isStylus
+                    false, true, isStylus,
+                    pointerId
                 );
                 mFrontBufferedRenderer.commit();
                 break;

@@ -10,10 +10,6 @@ set(FOLIO_BACKENDS_SOURCES
     android/android_frontbuffer.cpp
 )
 
-if(ANDROID)
-    list(APPEND FOLIO_BACKENDS_SOURCES android/folio_android_jni.cpp)
-endif()
-
 set(FOLIO_BACKENDS_HEADERS
     common/gl_capsule_renderer.hpp
     android/android_frontbuffer.hpp
@@ -35,12 +31,12 @@ target_include_directories(folio_backends
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../src"
         "${CMAKE_CURRENT_SOURCE_DIR}/../inspector"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../inspectorV2.0"
 )
 
 target_link_libraries(folio_backends
     PUBLIC
         folio_sketch
+        imgui
 )
 
 if(TARGET SDL3::SDL3)

@@ -50,13 +50,15 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeIngestPacket(
     jfloat x, jfloat y, jfloat pressure,
     jfloat tiltX, jfloat tiltY,
     jlong timestampNs,
-    jboolean isDown, jboolean isUp, jboolean isStylus)
+    jboolean isDown, jboolean isUp, jboolean isStylus,
+    jint pointerId)
 {
     auto* session = reinterpret_cast<FolioAndroidSession*>(handle);
     if (!session) return;
 
     Folio::V2::PointerPacket pkt;
     pkt.device = isStylus ? Folio::V2::DeviceType::Stylus : Folio::V2::DeviceType::Touch;
+    pkt.pointerId = pointerId;
     if (isDown) {
         pkt.phase = Folio::V2::InputPhase::Down;
     } else if (isUp) {
@@ -88,6 +90,19 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeRenderWet(
         matrixElements = env->GetFloatArrayElements(surfaceTransform, nullptr);
     }
 
+    if (matrixElements != nullptr) {
+        static bool s_logged = false;
+        if (!s_logged) {
+            s_logged = true;
+            LOGI("SurfaceTransform matrix: [%.2f, %.2f, %.2f, %.2f] [%.2f, %.2f, %.2f, %.2f] [%.2f, %.2f, %.2f, %.2f] [%.2f, %.2f, %.2f, %.2f], vp: %dx%d",
+                matrixElements[0], matrixElements[1], matrixElements[2], matrixElements[3],
+                matrixElements[4], matrixElements[5], matrixElements[6], matrixElements[7],
+                matrixElements[8], matrixElements[9], matrixElements[10], matrixElements[11],
+                matrixElements[12], matrixElements[13], matrixElements[14], matrixElements[15],
+                width, height);
+        }
+    }
+
     session->layerManager.RenderLiveInking(width, height, matrixElements);
 
     if (matrixElements != nullptr) {
@@ -109,6 +124,7 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeRenderDry(
     }
 
     session->layerManager.RenderDocumentCanvas(width, height, matrixElements);
+    session->layerManager.RenderImGui(width, height, matrixElements, /*isSdlHost=*/false);
 
     if (matrixElements != nullptr) {
         env->ReleaseFloatArrayElements(surfaceTransform, matrixElements, JNI_ABORT);
@@ -123,6 +139,28 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeClearCanvas(
     if (!session) return;
 
     session->layerManager.ClearDocument();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_org_foliosketch_android_FolioNativeBridge_nativeTouch(
+    JNIEnv* /*env*/, jclass /*clazz*/,
+    jlong handle, jfloat x, jfloat y, jint action)
+{
+    auto* session = reinterpret_cast<FolioAndroidSession*>(handle);
+    if (!session) return JNI_FALSE;
+
+    // Convert Android MotionEvent actions: 0=ACTION_DOWN, 1=ACTION_UP, 2=ACTION_MOVE, 3=ACTION_CANCEL
+    Folio::V2::InputPhase phase = Folio::V2::InputPhase::Move;
+    if (action == 0) {
+        phase = Folio::V2::InputPhase::Down;
+    } else if (action == 1) {
+        phase = Folio::V2::InputPhase::Up;
+    } else if (action == 3) {
+        phase = Folio::V2::InputPhase::Cancel;
+    }
+
+    bool captured = session->layerManager.HandleTouchForImGui(x, y, phase);
+    return captured ? JNI_TRUE : JNI_FALSE;
 }
 
 } // extern "C"

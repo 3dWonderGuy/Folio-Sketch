@@ -164,8 +164,9 @@ private:
     unsigned int m_layerTex         = 0;
     int          m_layerW           = 0;
     int          m_layerH           = 0;
-    int          m_locCompLayer     = -1;
-    int          m_locCompOpacity   = -1;
+    int          m_locCompLayer            = -1;
+    int          m_locCompOpacity          = -1;
+    int          m_locCompSurfaceTransform = -1;
 
     std::vector<CapsuleInstance> m_instances;
     double m_lastCpuIngestionMs = 0.0;

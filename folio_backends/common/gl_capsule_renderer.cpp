@@ -75,11 +75,18 @@ bool GlCapsuleRenderer::Init() {
         "    float halfSpanU = 0.5 * segLen + maxR;\n"
         "    vec2 worldPos = mid + u * (aQuadPos.x * halfSpanU) + n * (aQuadPos.y * maxR);\n"
         "    vec2 screenPos = worldPos * zoom + uTransform.xy;\n"
+#if defined(__ANDROID__)
         "    vec2 ndc = vec2(\n"
-        "        1.0 - (screenPos.x / uViewport.x) * 2.0,\n"
+        "        (screenPos.x / uViewport.x) * 2.0 - 1.0,\n"
+        "        (screenPos.y / uViewport.y) * 2.0 - 1.0\n"
+        "    );\n"
+#else
+        "    vec2 ndc = vec2(\n"
+        "        (screenPos.x / uViewport.x) * 2.0 - 1.0,\n"
         "        1.0 - (screenPos.y / uViewport.y) * 2.0\n"
         "    );\n"
-        "    gl_Position = vec4(ndc, 0.0, 1.0);\n"
+#endif
+        "    gl_Position = uSurfaceTransform * vec4(ndc, 0.0, 1.0);\n"
         "    vWorldPos   = worldPos;\n"
         "    vPointA     = aPointA;\n"
         "    vPointB     = aPointB;\n"
@@ -134,10 +141,11 @@ bool GlCapsuleRenderer::Init() {
     // Composite shader: fullscreen quad sampling offscreen layer with brush opacity
     std::string cvSrc = std::string(glslHeader) +
         "layout(location = 0) in vec2 aPos;\n"
+        "uniform mat4 uSurfaceTransform;\n"
         "out vec2 vUv;\n"
         "void main() {\n"
         "    vUv = aPos * 0.5 + 0.5;\n"
-        "    gl_Position = vec4(aPos, 0.0, 1.0);\n"
+        "    gl_Position = uSurfaceTransform * vec4(aPos, 0.0, 1.0);\n"
         "}\n";
     std::string cfSrc = std::string(glslHeader) +
         "in vec2 vUv;\n"
@@ -156,8 +164,9 @@ bool GlCapsuleRenderer::Init() {
         glLinkProgram(m_compositeProgram);
         glDeleteShader(cvs);
         glDeleteShader(cfs);
-        m_locCompLayer   = glGetUniformLocation(m_compositeProgram, "uLayer");
-        m_locCompOpacity = glGetUniformLocation(m_compositeProgram, "uOpacity");
+        m_locCompLayer            = glGetUniformLocation(m_compositeProgram, "uLayer");
+        m_locCompOpacity          = glGetUniformLocation(m_compositeProgram, "uOpacity");
+        m_locCompSurfaceTransform = glGetUniformLocation(m_compositeProgram, "uSurfaceTransform");
 
         static constexpr float kCompQuad[12] = {
             -1.0f, -1.0f,
@@ -411,6 +420,19 @@ void GlCapsuleRenderer::Render(const CanvasTransform& transform, int vpWidth, in
     glBindTexture(GL_TEXTURE_2D, m_layerTex);
     glUniform1i(m_locCompLayer, 0);
     glUniform1f(m_locCompOpacity, brush.opacity);
+    if (m_locCompSurfaceTransform >= 0) {
+        if (surfaceTransform != nullptr) {
+            glUniformMatrix4fv(m_locCompSurfaceTransform, 1, GL_FALSE, surfaceTransform);
+        } else {
+            static const float identity[16] = {
+                1.0f, 0.0f, 0.0f, 0.0f,
+                0.0f, 1.0f, 0.0f, 0.0f,
+                0.0f, 0.0f, 1.0f, 0.0f,
+                0.0f, 0.0f, 0.0f, 1.0f
+            };
+            glUniformMatrix4fv(m_locCompSurfaceTransform, 1, GL_FALSE, identity);
+        }
+    }
     glBindVertexArray(m_compositeVao);
     glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindVertexArray(0);

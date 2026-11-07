@@ -21,10 +21,12 @@ public final class FolioNativeBridge {
         float x, float y, float pressure,
         float tiltX, float tiltY,
         long timestampNs,
-        boolean isDown, boolean isUp, boolean isStylus
+        boolean isDown, boolean isUp, boolean isStylus,
+        int pointerId
     );
 
     public static native void nativeRenderWet(long handle, int width, int height, float[] surfaceTransform);
     public static native void nativeRenderDry(long handle, int width, int height, float[] surfaceTransform);
     public static native void nativeClearCanvas(long handle);
+    public static native boolean nativeTouch(long handle, float x, float y, int action);
 }
