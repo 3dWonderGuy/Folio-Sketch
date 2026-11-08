@@ -195,25 +195,27 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
             add_library(SDL3::SDL3 ALIAS SDL3-static)
         endif()
     endif()
+endif()
 
-    # --- Vendored Dear ImGui (SDL3 + OpenGL3 backends) ---
-    set(FOLIO_IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
-    if(NOT TARGET imgui)
-        add_library(imgui STATIC
-            "${FOLIO_IMGUI_DIR}/imgui.cpp"
-            "${FOLIO_IMGUI_DIR}/imgui_draw.cpp"
-            "${FOLIO_IMGUI_DIR}/imgui_tables.cpp"
-            "${FOLIO_IMGUI_DIR}/imgui_widgets.cpp"
-            "${FOLIO_IMGUI_DIR}/backends/imgui_impl_sdl3.cpp"
-            "${FOLIO_IMGUI_DIR}/backends/imgui_impl_opengl3.cpp"
-        )
-        target_include_directories(imgui PUBLIC "${FOLIO_IMGUI_DIR}" "${FOLIO_IMGUI_DIR}/backends")
-        target_compile_definitions(imgui PUBLIC IMGUI_DEFINE_MATH_OPERATORS)
-        target_link_libraries(imgui PUBLIC SDL3::SDL3)
-        if(ANDROID)
-            target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_ES3)
-        endif()
-    endif()
+# ==============================================================================
+# Vendored Dear ImGui (SDL3 + OpenGL3 backends)
+# ==============================================================================
+set(FOLIO_IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
+add_library(imgui STATIC
+    "${FOLIO_IMGUI_DIR}/imgui.cpp"
+    "${FOLIO_IMGUI_DIR}/imgui_draw.cpp"
+    "${FOLIO_IMGUI_DIR}/imgui_tables.cpp"
+    "${FOLIO_IMGUI_DIR}/imgui_widgets.cpp"
+    "${FOLIO_IMGUI_DIR}/backends/imgui_impl_sdl3.cpp"
+    "${FOLIO_IMGUI_DIR}/backends/imgui_impl_opengl3.cpp"
+)
+target_include_directories(imgui PUBLIC "${FOLIO_IMGUI_DIR}" "${FOLIO_IMGUI_DIR}/backends")
+target_compile_definitions(imgui PUBLIC IMGUI_DEFINE_MATH_OPERATORS)
+if(TARGET SDL3::SDL3)
+    target_link_libraries(imgui PUBLIC SDL3::SDL3)
+endif()
+if(ANDROID)
+    target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_ES3)
 endif()
 
 # ==============================================================================
@@ -233,22 +235,24 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
     endif()
 
     set(FOLIO_INSPECTOR_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/main.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/layer_manager.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/input_manager.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/gl_loader.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/gl_shape_renderer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/raw_sensor_layer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/modeler_inspector.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/width_inspector.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/geometry_inspector.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/stroke_scrubber.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/digitizer_trace_replayer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/wet_dry_compositor.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/layer_manager.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/ui/inspector_gui.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/ui/diagnostics_overlay.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/ui/tabs/tab_modeler.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/ui/tabs/tab_dynamics.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/ui/tabs/tab_postprocessing.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/ui/tabs/tab_shape_snapping.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/ui/tabs/tab_canvas.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/testbed/testbed_samples.cpp"
     )
 
     if(ANDROID)
-        # Android SDLActivity loads libmain.so
+        # Android FolioHostActivity loads libmain.so and executes SDL_main
+        list(APPEND FOLIO_INSPECTOR_SOURCES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/main.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/folio_backends/android/folio_android_jni.cpp"
+        )
         add_library(main SHARED ${FOLIO_INSPECTOR_SOURCES})
         set_target_properties(main PROPERTIES
             C_VISIBILITY_PRESET default
@@ -257,6 +261,10 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
         )
         set(INSPECTOR_TARGET main)
     else()
+        list(APPEND FOLIO_INSPECTOR_SOURCES
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/main.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspector/gl_loader.cpp"
+        )
         add_executable(folio_ink_inspector ${FOLIO_INSPECTOR_SOURCES})
         set(INSPECTOR_TARGET folio_ink_inspector)
     endif()
@@ -267,9 +275,10 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
         "${CMAKE_CURRENT_SOURCE_DIR}/folio_backends"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspector"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0"
     )
     if(ANDROID)
-        target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch -Wl,--whole-archive folio_backends -Wl,--no-whole-archive SDL3::SDL3 imgui)
+        target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch folio_backends SDL3::SDL3 imgui)
     else()
         target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch folio_backends SDL3::SDL3 imgui)
     endif()

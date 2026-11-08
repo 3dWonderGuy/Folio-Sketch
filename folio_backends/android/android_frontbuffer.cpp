@@ -28,6 +28,10 @@
 
 namespace Folio::Backends {
 
+#if !defined(__ANDROID__)
+void RequestAndroidFrontBufferFlush() {}
+#endif
+
 AndroidFrontBuffer::AndroidFrontBuffer() = default;
 AndroidFrontBuffer::~AndroidFrontBuffer() {
     Shutdown();

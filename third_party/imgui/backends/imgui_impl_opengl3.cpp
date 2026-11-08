@@ -254,6 +254,8 @@ struct ImGui_ImplOpenGL3_Data
     bool            HasBindSampler;
     bool            HasClipOrigin;
     bool            UseBufferSubData;
+    bool            HasSurfaceTransform;
+    float           SurfaceTransform[16];
     ImVector<char>  TempBuffer;
 
     ImGui_ImplOpenGL3_Data() { memset((void*)this, 0, sizeof(*this)); }
@@ -455,6 +457,18 @@ void    ImGui_ImplOpenGL3_Shutdown()
     ImGui_ImplOpenGL3_ShutdownLoader();
 }
 
+void    ImGui_ImplOpenGL3_SetSurfaceTransform(const float* transformMatrix)
+{
+    ImGui_ImplOpenGL3_Data* bd = ImGui_ImplOpenGL3_GetBackendData();
+    if (!bd) return;
+    if (transformMatrix != nullptr) {
+        bd->HasSurfaceTransform = true;
+        memcpy(bd->SurfaceTransform, transformMatrix, 16 * sizeof(float));
+    } else {
+        bd->HasSurfaceTransform = false;
+    }
+}
+
 void    ImGui_ImplOpenGL3_NewFrame()
 {
     ImGui_ImplOpenGL3_Data* bd = ImGui_ImplOpenGL3_GetBackendData();
@@ -505,22 +519,38 @@ static void ImGui_ImplOpenGL3_SetupRenderState(ImDrawData* draw_data, int fb_wid
     float R = draw_data->DisplayPos.x + draw_data->DisplaySize.x;
     float T = draw_data->DisplayPos.y;
     float B = draw_data->DisplayPos.y + draw_data->DisplaySize.y;
-#if defined(__ANDROID__)
-    // Match Android DPU hardware scanout orientation (inverted Y NDC, matching GlCapsuleRenderer)
-    float tmp = T; T = B; B = tmp;
-#elif defined(GL_CLIP_ORIGIN)
+#if defined(GL_CLIP_ORIGIN)
     if (!clip_origin_lower_left) { float tmp = T; T = B; B = tmp; } // Swap top and bottom if origin is upper left
 #endif
-    const float ortho_projection[4][4] =
+    float ortho_projection[4][4] =
     {
         { 2.0f/(R-L),   0.0f,         0.0f,   0.0f },
-        { 0.0f,         2.0f/(T-B),   0.0f,   0.0f },
+        { 0.0f,         2.0f/(B-T),   0.0f,   0.0f },
         { 0.0f,         0.0f,        -1.0f,   0.0f },
-        { (R+L)/(L-R),  (T+B)/(B-T),  0.0f,   1.0f },
+        { (R+L)/(L-R),  (T+B)/(T-B),  0.0f,   1.0f },
     };
+
     glUseProgram(bd->ShaderHandle);
     glUniform1i(bd->AttribLocationTex, 0);
-    glUniformMatrix4fv(bd->AttribLocationProjMtx, 1, GL_FALSE, &ortho_projection[0][0]);
+
+    if (bd->HasSurfaceTransform)
+    {
+        float final_proj[4][4];
+        for (int c = 0; c < 4; ++c) {
+            for (int r = 0; r < 4; ++r) {
+                final_proj[c][r] = 0.0f;
+                for (int k = 0; k < 4; ++k) {
+                    final_proj[c][r] += bd->SurfaceTransform[k * 4 + r] * ortho_projection[c][k];
+                }
+            }
+        }
+        glUniformMatrix4fv(bd->AttribLocationProjMtx, 1, GL_FALSE, &final_proj[0][0]);
+        glDisable(GL_SCISSOR_TEST);
+    }
+    else
+    {
+        glUniformMatrix4fv(bd->AttribLocationProjMtx, 1, GL_FALSE, &ortho_projection[0][0]);
+    }
 
 #ifdef IMGUI_IMPL_OPENGL_MAY_HAVE_BIND_SAMPLER
     if (bd->HasBindSampler)
@@ -671,12 +701,15 @@ void    ImGui_ImplOpenGL3_RenderDrawData(ImDrawData* draw_data)
                 if (clip_max.x <= clip_min.x || clip_max.y <= clip_min.y)
                     continue;
 
-                // Apply scissor/clipping rectangle
+                // Apply scissor/clipping rectangle (Y is inverted in desktop OpenGL, not inverted in Android HardwareBuffer)
+                if (!bd->HasSurfaceTransform)
+                {
 #if defined(__ANDROID__)
-                GL_CALL(glScissor((int)clip_min.x, (int)clip_min.y, (int)(clip_max.x - clip_min.x), (int)(clip_max.y - clip_min.y)));
+                    GL_CALL(glScissor((int)clip_min.x, (int)clip_min.y, (int)(clip_max.x - clip_min.x), (int)(clip_max.y - clip_min.y)));
 #else
-                GL_CALL(glScissor((int)clip_min.x, (int)((float)fb_height - clip_max.y), (int)(clip_max.x - clip_min.x), (int)(clip_max.y - clip_min.y)));
+                    GL_CALL(glScissor((int)clip_min.x, (int)((float)fb_height - clip_max.y), (int)(clip_max.x - clip_min.x), (int)(clip_max.y - clip_min.y)));
 #endif
+                }
 
                 // Bind texture, Draw
                 GL_CALL(glBindTexture(GL_TEXTURE_2D, (GLuint)(intptr_t)pcmd->GetTexID()));

@@ -27,5 +27,6 @@ public final class FolioNativeBridge {
 
     public static native void nativeRenderWet(long handle, int width, int height, float[] surfaceTransform);
     public static native void nativeRenderDry(long handle, int width, int height, float[] surfaceTransform);
+    public static native void nativeUpdateSurfaceTransform(long handle, float[] surfaceTransform);
     public static native void nativeClearCanvas(long handle);
 }

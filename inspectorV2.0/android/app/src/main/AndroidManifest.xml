@@ -62,7 +62,7 @@
             android:label="Folio Inspector (SDL3)"
             android:alwaysRetainTaskState="true"
             android:launchMode="singleTop"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|smallestScreenSize|keyboard|keyboardHidden"
             android:preferMinimalPostProcessing="true"
             android:hardwareAccelerated="true"
@@ -75,10 +75,10 @@
         </activity>
 
         <activity android:name="org.foliosketch.android.FolioCanvasActivity"
-            android:label="Folio Benchmark (Bare Metal)"
+            android:label="Folio Inspector (Zero-Latency FrontBuffer)"
             android:alwaysRetainTaskState="true"
             android:launchMode="singleTop"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|smallestScreenSize|keyboard|keyboardHidden"
             android:preferMinimalPostProcessing="true"
             android:hardwareAccelerated="true"

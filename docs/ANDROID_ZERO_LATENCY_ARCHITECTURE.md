@@ -76,6 +76,31 @@ Through rigorous benchmarking on the Samsung Galaxy Tab `SM-X930`, we have isola
 ```
 The mobile DPU will grant direct unbuffered hardware scanout **if and only if there is exactly one active `SurfaceView` in the window hierarchy**. As soon as a second `SurfaceView` is attached, the hardware compositor revokes direct scanout bypass and forces both through SurfaceFlinger composition queues.
 
+### Law 1.1: Single Master Pipeline (Strictly NO Conflicting Dual Engines)
+> [!CAUTION]
+> **CRITICAL ARCHITECTURAL RULE: NEVER RUN TWO INDEPENDENT APPLICATION RUNTIMES AT ONCE.**
+> - Do NOT initialize an independent ImGui context or secondary renderer in Android Java (`FolioInkView`) while simultaneously running another engine loop in C++ (`inspectorV2.0/main.cpp`).
+> - Ingestion, physics modeling, and document state belong exclusively to the **C++ Core Engine (`AppBrain` / `LayerManager`)**.
+> - Java/Android is strictly an unbuffered hardware I/O driver (`MotionEvent` in -> hardware scanout pixel flush out). Running UI loops or secondary render loops inside Android Java leads to split brain state, mirrored coordinate collisions, and dual-app contention.
+
+### Law 1.2: The Mandatory Java Hardware-Binding Layer (Android Platform Reality)
+> [!IMPORTANT]
+> **WHY C++ CANNOT BYPASS JAVA ENTIRELY ON MODERN ANDROID (OneUI 6+ / Android 14+):**
+> 1. **No Direct C++ NDK Access to DPU Front-Buffer Overlay**:
+>    On modern Android, raw Linux `/dev/fb0` or direct KMS/DRM ioctls are strictly walled off from apps by SELinux. The NDK provides `ANativeWindow`, but setting `EGL_SINGLE_BUFFER` via raw EGL in C++ does **not** grant hardware overlay bypass through `SurfaceFlinger`. Instead, SurfaceFlinger forces multi-buffer `BLASTBufferQueue` composition (~8–15ms latency).
+> 2. **`androidx.graphics.lowlatency.GLFrontBufferedRenderer` is Java-Exclusive**:
+>    The Google/Samsung sanctioned zero-latency pipeline is implemented inside Jetpack Java. It negotiates private IPC calls with SurfaceFlinger and the hardware composer (HWC) to assign a dedicated hardware plane on the DPU.
+> 3. **The Clean Division of Labor**:
+>    - **Java is the Hardware Host**: Owns the single `SurfaceView` and the `GLFrontBufferedRenderer` lifecycle, handles unbuffered `MotionEvent` delivery (`requestUnbufferedDispatch`), and calls the C++ JNI bridge.
+>    - **C++ is the Rendering & Logic Engine**: Executes all math, capsule rendering, ImGui generation, and stroke management inside the callbacks Java triggers.
+
+### Law 1.3: Front-Buffer Mechanics & Clearing Constraints
+> [!WARNING]
+> **THE FRONT BUFFER CANNOT BE FULLY CLEARED (`glClear`) WITHOUT SEVERE FLICKER:**
+> - The front buffer is the physical memory currently being scanned out to the display glass at 120Hz.
+> - Calling `glClear()` on the front buffer causes the screen to flash black mid-scanout (strobing black 120 times/sec).
+> - **Zero-Latency Inking Pattern**: The front buffer is used strictly for **additive/incremental wet ink capsules** under the pen tip. When the pen lifts, `commit()` is called: Java swaps the double-buffered layer (which clears and redraws the full document + ImGui cleanly) and clears the front buffer behind it.
+
 ### Law 2: The Swapchain Contention Law (Zero Continuous Swaps During Inking)
 Desktop game engines run a continuous loop calling `SDL_GL_SwapWindow` at 120 FPS.
 On Android:

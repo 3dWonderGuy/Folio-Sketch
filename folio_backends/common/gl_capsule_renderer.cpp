@@ -75,18 +75,13 @@ bool GlCapsuleRenderer::Init() {
         "    float halfSpanU = 0.5 * segLen + maxR;\n"
         "    vec2 worldPos = mid + u * (aQuadPos.x * halfSpanU) + n * (aQuadPos.y * maxR);\n"
         "    vec2 screenPos = worldPos * zoom + uTransform.xy;\n"
-#if defined(__ANDROID__)
-        "    vec2 ndc = vec2(\n"
+        "    vec4 rawNdc = vec4(\n"
         "        (screenPos.x / uViewport.x) * 2.0 - 1.0,\n"
-        "        (screenPos.y / uViewport.y) * 2.0 - 1.0\n"
+        "        1.0 - (screenPos.y / uViewport.y) * 2.0,\n"
+        "        0.0,\n"
+        "        1.0\n"
         "    );\n"
-#else
-        "    vec2 ndc = vec2(\n"
-        "        (screenPos.x / uViewport.x) * 2.0 - 1.0,\n"
-        "        1.0 - (screenPos.y / uViewport.y) * 2.0\n"
-        "    );\n"
-#endif
-        "    gl_Position = vec4(ndc, 0.0, 1.0);\n"
+        "    gl_Position = uSurfaceTransform * rawNdc;\n"
         "    vWorldPos   = worldPos;\n"
         "    vPointA     = aPointA;\n"
         "    vPointB     = aPointB;\n"

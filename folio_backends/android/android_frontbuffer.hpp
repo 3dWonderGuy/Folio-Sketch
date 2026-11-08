@@ -16,6 +16,11 @@ struct ANativeWindow;
 namespace Folio::Backends {
 
 /**
+ * @brief Requests an immediate front-buffer render pass from the Android GLFrontBufferedRenderer backend.
+ */
+void RequestAndroidFrontBufferFlush();
+
+/**
  * @class AndroidFrontBuffer
  * @brief Hardware direct-to-scanout single-buffered EGL surface presentation manager.
  */

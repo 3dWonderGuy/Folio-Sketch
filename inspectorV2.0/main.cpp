@@ -1,22 +1,12 @@
 /**
  * =========================================================================================
  * @file inspectorV2.0/main.cpp
- * @brief FolioNote Mini Base (Inspector V2.0): Dual-Thread Architecture Host
+ * @brief FolioNote Inspector V2.0 Desktop Host (SDL3 + OpenGL + Dear ImGui)
  * =========================================================================================
- *
- * Thread 1: Event-Driven Host Loop (SDL3)
- *   - Initializes window & graphics context.
- *   - Completely event-driven: blocks in SDL_WaitEvent when idle (0% CPU / 0% GPU).
- *   - Redraws background canvas only when window is exposed or resized.
- *   - Swaps ZERO frames while the user is inking on Thread 2.
- *
- * Thread 2: Zero-Latency Hardware Scanout Engine
- *   - Runs on Android's unbuffered digitizer thread (GLFrontBufferedRenderer / low-latency).
- *   - Ingests 240Hz stylus samples directly into Folio::InkEngine + GlCapsuleRenderer.
- *   - Flushes directly to the hardware scanout layer with <2ms latency.
  */
 
 #include <iostream>
+#include <algorithm>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
@@ -24,57 +14,210 @@
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_opengl3.h>
 
-#if defined(__ANDROID__)
-#include <GLES3/gl3.h>
-#include <android/log.h>
-#define LOG_TAG "FolioInspectorV2"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-#define LOG_SWAP(...) __android_log_print(ANDROID_LOG_VERBOSE, "FolioSwap", __VA_ARGS__)
-#define LOG_SWAP_ERR(...) __android_log_print(ANDROID_LOG_ERROR, "FolioSwap", __VA_ARGS__)
-#else
 #include "inspector/gl_loader.hpp"
-#include <cstdio>
-#define LOG_SWAP(...) do { printf("[FolioSwap] " __VA_ARGS__); printf("\n"); } while(0)
-#define LOG_SWAP_ERR(...) do { fprintf(stderr, "[FolioSwap:ERROR] " __VA_ARGS__); fprintf(stderr, "\n"); } while(0)
-#endif
-
-#include "inspectorV2.0/layer_manager.hpp"
 #include "inspectorV2.0/app_brain.hpp"
-#include "inspectorV2.0/ui_manager.hpp"
+#include "inspectorV2.0/layer_manager.hpp"
+#include "folio_backends/android/android_frontbuffer.hpp"
+
+namespace {
+
+void ScreenToFb(SDL_Window* window, float sx, float sy, float& outX, float& outY) {
+    int winW = 1, winH = 1, fbW = 1, fbH = 1;
+    SDL_GetWindowSize(window, &winW, &winH);
+    SDL_GetWindowSizeInPixels(window, &fbW, &fbH);
+    float sxFactor = (winW > 0) ? (static_cast<float>(fbW) / static_cast<float>(winW)) : 1.0f;
+    float syFactor = (winH > 0) ? (static_cast<float>(fbH) / static_cast<float>(winH)) : 1.0f;
+    outX = sx * sxFactor;
+    outY = sy * syFactor;
+}
+
+void ProcessSdlEvent(const SDL_Event& event, SDL_Window* window, Folio::V2::LayerManager& layerManager,
+                     const ImGuiIO& io, bool& needsRedraw, bool& running) {
+    ImGui_ImplSDL3_ProcessEvent(&event);
+
+    if (event.type == SDL_EVENT_QUIT ||
+        (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
+         event.window.windowID == SDL_GetWindowID(window))) {
+        running = false;
+        return;
+    }
+
+    if (event.type == SDL_EVENT_WINDOW_EXPOSED ||
+        event.type == SDL_EVENT_WINDOW_RESIZED ||
+        event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+        needsRedraw = true;
+        return;
+    }
+
+    if (event.type == SDL_EVENT_PEN_AXIS) {
+        constexpr float kDegToRad = 3.14159265f / 180.0f;
+        auto& telem = const_cast<Folio::V2::LayerManager::StylusTelemetry&>(layerManager.GetStylusTelemetry());
+        if (event.paxis.axis == SDL_PEN_AXIS_PRESSURE) {
+            telem.pressure = std::clamp(event.paxis.value, 0.0f, 1.0f);
+        } else if (event.paxis.axis == SDL_PEN_AXIS_XTILT) {
+            telem.tiltX = std::clamp(event.paxis.value * kDegToRad, -1.570796f, 1.570796f);
+        } else if (event.paxis.axis == SDL_PEN_AXIS_YTILT) {
+            telem.tiltY = std::clamp(event.paxis.value * kDegToRad, -1.570796f, 1.570796f);
+        }
+        needsRedraw = true;
+    } else if (event.type == SDL_EVENT_PEN_DOWN || event.type == SDL_EVENT_PEN_MOTION || event.type == SDL_EVENT_PEN_UP) {
+        float rawX = (event.type == SDL_EVENT_PEN_MOTION) ? event.pmotion.x : event.ptouch.x;
+        float rawY = (event.type == SDL_EVENT_PEN_MOTION) ? event.pmotion.y : event.ptouch.y;
+        float fbX = rawX, fbY = rawY;
+        ScreenToFb(window, rawX, rawY, fbX, fbY);
+
+        Folio::V2::PointerPacket pkt;
+        pkt.device = Folio::V2::DeviceType::Stylus;
+        pkt.pointerId = 2;
+        pkt.x = fbX;
+        pkt.y = fbY;
+        pkt.tiltX = layerManager.GetStylusTelemetry().tiltX;
+        pkt.tiltY = layerManager.GetStylusTelemetry().tiltY;
+
+        if (event.type == SDL_EVENT_PEN_DOWN) {
+            pkt.phase = Folio::V2::InputPhase::Down;
+            pkt.pressure = (layerManager.GetStylusTelemetry().pressure > 0.001f) ? layerManager.GetStylusTelemetry().pressure : 0.6f;
+            pkt.timestampSec = static_cast<double>(event.ptouch.timestamp) * 1e-9;
+        } else if (event.type == SDL_EVENT_PEN_MOTION) {
+            pkt.phase = Folio::V2::InputPhase::Move;
+            pkt.pressure = (layerManager.GetStylusTelemetry().pressure > 0.001f) ? layerManager.GetStylusTelemetry().pressure : 0.6f;
+            pkt.timestampSec = static_cast<double>(event.pmotion.timestamp) * 1e-9;
+        } else {
+            pkt.phase = Folio::V2::InputPhase::Up;
+            pkt.pressure = 0.0f;
+            pkt.timestampSec = static_cast<double>(event.ptouch.timestamp) * 1e-9;
+        }
+        layerManager.ProcessPointer(pkt);
+        needsRedraw = true;
+    } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+        if (!io.WantCaptureMouse) {
+            float mouseX = 0.0f, mouseY = 0.0f;
+            SDL_GetMouseState(&mouseX, &mouseY);
+            float fbX = mouseX, fbY = mouseY;
+            ScreenToFb(window, mouseX, mouseY, fbX, fbY);
+            float zoomFactor = (event.wheel.y > 0) ? 1.15f : 0.87f;
+            layerManager.GetInputManager().onCanvasZoom(fbX, fbY, zoomFactor);
+            needsRedraw = true;
+        }
+    } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && (io.WantCaptureMouse || event.button.button != SDL_BUTTON_LEFT)) {
+            return;
+        }
+        if (event.type == SDL_EVENT_MOUSE_MOTION && (io.WantCaptureMouse || !(event.motion.state & SDL_BUTTON_LMASK))) {
+            return;
+        }
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button != SDL_BUTTON_LEFT) {
+            return;
+        }
+
+        float rawX = (event.type == SDL_EVENT_MOUSE_MOTION) ? event.motion.x : event.button.x;
+        float rawY = (event.type == SDL_EVENT_MOUSE_MOTION) ? event.motion.y : event.button.y;
+        float fbX = rawX, fbY = rawY;
+        ScreenToFb(window, rawX, rawY, fbX, fbY);
+
+        Folio::V2::PointerPacket pkt;
+        pkt.device = Folio::V2::DeviceType::Mouse;
+        pkt.pointerId = 1;
+        pkt.x = fbX;
+        pkt.y = fbY;
+
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            pkt.phase = Folio::V2::InputPhase::Down;
+            pkt.pressure = 0.8f;
+            pkt.timestampSec = static_cast<double>(event.button.timestamp) * 1e-9;
+        } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            pkt.phase = Folio::V2::InputPhase::Move;
+            pkt.pressure = 0.8f;
+            pkt.timestampSec = static_cast<double>(event.motion.timestamp) * 1e-9;
+        } else {
+            pkt.phase = Folio::V2::InputPhase::Up;
+            pkt.pressure = 0.0f;
+            pkt.timestampSec = static_cast<double>(event.button.timestamp) * 1e-9;
+        }
+        layerManager.ProcessPointer(pkt);
+        needsRedraw = true;
+    } else if (event.type == SDL_EVENT_KEY_DOWN) {
+        if (event.key.key == SDLK_ESCAPE) {
+            running = false;
+        } else if (event.key.key == SDLK_C) {
+            layerManager.ClearDocument();
+            needsRedraw = true;
+        }
+    }
+}
+
+} // namespace
 
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
 
 #if defined(__ANDROID__)
-    LOGI("[FolioInspectorV2] SDL host thread initialized (C++ Brain Driver)");
-    auto& brain = Folio::V2::AppBrain::Instance();
-
-    // Event-driven loop on Android: waits when idle, consumes 0% CPU and zero GPU swaps while user inks
-    while (true) {
-        if (brain.CheckAndResetRedraw()) {
-            size_t totalStrokes = brain.GetLayerManager().GetDocumentStrokes().size();
-            LOGI("[FolioInspectorV2] Stroke commit synchronized to Document Model! Total strokes: %zu", totalStrokes);
-        }
-        SDL_Delay(100);
+    // On Android, SDL3 is the main C++ application driver, while FolioInkView (GLFrontBufferedRenderer)
+    // is the sole hardware surface. Do NOT initialize SDL_INIT_VIDEO or create a second SDL window/GLContext
+    // (Law 1 & Law 1.1: Single Hardware Surface + Single Master Pipeline).
+    if (!SDL_Init(SDL_INIT_EVENTS)) {
+        std::cerr << "[FolioInspectorV2] SDL_Init(SDL_INIT_EVENTS) failed: " << SDL_GetError() << std::endl;
+        return 1;
     }
-#endif
 
+    auto& brain = Folio::V2::AppBrain::Instance();
+    auto& layerManager = brain.GetLayerManager();
+
+    layerManager.onDocumentDirty = [&brain]() {
+        brain.RequestRedraw();
+    };
+
+    // Request initial front-buffer render pass once surface is ready
+    Folio::Backends::RequestAndroidFrontBufferFlush();
+
+    bool running = true;
+    while (running) {
+        SDL_Event event;
+        const bool hasDelayed = (layerManager.GetInspectorGui().simulatedLatencyMs > 0.0f);
+        bool hasEvent = false;
+        if (hasDelayed) {
+            hasEvent = SDL_WaitEventTimeout(&event, 4);
+        } else {
+            hasEvent = SDL_WaitEvent(&event);
+        }
+
+        while (hasEvent) {
+            if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_TERMINATING) {
+                running = false;
+                break;
+            }
+            if (event.type == SDL_EVENT_KEY_DOWN) {
+                if (event.key.key == SDLK_ESCAPE || event.key.key == SDLK_AC_BACK) {
+                    running = false;
+                } else if (event.key.key == SDLK_C) {
+                    layerManager.ClearDocument();
+                    brain.RequestRedraw();
+                }
+            }
+            hasEvent = SDL_PollEvent(&event);
+        }
+
+        if (layerManager.FlushDelayedPackets()) {
+            brain.RequestRedraw();
+        }
+
+        if (brain.CheckAndResetRedraw()) {
+            Folio::Backends::RequestAndroidFrontBufferFlush();
+        }
+    }
+
+    SDL_Quit();
+    return 0;
+#else
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::cerr << "[FolioInspectorV2] SDL_Init failed: " << SDL_GetError() << std::endl;
         return 1;
     }
 
-#if defined(__ANDROID__)
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-#endif
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
 
@@ -97,11 +240,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-#if !defined(__ANDROID__)
     if (!Folio::Debug::InitGlLoader()) {
         std::cerr << "[FolioInspectorV2] Failed to initialize OpenGL loader!" << std::endl;
     }
-#endif
 
     // Initialize Dear ImGui
     IMGUI_CHECKVERSION();
@@ -111,16 +252,12 @@ int main(int argc, char* argv[]) {
     ImGui::StyleColorsDark();
 
     ImGui_ImplSDL3_InitForOpenGL(window, glContext);
-#if defined(__ANDROID__)
-    ImGui_ImplOpenGL3_Init("#version 300 es");
-#else
-    ImGui_ImplOpenGL3_Init("#version 330 core");
-#endif
+    if (io.BackendRendererUserData == nullptr) {
+        ImGui_ImplOpenGL3_Init("#version 330 core");
+    }
 
-    Folio::V2::LayerManager layerManager;
+    auto& layerManager = Folio::V2::AppBrain::Instance().GetLayerManager();
     bool needsRedraw = true;
-    uint64_t liveInkingFlushCount = 0;
-    bool wasInkingActive = false;
 
     layerManager.onDocumentDirty = [&needsRedraw]() {
         needsRedraw = true;
@@ -128,121 +265,52 @@ int main(int argc, char* argv[]) {
 
     int fbWidth = 0, fbHeight = 0;
     SDL_GetWindowSizeInPixels(window, &fbWidth, &fbHeight);
-    layerManager.RenderDocumentCanvas(fbWidth, fbHeight);
-    SDL_GL_SwapWindow(window);
-    needsRedraw = false;
 
-    // Main Event Loop (Desktop)
+    // Initial render
+    glViewport(0, 0, fbWidth, fbHeight);
+    layerManager.RenderDocumentCanvas(fbWidth, fbHeight);
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+    layerManager.RenderImGui(fbWidth, fbHeight, nullptr, /*isSdlHost=*/true);
+    SDL_GL_SwapWindow(window);
+
+    // Event Loop
     bool running = true;
     while (running) {
         SDL_Event event;
-        bool hasEvent = false;
-
-        // When actively inking, poll continuously for low latency; when idle, wait for events
-        if (layerManager.IsLiveInkingActive()) {
-            hasEvent = SDL_PollEvent(&event);
-        } else {
+        bool hasEvent = SDL_PollEvent(&event);
+        const bool hasDelayed = (layerManager.GetInspectorGui().simulatedLatencyMs > 0.0f);
+        if (!hasEvent && !layerManager.IsLiveInkingActive() && !needsRedraw && !hasDelayed) {
             hasEvent = SDL_WaitEvent(&event);
         }
 
         if (hasEvent) {
             do {
-                ImGui_ImplSDL3_ProcessEvent(&event);
-
-                if (event.type == SDL_EVENT_QUIT ||
-                    (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
-                     event.window.windowID == SDL_GetWindowID(window))) {
-                    running = false;
-                    break;
-                }
-
-                if (event.type == SDL_EVENT_WINDOW_EXPOSED ||
-                    event.type == SDL_EVENT_WINDOW_RESIZED ||
-                    event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
-                    needsRedraw = true;
-                } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
-                    if (!io.WantCaptureMouse) {
-                        float mouseX = 0.0f, mouseY = 0.0f;
-                        SDL_GetMouseState(&mouseX, &mouseY);
-                        float zoomFactor = (event.wheel.y > 0) ? 1.15f : 0.87f;
-                        layerManager.GetInputManager().onCanvasZoom(mouseX, mouseY, zoomFactor);
-                        needsRedraw = true;
-                    }
-                } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-                    if (!io.WantCaptureMouse && event.button.button == SDL_BUTTON_LEFT) {
-                        Folio::V2::PointerPacket pkt;
-                        pkt.device = Folio::V2::DeviceType::Mouse;
-                        pkt.phase  = Folio::V2::InputPhase::Down;
-                        pkt.x = event.button.x;
-                        pkt.y = event.button.y;
-                        pkt.pressure = 0.8f;
-                        pkt.timestampSec = static_cast<double>(event.button.timestamp) * 1e-9;
-                        layerManager.ProcessPointer(pkt);
-                        needsRedraw = true;
-                    }
-                } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
-                    if (!io.WantCaptureMouse && (event.motion.state & SDL_BUTTON_LMASK)) {
-                        Folio::V2::PointerPacket pkt;
-                        pkt.device = Folio::V2::DeviceType::Mouse;
-                        pkt.phase  = Folio::V2::InputPhase::Move;
-                        pkt.x = event.motion.x;
-                        pkt.y = event.motion.y;
-                        pkt.pressure = 0.8f;
-                        pkt.timestampSec = static_cast<double>(event.motion.timestamp) * 1e-9;
-                        layerManager.ProcessPointer(pkt);
-                        needsRedraw = true;
-                    }
-                } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
-                    if (event.button.button == SDL_BUTTON_LEFT) {
-                        Folio::V2::PointerPacket pkt;
-                        pkt.device = Folio::V2::DeviceType::Mouse;
-                        pkt.phase  = Folio::V2::InputPhase::Up;
-                        pkt.x = event.button.x;
-                        pkt.y = event.button.y;
-                        pkt.pressure = 0.0f;
-                        pkt.timestampSec = static_cast<double>(event.button.timestamp) * 1e-9;
-                        layerManager.ProcessPointer(pkt);
-                        needsRedraw = true;
-                    }
-                } else if (event.type == SDL_EVENT_KEY_DOWN) {
-                    if (event.key.key == SDLK_ESCAPE) {
-                        running = false;
-                        break;
-                    } else if (event.key.key == SDLK_C) {
-                        layerManager.ClearDocument();
-                        needsRedraw = true;
-                    }
-                }
+                ProcessSdlEvent(event, window, layerManager, io, needsRedraw, running);
             } while (SDL_PollEvent(&event));
         }
 
-        // Invalidation-driven & active inking lock:
-        // When user is inking on Thread 2, suppress SDL_GL_SwapWindow to prevent DPU swapchain stalls and latency spikes.
+        // Flush any delayed packets scheduled for delivery
+        if (layerManager.FlushDelayedPackets()) {
+            needsRedraw = true;
+        }
+
+        SDL_GetWindowSizeInPixels(window, &fbWidth, &fbHeight);
+        glViewport(0, 0, fbWidth, fbHeight);
+
+        layerManager.RenderDocumentCanvas(fbWidth, fbHeight);
         if (layerManager.IsLiveInkingActive()) {
             layerManager.RenderLiveInking(fbWidth, fbHeight);
-            liveInkingFlushCount++;
-            LOG_SWAP("glFlush executed during active live inking (count: %llu)", (unsigned long long)liveInkingFlushCount);
-            wasInkingActive = true;
-            // ZERO SDL_GL_SwapWindow calls during active inking
-        } else if (needsRedraw) {
-            if (layerManager.IsLiveInkingActive()) {
-                LOG_SWAP_ERR("CRITICAL VIOLATION: SDL_GL_SwapWindow requested while IsLiveInkingActive() is TRUE!");
-            }
-            if (wasInkingActive) {
-                LOG_SWAP("Stroke completed (ACTION_UP) - presenting dry document frame via SDL_GL_SwapWindow (total inking flushes: %llu)", (unsigned long long)liveInkingFlushCount);
-                wasInkingActive = false;
-                liveInkingFlushCount = 0;
-            }
-
-            // Render Document Canvas & ImGui only when dirty / on pen lift / exposed
-            layerManager.RenderDocumentCanvas(fbWidth, fbHeight);
-
-            // Unified ImGui rendered identically on Linux & Android
-            Folio::V2::UiManager::Instance().Render(fbWidth, fbHeight);
-
-            SDL_GL_SwapWindow(window);
-            needsRedraw = false;
         }
+
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        layerManager.RenderImGui(fbWidth, fbHeight, nullptr, /*isSdlHost=*/true);
+
+        SDL_GL_SwapWindow(window);
+        needsRedraw = false;
     }
 
     ImGui_ImplOpenGL3_Shutdown();
@@ -253,4 +321,5 @@ int main(int argc, char* argv[]) {
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;
+#endif
 }

@@ -18,8 +18,16 @@ public:
         return s_instance;
     }
 
-    LayerManager& GetLayerManager() noexcept { return m_layerManager; }
-    const LayerManager& GetLayerManager() const noexcept { return m_layerManager; }
+    LayerManager& GetLayerManager() noexcept {
+        return m_activeLayerManager ? *m_activeLayerManager : m_layerManager;
+    }
+    const LayerManager& GetLayerManager() const noexcept {
+        return m_activeLayerManager ? *m_activeLayerManager : m_layerManager;
+    }
+
+    void SetLayerManager(LayerManager* manager) noexcept {
+        m_activeLayerManager = manager;
+    }
 
     void RequestRedraw() noexcept {
         m_needsRedraw = true;
@@ -38,6 +46,7 @@ private:
     AppBrain& operator=(const AppBrain&) = delete;
 
     LayerManager m_layerManager;
+    LayerManager* m_activeLayerManager = nullptr;
     std::atomic<bool> m_needsRedraw{true};
 };
 

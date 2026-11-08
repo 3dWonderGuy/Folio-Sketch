@@ -35,6 +35,21 @@ public class FolioCanvasActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (mInkView != null) {
+            mInkView.post(new Runnable() {
+                @Override
+                public void run() {
+                    if (mInkView != null) {
+                        mInkView.requestMultiBufferRender();
+                    }
+                }
+            });
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
         if (mInkView != null) {

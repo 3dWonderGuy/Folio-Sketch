@@ -15,14 +15,15 @@ import androidx.graphics.opengl.egl.EGLManager;
 import java.util.Collection;
 
 /**
- * Dedicated bare-metal hardware front-buffered scanout view for zero-latency stylus inking.
+ * Dumb hardware front-buffer scanout container.
  *
- * Runs directly on Android's hardware scanout overlay buffer (via GLFrontBufferedRenderer),
- * bypassing SurfaceFlinger multi-buffer presentation delays and VSYNC queues.
+ * Pushes ALL rendering (ink + document + Dear ImGui) exclusively through
+ * GLFrontBufferedRenderer's front-buffered layer without multi-buffer swap latency.
  */
 @RequiresApi(Build.VERSION_CODES.Q)
 public class FolioInkView extends SurfaceView {
 
+    private static FolioInkView sInstance = null;
     private long mEngineHandle = 0;
     private GLFrontBufferedRenderer<Object> mFrontBufferedRenderer;
 
@@ -37,8 +38,8 @@ public class FolioInkView extends SurfaceView {
                 @NonNull float[] transform,
                 @NonNull Object param
             ) {
-                android.util.Log.v("FolioInkView", "onDrawFrontBufferedLayer: w=" + width + ", h=" + height);
                 if (mEngineHandle != 0) {
+                    FolioNativeBridge.nativeUpdateSurfaceTransform(mEngineHandle, transform);
                     FolioNativeBridge.nativeRenderWet(mEngineHandle, width, height, transform);
                 }
             }
@@ -52,11 +53,16 @@ public class FolioInkView extends SurfaceView {
                 @NonNull float[] transform,
                 @NonNull Collection<? extends Object> params
             ) {
-                if (mEngineHandle != 0) {
-                    FolioNativeBridge.nativeRenderDry(mEngineHandle, width, height, transform);
-                }
+                // Intentionally unused: ALL rendering goes through the front buffer
             }
         };
+
+    public static void requestFrontBufferRenderFromNative() {
+        FolioInkView view = sInstance;
+        if (view != null && view.mFrontBufferedRenderer != null) {
+            view.mFrontBufferedRenderer.renderFrontBufferedLayer(view);
+        }
+    }
 
     public FolioInkView(@NonNull Context context) {
         super(context);
@@ -74,22 +80,40 @@ public class FolioInkView extends SurfaceView {
     }
 
     private void init() {
+        sInstance = this;
         setZOrderOnTop(true);
         getHolder().setFormat(PixelFormat.TRANSLUCENT);
         mEngineHandle = FolioNativeBridge.nativeCreateEngine();
         mFrontBufferedRenderer = new GLFrontBufferedRenderer<>(this, mRendererCallback);
+        post(new Runnable() {
+            @Override
+            public void run() {
+                if (mFrontBufferedRenderer != null) {
+                    mFrontBufferedRenderer.renderFrontBufferedLayer(FolioInkView.this);
+                }
+            }
+        });
     }
 
     public void clearCanvas() {
         if (mEngineHandle != 0) {
             FolioNativeBridge.nativeClearCanvas(mEngineHandle);
             if (mFrontBufferedRenderer != null) {
-                mFrontBufferedRenderer.commit();
+                mFrontBufferedRenderer.renderFrontBufferedLayer(this);
             }
         }
     }
 
+    public void requestMultiBufferRender() {
+        if (mFrontBufferedRenderer != null) {
+            mFrontBufferedRenderer.renderFrontBufferedLayer(this);
+        }
+    }
+
     public void release() {
+        if (sInstance == this) {
+            sInstance = null;
+        }
         if (mFrontBufferedRenderer != null) {
             mFrontBufferedRenderer.release(false);
             mFrontBufferedRenderer = null;
@@ -115,10 +139,8 @@ public class FolioInkView extends SurfaceView {
             return super.onTouchEvent(event);
         }
 
-        // Request unbuffered dispatch for stylus so S-Pen bypasses 60Hz OS VSYNC batching
-        if (isStylus) {
-            requestUnbufferedDispatch(event);
-        }
+        // Request unbuffered dispatch for all input so everything bypasses OS VSYNC batching
+        requestUnbufferedDispatch(event);
 
         final int action = event.getActionMasked();
         final int pointerId = event.getPointerId(actionIndex);
@@ -135,12 +157,7 @@ public class FolioInkView extends SurfaceView {
                     event.getEventTime() * 1_000_000L,
                     true, false, isStylus, pointerId
                 );
-                if (isStylus) {
-                    mFrontBufferedRenderer.renderFrontBufferedLayer(this);
-                } else {
-                    // Finger touch interaction (e.g. tapping ImGui button or canvas gesture)
-                    mFrontBufferedRenderer.commit();
-                }
+                mFrontBufferedRenderer.renderFrontBufferedLayer(this);
                 return true;
             }
 
@@ -178,11 +195,7 @@ public class FolioInkView extends SurfaceView {
                     );
                 }
 
-                if (isStylus) {
-                    mFrontBufferedRenderer.renderFrontBufferedLayer(this);
-                } else {
-                    mFrontBufferedRenderer.commit();
-                }
+                mFrontBufferedRenderer.renderFrontBufferedLayer(this);
                 return true;
             }
 
@@ -198,7 +211,7 @@ public class FolioInkView extends SurfaceView {
                     event.getEventTime() * 1_000_000L,
                     false, true, isStylus, pointerId
                 );
-                mFrontBufferedRenderer.commit();
+                mFrontBufferedRenderer.renderFrontBufferedLayer(this);
                 return true;
             }
 

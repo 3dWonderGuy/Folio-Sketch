@@ -501,22 +501,9 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         // Set up the surface
         mLayout = new RelativeLayout(this);
 
-        try {
-            mInkOverlay = new org.foliosketch.android.FolioInkView(this);
-            mInkOverlay.setFocusable(true);
-            mInkOverlay.setFocusableInTouchMode(true);
-            mInkOverlay.requestFocus();
-            mLayout.addView(mInkOverlay, new RelativeLayout.LayoutParams(
-                RelativeLayout.LayoutParams.MATCH_PARENT,
-                RelativeLayout.LayoutParams.MATCH_PARENT));
-            Log.i(TAG, "FolioInkView attached as single SurfaceView successfully.");
-        } catch (Throwable t) {
-            Log.e(TAG, "Failed to attach FolioInkView: " + t.getMessage(), t);
-        }
-
         if (SDL.isSubsystemInitialized(SDL.SDL_INIT_VIDEO)) {
             mSurface = createSDLSurface(this);
-            // mLayout.addView(mSurface); // NOTE: Do NOT add mSurface to avoid DPU dual-surface 15ms latency penalty!
+            mLayout.addView(mSurface); // Sole native SurfaceView attached to layout
 
             // Get our current screen orientation and pass it down.
             SDLActivity.nativeSetNaturalOrientation(SDLActivity.getNaturalOrientation());
