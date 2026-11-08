@@ -41,6 +41,8 @@ struct InspectorGui {
     std::vector<float> arcLengthPlotSamples;
 
     void Render(LayerManager& layerManager, int fbWidth, int fbHeight, bool& needsRedraw);
+    void RenderTelemetryHud(LayerManager& layerManager, bool drawOpaqueBackdrop = false,
+                            int* outX = nullptr, int* outY = nullptr, int* outW = nullptr, int* outH = nullptr);
 };
 
 // Internal tab renderers (implemented in inspectorV2.0/ui/tabs/)
@@ -51,6 +53,6 @@ void RenderTabShapeSnapping(InspectorGui& gui, LayerManager& layerManager, bool&
 void RenderTabCanvas(InspectorGui& gui, LayerManager& layerManager, bool& needsRedraw);
 
 // Canvas overlay rendering (implemented in inspectorV2.0/ui/diagnostics_overlay.cpp)
-void RenderDiagnosticsOverlay(const InspectorGui& gui, LayerManager& layerManager, int fbWidth, int fbHeight);
+void RenderDiagnosticsOverlay(const InspectorGui& gui, LayerManager& layerManager, int fbWidth, int fbHeight, bool drawBackgroundGrid = true);
 
 } // namespace Folio::V2

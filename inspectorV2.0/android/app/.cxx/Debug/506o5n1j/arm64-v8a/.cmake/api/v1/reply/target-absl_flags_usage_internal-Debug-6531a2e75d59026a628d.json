@@ -3,7 +3,7 @@
 	"artifacts" : 
 	[
 		{
-			"path" : "_deps/abseil-cpp-build/absl/log/libabsl_log_internal_message.a"
+			"path" : "_deps/abseil-cpp-build/absl/flags/libabsl_flags_usage_internal.a"
 		}
 	],
 	"backtrace" : 2,
@@ -22,7 +22,7 @@
 		"files" : 
 		[
 			"/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/CMake/AbseilHelpers.cmake",
-			"/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/log/CMakeLists.txt"
+			"/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/flags/CMakeLists.txt"
 		],
 		"nodes" : 
 		[
@@ -32,7 +32,7 @@
 			{
 				"command" : 1,
 				"file" : 1,
-				"line" : 185,
+				"line" : 229,
 				"parent" : 0
 			},
 			{
@@ -311,11 +311,19 @@
 		},
 		{
 			"backtrace" : 3,
-			"id" : "absl_strerror::@649cb5ab055927a76ab5"
+			"id" : "absl_tracing_internal::@649cb5ab055927a76ab5"
 		},
 		{
 			"backtrace" : 3,
-			"id" : "absl_tracing_internal::@649cb5ab055927a76ab5"
+			"id" : "absl_crc_internal::@e7b73a99dc329af715ea"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_crc32c::@e7b73a99dc329af715ea"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_crc_cord_state::@e7b73a99dc329af715ea"
 		},
 		{
 			"backtrace" : 3,
@@ -324,10 +332,6 @@
 		{
 			"backtrace" : 3,
 			"id" : "absl_symbolize::@29ce828be0197ec6dd61"
-		},
-		{
-			"backtrace" : 3,
-			"id" : "absl_examine_stack::@29ce828be0197ec6dd61"
 		},
 		{
 			"backtrace" : 3,
@@ -343,6 +347,14 @@
 		},
 		{
 			"backtrace" : 3,
+			"id" : "absl_hashtablez_sampler::@49ad4cc58ca2b33d3cb1"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_flags_internal::@4e66689cfd0f0cabb9c5"
+		},
+		{
+			"backtrace" : 3,
 			"id" : "absl_hash::@e82b4f9cfb0ccfacbdfd"
 		},
 		{
@@ -351,19 +363,11 @@
 		},
 		{
 			"backtrace" : 3,
-			"id" : "absl_log_internal_structured_proto::@ec0c5076da8ab1df7c81"
-		},
-		{
-			"backtrace" : 3,
-			"id" : "absl_vlog_config_internal::@ec0c5076da8ab1df7c81"
-		},
-		{
-			"backtrace" : 3,
-			"id" : "absl_log_internal_fnmatch::@ec0c5076da8ab1df7c81"
-		},
-		{
-			"backtrace" : 3,
 			"id" : "absl_int128::@9d8e9017d0346130c5af"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_exponential_biased::@610112b8222b7e6b2b6f"
 		},
 		{
 			"backtrace" : 3,
@@ -376,6 +380,26 @@
 		{
 			"backtrace" : 3,
 			"id" : "absl_str_format_internal::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_cord_internal::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_cordz_functions::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_cordz_handle::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_cordz_info::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_cord::@cadd5db28f0587d4097f"
 		},
 		{
 			"backtrace" : 3,
@@ -407,35 +431,7 @@
 		},
 		{
 			"backtrace" : 3,
-			"id" : "absl_log_internal_format::@ec0c5076da8ab1df7c81"
-		},
-		{
-			"backtrace" : 3,
-			"id" : "absl_log_internal_globals::@ec0c5076da8ab1df7c81"
-		},
-		{
-			"backtrace" : 3,
-			"id" : "absl_log_internal_proto::@ec0c5076da8ab1df7c81"
-		},
-		{
-			"backtrace" : 3,
-			"id" : "absl_log_internal_log_sink_set::@ec0c5076da8ab1df7c81"
-		},
-		{
-			"backtrace" : 3,
-			"id" : "absl_log_internal_nullguard::@ec0c5076da8ab1df7c81"
-		},
-		{
-			"backtrace" : 3,
-			"id" : "absl_log_globals::@ec0c5076da8ab1df7c81"
-		},
-		{
-			"backtrace" : 3,
-			"id" : "absl_log_entry::@ec0c5076da8ab1df7c81"
-		},
-		{
-			"backtrace" : 3,
-			"id" : "absl_log_sink::@ec0c5076da8ab1df7c81"
+			"id" : "absl_raw_hash_set::@49ad4cc58ca2b33d3cb1"
 		},
 		{
 			"backtrace" : 3,
@@ -444,19 +440,51 @@
 		{
 			"backtrace" : 3,
 			"id" : "absl_utf8_for_code_point::@29ce828be0197ec6dd61"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_flags_program_name::@4e66689cfd0f0cabb9c5"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_flags_config::@4e66689cfd0f0cabb9c5"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_flags_marshalling::@4e66689cfd0f0cabb9c5"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_flags_commandlineflag_internal::@4e66689cfd0f0cabb9c5"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_flags_commandlineflag::@4e66689cfd0f0cabb9c5"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_flags_private_handle_accessor::@4e66689cfd0f0cabb9c5"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_flags_reflection::@4e66689cfd0f0cabb9c5"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "absl_base_cpu_detect::@649cb5ab055927a76ab5"
 		}
 	],
 	"folder" : 
 	{
 		"name" : "Abseil/internal"
 	},
-	"id" : "absl_log_internal_message::@ec0c5076da8ab1df7c81",
-	"name" : "absl_log_internal_message",
-	"nameOnDisk" : "libabsl_log_internal_message.a",
+	"id" : "absl_flags_usage_internal::@4e66689cfd0f0cabb9c5",
+	"name" : "absl_flags_usage_internal",
+	"nameOnDisk" : "libabsl_flags_usage_internal.a",
 	"paths" : 
 	{
-		"build" : "_deps/abseil-cpp-build/absl/log",
-		"source" : "/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/log"
+		"build" : "_deps/abseil-cpp-build/absl/flags",
+		"source" : "/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/flags"
 	},
 	"sourceGroups" : 
 	[
@@ -480,12 +508,12 @@
 		{
 			"backtrace" : 7,
 			"compileGroupIndex" : 0,
-			"path" : "/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/log/internal/log_message.cc",
+			"path" : "/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/flags/internal/usage.cc",
 			"sourceGroupIndex" : 0
 		},
 		{
 			"backtrace" : 7,
-			"path" : "/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/log/internal/log_message.h",
+			"path" : "/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/flags/internal/usage.h",
 			"sourceGroupIndex" : 1
 		}
 	],

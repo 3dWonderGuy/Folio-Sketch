@@ -355,6 +355,10 @@
 		},
 		{
 			"backtrace" : 3,
+			"id" : "absl_log_sink::@ec0c5076da8ab1df7c81"
+		},
+		{
+			"backtrace" : 3,
 			"id" : "absl_log_internal_structured_proto::@ec0c5076da8ab1df7c81"
 		},
 		{
@@ -440,10 +444,6 @@
 		{
 			"backtrace" : 3,
 			"id" : "absl_log_entry::@ec0c5076da8ab1df7c81"
-		},
-		{
-			"backtrace" : 3,
-			"id" : "absl_log_sink::@ec0c5076da8ab1df7c81"
 		},
 		{
 			"backtrace" : 3,

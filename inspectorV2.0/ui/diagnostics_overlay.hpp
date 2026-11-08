@@ -6,11 +6,4 @@
  * =========================================================================================
  */
 
-namespace Folio::V2 {
-
-class LayerManager;
-struct InspectorGui;
-
-void RenderDiagnosticsOverlay(const InspectorGui& gui, LayerManager& layerManager, int fbWidth, int fbHeight);
-
-} // namespace Folio::V2
+#include "inspectorV2.0/ui/inspector_gui.hpp"

@@ -770,6 +770,7 @@
 /home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/debugging/internal/utf8_for_code_point.h
 /home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/log/internal/vlog_config.h
 /home/odysseus/Documents/GitHub/Folio-Sketch/folio_backends/common/gl_capsule_renderer.hpp
+/home/odysseus/Documents/GitHub/Folio-Sketch/folio_backends/common/display_surface_transform.hpp
 /home/odysseus/Documents/GitHub/Folio-Sketch/folio_backends/android/android_frontbuffer.hpp
 /home/odysseus/Documents/GitHub/Folio-Sketch/third_party/ink-stroke-modeler/ink_stroke_modeler/internal/prediction/input_predictor.h
 /home/odysseus/Documents/GitHub/Folio-Sketch/third_party/ink-stroke-modeler/ink_stroke_modeler/internal/internal_types.h

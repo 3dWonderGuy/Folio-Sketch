@@ -134,6 +134,10 @@ public:
         float sampleRateHz = 0.0f;
         float inputLatencyMs = 0.0f;
         bool isHoverOrActive = false;
+
+        float displayFps = 120.0f;
+        float frameLatencyMs = 8.33f;
+        float passDurationMs = 0.0f;
     };
 
     [[nodiscard]] const StylusTelemetry& GetStylusTelemetry() const noexcept { return m_telemetry; }
@@ -188,6 +192,9 @@ private:
     size_t       m_wetUploadedModeledCount = 0;
     ScreenRect   m_prevPredictionDirtyRect{};
     double       m_lastTelemetryHudUpdateSec = 0.0;
+    std::chrono::steady_clock::time_point m_lastRenderTimePoint{};
+    std::chrono::steady_clock::time_point m_lastImGuiFrameTime{};
+    float        m_lastDeltaTime = 1.0f / 120.0f;
 
     void EnsureDocumentFbo(int w, int h);
     void ShutdownDocumentFbo();

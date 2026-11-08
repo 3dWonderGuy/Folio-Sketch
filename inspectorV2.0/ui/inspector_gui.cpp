@@ -23,7 +23,10 @@ void InspectorGui::Render(LayerManager& layerManager, int fbWidth, int fbHeight,
         ImGui::SetNextWindowSize(ImVec2(520.0f, 680.0f), ImGuiCond_FirstUseEver);
         ImGui::Begin("Inspector V2.0 Controls", nullptr);
 
-        ImGui::Text("FPS: %.1f (%.2f ms/frame)", io.Framerate, (io.Framerate > 0.0f ? (1000.0f / io.Framerate) : 0.0f));
+        const auto& telem = layerManager.GetStylusTelemetry();
+        const float activeFps = (telem.displayFps > 0.0f) ? telem.displayFps : (io.Framerate > 0.0f ? io.Framerate : 120.0f);
+        const float activeFrameLat = (telem.frameLatencyMs > 0.0f) ? telem.frameLatencyMs : (activeFps > 0.0f ? (1000.0f / activeFps) : 8.33f);
+        ImGui::Text("FPS: %.1f (%.2f ms/frame)", activeFps, activeFrameLat);
         ImGui::Separator();
 
         auto& canvas = layerManager.GetCanvasState();
@@ -94,41 +97,69 @@ void InspectorGui::Render(LayerManager& layerManager, int fbWidth, int fbHeight,
     RenderDiagnosticsOverlay(*this, layerManager, fbWidth, fbHeight);
 
     // Top-Right Live Stylus Telemetry HUD
-    {
-        const float overlayWidth = 280.0f;
-        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - overlayWidth - 20.0f, 20.0f), ImGuiCond_Always);
-        ImGui::SetNextWindowBgAlpha(0.65f);
+    RenderTelemetryHud(layerManager, /*drawOpaqueBackdrop=*/false);
+}
 
-        ImGuiWindowFlags flags = ImGuiWindowFlags_NoMove |
-                                 ImGuiWindowFlags_AlwaysAutoResize |
-                                 ImGuiWindowFlags_NoSavedSettings |
-                                 ImGuiWindowFlags_NoFocusOnAppearing |
-                                 ImGuiWindowFlags_NoNav;
+void InspectorGui::RenderTelemetryHud(LayerManager& layerManager, bool drawOpaqueBackdrop,
+                                      int* outX, int* outY, int* outW, int* outH) {
+    ImGuiIO& io = ImGui::GetIO();
 
-        if (ImGui::Begin("Live Stylus Telemetry", nullptr, flags)) {
-            const auto& telem = layerManager.GetStylusTelemetry();
-            ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f), "PERFORMANCE");
-            ImGui::Text("FPS:           %.1f", io.Framerate);
-            ImGui::Text("Frame Latency: %.2f ms", (io.Framerate > 0.0f ? (1000.0f / io.Framerate) : 0.0f));
-            if (telem.sampleRateHz > 0.0f) {
-                ImGui::Text("Input Latency: %.2f ms", telem.inputLatencyMs);
-            } else {
-                ImGui::Text("Input Latency: -- ms");
-            }
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 20.0f, 20.0f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.65f);
 
-            ImGui::Separator();
-            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "STYLUS / INPUT");
-            ImGui::Text("Screen Pos:    (%.1f, %.1f)", telem.screenX, telem.screenY);
-            ImGui::Text("World Pos:     (%.1f, %.1f)", telem.worldX, telem.worldY);
-            ImGui::Text("Pressure:      %.3f", telem.pressure);
-            ImGui::ProgressBar(telem.pressure, ImVec2(-1.0f, 12.0f), "");
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoMove |
+                             ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoSavedSettings |
+                             ImGuiWindowFlags_NoFocusOnAppearing |
+                             ImGuiWindowFlags_NoNav;
 
-            const float tiltXDeg = telem.tiltX * 57.2957795f;
-            const float tiltYDeg = telem.tiltY * 57.2957795f;
-            ImGui::Text("Tilt:          (%.1f°, %.1f°)", tiltXDeg, tiltYDeg);
+    if (ImGui::Begin("Live Stylus Telemetry", nullptr, flags)) {
+        const ImVec2 wPos  = ImGui::GetWindowPos();
+        const ImVec2 wSize = ImGui::GetWindowSize();
 
-            ImGui::End();
+        if (drawOpaqueBackdrop) {
+            const auto& paper = layerManager.GetCanvasState().paperColor;
+            ImGui::GetBackgroundDrawList()->AddRectFilled(
+                ImVec2(wPos.x - 2.0f, wPos.y - 2.0f),
+                ImVec2(wPos.x + wSize.x + 2.0f, wPos.y + wSize.y + 2.0f),
+                IM_COL32(paper.r, paper.g, paper.b, 255)
+            );
         }
+
+        if (outX) *outX = static_cast<int>(wPos.x - 2.0f);
+        if (outY) *outY = static_cast<int>(wPos.y - 2.0f);
+        if (outW) *outW = static_cast<int>(wSize.x + 4.0f);
+        if (outH) *outH = static_cast<int>(wSize.y + 4.0f);
+
+        const auto& telem = layerManager.GetStylusTelemetry();
+        ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f), "PERFORMANCE");
+        const float activeFps = (telem.displayFps > 0.0f) ? telem.displayFps : (io.Framerate > 0.0f ? io.Framerate : 120.0f);
+        const float activeFrameLat = (telem.frameLatencyMs > 0.0f) ? telem.frameLatencyMs : (activeFps > 0.0f ? (1000.0f / activeFps) : 8.33f);
+        ImGui::Text("FPS:           %.1f", activeFps);
+        ImGui::Text("Frame Latency: %.2f ms", activeFrameLat);
+        if (telem.passDurationMs > 0.0f) {
+            ImGui::Text("Pass Duration: %.2f ms", telem.passDurationMs);
+        }
+        if (telem.sampleRateHz > 0.0f) {
+            ImGui::Text("Input Latency: %.2f ms", telem.inputLatencyMs);
+            ImGui::Text("Sample Rate:   %.0f Hz", telem.sampleRateHz);
+        } else {
+            ImGui::Text("Input Latency: -- ms");
+            ImGui::Text("Sample Rate:   -- Hz");
+        }
+
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "STYLUS / INPUT");
+        ImGui::Text("Screen Pos:    (%.1f, %.1f)", telem.screenX, telem.screenY);
+        ImGui::Text("World Pos:     (%.1f, %.1f)", telem.worldX, telem.worldY);
+        ImGui::Text("Pressure:      %.3f", telem.pressure);
+        ImGui::ProgressBar(telem.pressure, ImVec2(-1.0f, 12.0f), "");
+
+        const float tiltXDeg = telem.tiltX * 57.2957795f;
+        const float tiltYDeg = telem.tiltY * 57.2957795f;
+        ImGui::Text("Tilt:          (%.1f°, %.1f°)", tiltXDeg, tiltYDeg);
+
+        ImGui::End();
     }
 }
 

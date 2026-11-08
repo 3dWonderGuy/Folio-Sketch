@@ -6,6 +6,7 @@
  */
 
 #include "folio_backends/common/gl_capsule_renderer.hpp"
+#include "folio_backends/common/display_surface_transform.hpp"
 
 #if defined(__ANDROID__)
 #include <GLES3/gl3.h>
@@ -48,6 +49,7 @@ bool GlCapsuleRenderer::Init() {
     // static unit quad [-1, 1]^2 by max(rA, rB) + AA padding along +/-u and +/-n,
     // and projects world coordinates to clip space using canvas pan & zoom.
     std::string vSrc = std::string(glslHeader) +
+        GetGlslNdcSnippet() +
         "layout(location = 0) in vec2 aQuadPos;\n"
         "layout(location = 1) in vec2 aPointA;\n"
         "layout(location = 2) in vec2 aPointB;\n"
@@ -75,13 +77,7 @@ bool GlCapsuleRenderer::Init() {
         "    float halfSpanU = 0.5 * segLen + maxR;\n"
         "    vec2 worldPos = mid + u * (aQuadPos.x * halfSpanU) + n * (aQuadPos.y * maxR);\n"
         "    vec2 screenPos = worldPos * zoom + uTransform.xy;\n"
-        "    vec4 rawNdc = vec4(\n"
-        "        (screenPos.x / uViewport.x) * 2.0 - 1.0,\n"
-        "        1.0 - (screenPos.y / uViewport.y) * 2.0,\n"
-        "        0.0,\n"
-        "        1.0\n"
-        "    );\n"
-        "    gl_Position = uSurfaceTransform * rawNdc;\n"
+        "    gl_Position = ComputeNdc(screenPos, uViewport, uSurfaceTransform);\n"
         "    vWorldPos   = worldPos;\n"
         "    vPointA     = aPointA;\n"
         "    vPointB     = aPointB;\n"

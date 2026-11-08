@@ -7,11 +7,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(FOLIO_BACKENDS_SOURCES
     common/gl_capsule_renderer.cpp
+    common/display_surface_transform.cpp
     android/android_frontbuffer.cpp
 )
 
 set(FOLIO_BACKENDS_HEADERS
     common/gl_capsule_renderer.hpp
+    common/display_surface_transform.hpp
     android/android_frontbuffer.hpp
 )
 

@@ -15,7 +15,7 @@
 
 namespace Folio::V2 {
 
-void RenderDiagnosticsOverlay(const InspectorGui& gui, LayerManager& layerManager, int fbWidth, int fbHeight) {
+void RenderDiagnosticsOverlay(const InspectorGui& gui, LayerManager& layerManager, int fbWidth, int fbHeight, bool drawBackgroundGrid) {
     ImDrawList* bgDrawList = ImGui::GetBackgroundDrawList();
     ImGuiIO& io = ImGui::GetIO();
     const auto& canvas = layerManager.GetCanvasState();
@@ -32,7 +32,7 @@ void RenderDiagnosticsOverlay(const InspectorGui& gui, LayerManager& layerManage
     };
 
     // 0. Blueprint Background Grid
-    {
+    if (drawBackgroundGrid) {
         float panScreenX = canvas.panX / scaleX;
         float panScreenY = canvas.panY / scaleY;
 

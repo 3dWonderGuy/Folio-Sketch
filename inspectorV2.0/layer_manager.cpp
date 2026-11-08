@@ -8,6 +8,7 @@
 #include "inspectorV2.0/layer_manager.hpp"
 #include "inspectorV2.0/ui/inspector_gui.hpp"
 #include "inspectorV2.0/testbed/testbed_samples.hpp"
+#include "folio_backends/common/display_surface_transform.hpp"
 #include <cmath>
 #include <algorithm>
 #include <imgui_internal.h>
@@ -274,7 +275,23 @@ void LayerManager::EnsureImGui(int vpWidth, int vpHeight, bool isSdlHost) {
     if (!isSdlHost && vpWidth > 0 && vpHeight > 0) {
         io.DisplaySize = ImVec2(static_cast<float>(vpWidth), static_cast<float>(vpHeight));
     }
-    io.DeltaTime = 1.0f / 60.0f;
+
+    if (!isSdlHost) {
+        auto now = std::chrono::steady_clock::now();
+        if (m_lastImGuiFrameTime.time_since_epoch().count() > 0) {
+            float dt = std::chrono::duration<float>(now - m_lastImGuiFrameTime).count();
+            if (dt >= 0.0005f && dt <= 0.25f) {
+                io.DeltaTime = dt;
+            } else if (m_lastDeltaTime >= 0.0005f && m_lastDeltaTime <= 0.25f) {
+                io.DeltaTime = m_lastDeltaTime;
+            } else {
+                io.DeltaTime = 1.0f / 120.0f;
+            }
+        } else {
+            io.DeltaTime = (m_lastDeltaTime >= 0.0005f) ? m_lastDeltaTime : (1.0f / 120.0f);
+        }
+        m_lastImGuiFrameTime = now;
+    }
 }
 
 void LayerManager::ShutdownImGui() {
@@ -549,56 +566,20 @@ void LayerManager::ApplyTransformedScissor(const ScreenRect& logicalRect, int vp
         return;
     }
 
-    // Convert logical top-left pixel corners to unrotated NDC [-1, 1]
-    const float x0 = static_cast<float>(logicalRect.x);
-    const float y0 = static_cast<float>(logicalRect.y);
-    const float x1 = static_cast<float>(logicalRect.x + logicalRect.w);
-    const float y1 = static_cast<float>(logicalRect.y + logicalRect.h);
-
-    const float cornersNdc[4][2] = {
-        { (x0 / vpWidth) * 2.0f - 1.0f, 1.0f - (y0 / vpHeight) * 2.0f },
-        { (x1 / vpWidth) * 2.0f - 1.0f, 1.0f - (y0 / vpHeight) * 2.0f },
-        { (x1 / vpWidth) * 2.0f - 1.0f, 1.0f - (y1 / vpHeight) * 2.0f },
-        { (x0 / vpWidth) * 2.0f - 1.0f, 1.0f - (y1 / vpHeight) * 2.0f }
-    };
-
-    float minNdcX =  10.0f, maxNdcX = -10.0f;
-    float minNdcY =  10.0f, maxNdcY = -10.0f;
-
-    for (int i = 0; i < 4; ++i) {
-        float nx = cornersNdc[i][0];
-        float ny = cornersNdc[i][1];
-        float tx = nx;
-        float ty = ny;
-        if (surfaceTransformMatrix != nullptr) {
-            tx = surfaceTransformMatrix[0] * nx + surfaceTransformMatrix[4] * ny + surfaceTransformMatrix[12];
-            ty = surfaceTransformMatrix[1] * nx + surfaceTransformMatrix[5] * ny + surfaceTransformMatrix[13];
-        }
-        minNdcX = std::min(minNdcX, tx);
-        maxNdcX = std::max(maxNdcX, tx);
-        minNdcY = std::min(minNdcY, ty);
-        maxNdcY = std::max(maxNdcY, ty);
-    }
-
     // Query physical bound viewport dimensions (in case hardware buffer rotated width/height)
     GLint physVp[4] = { 0, 0, vpWidth, vpHeight };
     glGetIntegerv(GL_VIEWPORT, physVp);
     const int physW = (physVp[2] > 0) ? physVp[2] : vpWidth;
     const int physH = (physVp[3] > 0) ? physVp[3] : vpHeight;
 
-    int sx0 = static_cast<int>(std::floor((minNdcX * 0.5f + 0.5f) * static_cast<float>(physW)));
-    int sy0 = static_cast<int>(std::floor((minNdcY * 0.5f + 0.5f) * static_cast<float>(physH)));
-    int sx1 = static_cast<int>(std::ceil((maxNdcX * 0.5f + 0.5f) * static_cast<float>(physW)));
-    int sy1 = static_cast<int>(std::ceil((maxNdcY * 0.5f + 0.5f) * static_cast<float>(physH)));
+    Folio::Backends::LogicalRect lRect{ logicalRect.x, logicalRect.y, logicalRect.w, logicalRect.h, logicalRect.valid };
+    const auto scissor = Folio::Backends::CalculatePhysicalScissor(
+        lRect, vpWidth, vpHeight, surfaceTransformMatrix, physW, physH
+    );
 
-    sx0 = std::clamp(sx0, 0, physW);
-    sy0 = std::clamp(sy0, 0, physH);
-    sx1 = std::clamp(sx1, 0, physW);
-    sy1 = std::clamp(sy1, 0, physH);
-
-    if (sx1 > sx0 && sy1 > sy0) {
+    if (scissor.enabled) {
         glEnable(GL_SCISSOR_TEST);
-        glScissor(sx0, sy0, sx1 - sx0, sy1 - sy0);
+        glScissor(scissor.x, scissor.y, scissor.w, scissor.h);
     } else {
         glDisable(GL_SCISSOR_TEST);
     }
@@ -606,6 +587,20 @@ void LayerManager::ApplyTransformedScissor(const ScreenRect& logicalRect, int vp
 
 void LayerManager::RenderStateADocumentEngine(int vpWidth, int vpHeight, const float* surfaceTransformMatrix, bool isSdlHost) {
     if (vpWidth <= 0 || vpHeight <= 0) return;
+
+    const auto startPass = std::chrono::steady_clock::now();
+    if (m_lastRenderTimePoint.time_since_epoch().count() > 0) {
+        const float dt = std::chrono::duration<float>(startPass - m_lastRenderTimePoint).count();
+        if (dt >= 0.0005f && dt <= 0.25f) {
+            const float instantFps = 1.0f / dt;
+            m_telemetry.displayFps = (m_telemetry.displayFps <= 0.0f)
+                ? instantFps
+                : (m_telemetry.displayFps * 0.90f + instantFps * 0.10f);
+            m_telemetry.frameLatencyMs = 1000.0f / m_telemetry.displayFps;
+            m_lastDeltaTime = dt;
+        }
+    }
+    m_lastRenderTimePoint = startPass;
 
     EnsureDocumentFbo(vpWidth, vpHeight);
 
@@ -635,10 +630,27 @@ void LayerManager::RenderStateADocumentEngine(int vpWidth, int vpHeight, const f
 
     BlitDocumentFboToFrontBuffer(surfaceTransformMatrix);
     glFlush();
+
+    const auto endPass = std::chrono::steady_clock::now();
+    m_telemetry.passDurationMs = std::chrono::duration<float, std::milli>(endPass - startPass).count();
 }
 
 void LayerManager::RenderStateBWetScanout(int vpWidth, int vpHeight, const float* surfaceTransformMatrix) {
     if (!m_isStrokeActive || vpWidth <= 0 || vpHeight <= 0) return;
+
+    const auto startPass = std::chrono::steady_clock::now();
+    if (m_lastRenderTimePoint.time_since_epoch().count() > 0) {
+        const float dt = std::chrono::duration<float>(startPass - m_lastRenderTimePoint).count();
+        if (dt >= 0.0005f && dt <= 0.25f) {
+            const float instantFps = 1.0f / dt;
+            m_telemetry.displayFps = (m_telemetry.displayFps <= 0.0f)
+                ? instantFps
+                : (m_telemetry.displayFps * 0.90f + instantFps * 0.10f);
+            m_telemetry.frameLatencyMs = 1000.0f / m_telemetry.displayFps;
+            m_lastDeltaTime = dt;
+        }
+    }
+    m_lastRenderTimePoint = startPass;
 
     // If the offscreen Document FBO hasn't been baked yet (e.g. first frame of testbed), bake it once
     if (!m_docFboValid || m_docWidth != vpWidth || m_docHeight != vpHeight) {
@@ -754,14 +766,38 @@ void LayerManager::RenderStateBWetScanout(int vpWidth, int vpHeight, const float
         ImGui_ImplOpenGL3_SetSurfaceTransform(surfaceTransformMatrix);
         ImGui_ImplOpenGL3_NewFrame();
         ImGui::NewFrame();
-        RenderDiagnosticsOverlay(m_inspectorGui, *this, vpWidth, vpHeight);
+        RenderDiagnosticsOverlay(m_inspectorGui, *this, vpWidth, vpHeight, /*drawBackgroundGrid=*/false);
         ImGui::Render();
         ApplyTransformedScissor(unionRect, vpWidth, vpHeight, surfaceTransformMatrix);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     }
 
+    // 4. Throttled (~15 Hz, every ~66ms) Partial Scissored Telemetry HUD Update
+    if ((m_telemetry.timestampSec - m_lastTelemetryHudUpdateSec) >= 0.066 || m_lastTelemetryHudUpdateSec <= 0.0) {
+        m_lastTelemetryHudUpdateSec = m_telemetry.timestampSec;
+
+        EnsureImGui(vpWidth, vpHeight, false);
+        ImGui_ImplOpenGL3_SetSurfaceTransform(surfaceTransformMatrix);
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui::NewFrame();
+
+        ScreenRect hudRect{};
+        m_inspectorGui.RenderTelemetryHud(*this, /*drawOpaqueBackdrop=*/true,
+                                          &hudRect.x, &hudRect.y, &hudRect.w, &hudRect.h);
+        ImGui::Render();
+
+        hudRect.valid = (hudRect.w > 0 && hudRect.h > 0);
+        if (hudRect.valid) {
+            ApplyTransformedScissor(hudRect, vpWidth, vpHeight, surfaceTransformMatrix);
+            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        }
+    }
+
     glDisable(GL_SCISSOR_TEST);
     glFlush();
+
+    const auto endPass = std::chrono::steady_clock::now();
+    m_telemetry.passDurationMs = std::chrono::duration<float, std::milli>(endPass - startPass).count();
 }
 
 void LayerManager::ReplayRawStroke() {
