@@ -102,6 +102,10 @@ public:
     void RenderDocumentCanvas(int vpWidth, int vpHeight, const float* surfaceTransformMatrix = nullptr, bool renderStrokes = true);
     void RenderLiveInking(int vpWidth, int vpHeight, const float* surfaceTransformMatrix = nullptr);
 
+    // Scissored FBO Presentation Engine (Binary State A / State B Machine)
+    void RenderStateADocumentEngine(int vpWidth, int vpHeight, const float* surfaceTransformMatrix = nullptr, bool isSdlHost = false);
+    void RenderStateBWetScanout(int vpWidth, int vpHeight, const float* surfaceTransformMatrix = nullptr);
+
     // Diagnostics & Modeler Replay
     void ReplayRawStroke();
     void InjectTestScribble();
@@ -160,6 +164,35 @@ private:
     bool   m_imguiInitialized = false;
     bool   m_touchCapturedByImGui = false;
     InspectorGui m_inspectorGui{};
+
+    // Offscreen Document & UI FBO (State A / State B Presentation Engine)
+    struct ScreenRect {
+        int x = 0;
+        int y = 0;
+        int w = 0;
+        int h = 0;
+        bool valid = false;
+    };
+
+    unsigned int m_docFbo            = 0;
+    unsigned int m_docTex            = 0;
+    int          m_docWidth          = 0;
+    int          m_docHeight         = 0;
+    bool         m_docFboValid       = false;
+    unsigned int m_blitProgram       = 0;
+    unsigned int m_blitVao           = 0;
+    unsigned int m_blitVbo           = 0;
+    int          m_locBlitTex        = -1;
+    int          m_locBlitTransform  = -1;
+
+    size_t       m_wetUploadedModeledCount = 0;
+    ScreenRect   m_prevPredictionDirtyRect{};
+    double       m_lastTelemetryHudUpdateSec = 0.0;
+
+    void EnsureDocumentFbo(int w, int h);
+    void ShutdownDocumentFbo();
+    void BlitDocumentFboToFrontBuffer(const float* surfaceTransformMatrix);
+    static void ApplyTransformedScissor(const ScreenRect& logicalRect, int vpWidth, int vpHeight, const float* surfaceTransformMatrix);
 
     struct DelayedPacket {
         PointerPacket packet;

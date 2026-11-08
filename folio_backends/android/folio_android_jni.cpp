@@ -155,12 +155,14 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeRenderWet(
 
     auto& layerMgr = Folio::V2::AppBrain::Instance().GetLayerManager();
 
-    // Push ALL rendering (document canvas + live wet stroke + Dear ImGui) directly through the front buffer
-    layerMgr.RenderDocumentCanvas(width, height, matrixElements);
+    // Binary State Machine:
+    // - STATE B (IsLiveInkingActive): Direct front-buffer wet scanout (<0.15ms, zero glClear, zero ImGui rebuild)
+    // - STATE A (Idle / UI / Pan & Zoom / Pen Lift): Offscreen Document FBO bake + single opaque pass (zero glClear on FBO 0)
     if (layerMgr.IsLiveInkingActive()) {
-        layerMgr.RenderLiveInking(width, height, matrixElements);
+        layerMgr.RenderStateBWetScanout(width, height, matrixElements);
+    } else {
+        layerMgr.RenderStateADocumentEngine(width, height, matrixElements, /*isSdlHost=*/false);
     }
-    layerMgr.RenderImGui(width, height, matrixElements, /*isSdlHost=*/false);
 
     if (matrixElements != nullptr) {
         env->ReleaseFloatArrayElements(surfaceTransform, matrixElements, JNI_ABORT);
