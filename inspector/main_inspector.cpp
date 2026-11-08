@@ -35,6 +35,16 @@
 #include <iomanip>
 #include <iostream>
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+#define LOG_TAG "FolioInspector"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#else
+#define LOGI(...) do {} while(0)
+#define LOGE(...) do {} while(0)
+#endif
+
 #include "folio_sketch/folio_sketch.hpp"
 #include "geometry/ink_stroke_filter.hpp"
 #include "geometry/ink_geometry_utils.hpp"
@@ -816,6 +826,13 @@ int main(int argc, char* argv[]) {
             return RunHeadlessDiagnostics();
         }
     }
+#if defined(__ANDROID__)
+    // On Android, inking scanout is handled directly by FolioInkView via GLFrontBufferedRenderer.
+    // Halting the SDL thread eliminates swapchain contention and EGL/VSYNC overhead on Android.
+    while (true) {
+        SDL_Delay(1000);
+    }
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::cerr << "[folio_ink_inspector] SDL_Init failed: " << SDL_GetError() << std::endl;
         return 1;
@@ -851,7 +868,11 @@ int main(int argc, char* argv[]) {
         SDL_Quit();
         return 1;
     }
+#if defined(__ANDROID__)
+    SDL_GL_SetSwapInterval(0);
+#else
     SDL_GL_SetSwapInterval(1);
+#endif
 
     if (!InitGlLoader()) {
         std::cerr << "[folio_ink_inspector] Failed to initialize OpenGL functions via SDL_GL_GetProcAddress!" << std::endl;
@@ -863,11 +884,16 @@ int main(int argc, char* argv[]) {
         SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr));
     bool frontBufferActive = false;
     if (nativeWindow) {
+        LOGI("Obtained ANativeWindow from SDL window: %p. Initializing AndroidFrontBuffer...", nativeWindow);
         frontBufferActive = androidFrontBuffer.Init(nativeWindow);
         if (frontBufferActive) {
-            std::cout << "[folio_ink_inspector] AndroidFrontBuffer direct scanout active ("
-                      << androidFrontBuffer.GetWidth() << "x" << androidFrontBuffer.GetHeight() << ")" << std::endl;
+            LOGI("SUCCESS: AndroidFrontBuffer direct scanout active (%dx%d)",
+                 androidFrontBuffer.GetWidth(), androidFrontBuffer.GetHeight());
+        } else {
+            LOGE("FAILURE: AndroidFrontBuffer.Init(%p) FAILED! Falling back to standard compositor.", nativeWindow);
         }
+    } else {
+        LOGE("FAILURE: SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER returned nullptr!");
     }
 #endif
 
@@ -1133,7 +1159,7 @@ int main(int argc, char* argv[]) {
     while (running) {
         SDL_Event event;
         bool hadEvent = false;
-        if (dirtyFrames > 0) {
+        if (dirtyFrames > 0 || engine.IsStrokeActive()) {
             hadEvent = SDL_PollEvent(&event);
         } else {
             hadEvent = SDL_WaitEventTimeout(&event, 50);
@@ -1254,6 +1280,7 @@ int main(int argc, char* argv[]) {
 
         // Skip rendering if nothing is dirty and ImGui is not interacting
         if (dirtyFrames <= 0 && !ImGui::IsAnyItemActive() && !engine.IsStrokeActive() && !traceReplayer.IsPlaying()) {
+            SDL_Delay(1);
             continue;
         }
         if (ImGui::IsAnyItemActive() || engine.IsStrokeActive() || traceReplayer.IsPlaying()) {
@@ -1331,6 +1358,14 @@ int main(int argc, char* argv[]) {
         ImGui::SetNextWindowSize(ImVec2(470.0f, static_cast<float>(winHeight - 24)), ImGuiCond_FirstUseEver);
 
         if (ImGui::Begin("Inking Lab")) {
+#if defined(__ANDROID__)
+            if (frontBufferActive) {
+                ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "[HW FRONT-BUFFER BYPASS: ACTIVE (Sub-4ms Direct Scanout)]");
+            } else {
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "[HW FRONT-BUFFER BYPASS: INACTIVE (Standard Swapchain)]");
+            }
+            ImGui::Separator();
+#endif
             if (ImGui::Button("Reset View (1:1)")) {
                 viewport = CanvasTransform{};
                 dirtyFrames = 2;
@@ -2052,7 +2087,11 @@ int main(int argc, char* argv[]) {
                 if (frontBufferActive) {
                     int fbW = 0, fbH = 0;
                     if (androidFrontBuffer.BeginWetDraw(&fbW, &fbH)) {
-                        glCapsuleRenderer.RenderStroke(engine.GetLiveModeledPoints(),
+                        std::vector<StrokePoint> combined(engine.GetLiveModeledPoints());
+                        if (config.prediction.enable && predictedPts.size() > 1) {
+                            combined.insert(combined.end(), predictedPts.begin() + 1, predictedPts.end());
+                        }
+                        glCapsuleRenderer.RenderStroke(combined,
                                                        PackPremultipliedGpuColor(st.color),
                                                        viewport, fbW > 0 ? fbW : winWidth, fbH > 0 ? fbH : winHeight,
                                                        br, /*singlePassWet=*/true);
