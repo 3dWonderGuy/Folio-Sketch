@@ -50,7 +50,7 @@ public:
     /**
      * @brief Immediately flushes rendering commands directly to display scanout without swapchain delay.
      */
-    void EndWetDraw();
+    void EndWetDraw() const;
 
     /**
      * @brief Clears the front-buffer surface to transparent.
@@ -65,7 +65,6 @@ private:
     void* m_display = nullptr;  // EGLDisplay
     void* m_surface = nullptr;  // EGLSurface
     void* m_context = nullptr;  // EGLContext
-    ANativeWindow* m_window = nullptr;
     int m_width = 0;
     int m_height = 0;
     bool m_initialized = false;

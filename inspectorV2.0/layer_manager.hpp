@@ -27,7 +27,7 @@ struct CanvasState {
     float panX = 0.0f;
     float panY = 0.0f;
     float zoom = 1.0f;
-    Folio::ColorRgba paperColor = Folio::ColorRgba(245, 245, 248, 255);
+    Folio::ColorRgba paperColor = Folio::ColorRgba(0, 0, 0, 255); // True Black AMOLED background
 };
 
 struct DocumentStroke {
@@ -60,7 +60,20 @@ public:
         return m_documentStrokes;
     }
 
+    void AddDocumentStroke(DocumentStroke stroke) {
+        m_documentStrokes.push_back(std::move(stroke));
+        if (onDocumentDirty) {
+            onDocumentDirty();
+        }
+    }
+
     void SetActiveBrush(const Folio::StrokeStyle& style, const Folio::Backends::CapsuleBrush& brush);
+
+    [[nodiscard]] Folio::StrokeStyle& GetActiveStyle() noexcept { return m_activeStyle; }
+    [[nodiscard]] const Folio::StrokeStyle& GetActiveStyle() const noexcept { return m_activeStyle; }
+
+    [[nodiscard]] Folio::Backends::CapsuleBrush& GetActiveBrush() noexcept { return m_activeBrush; }
+    [[nodiscard]] const Folio::Backends::CapsuleBrush& GetActiveBrush() const noexcept { return m_activeBrush; }
 
     // Callbacks
     std::function<void()> onDocumentDirty; ///< Triggered when strokes commit or canvas pans

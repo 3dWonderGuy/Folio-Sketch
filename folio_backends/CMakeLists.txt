@@ -46,6 +46,10 @@ if(TARGET SDL3::SDL3)
     target_link_libraries(folio_backends PRIVATE SDL3::SDL3)
 endif()
 
+if(TARGET imgui)
+    target_link_libraries(folio_backends PRIVATE imgui)
+endif()
+
 if(ANDROID)
     find_library(ANDROID_LOG_LIB log)
     find_library(ANDROID_LIB android)

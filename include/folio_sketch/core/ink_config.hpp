@@ -79,6 +79,7 @@ struct InkingConfig {
         // Dynamic suppression & stabilization
         bool  suppressOnTurns              = true;             // Suppress/cut prediction lookahead during sharp angular direction changes
         float turnSuppressionThresholdRad  = 0.52359877f;      // Angular turning delta (~30 deg) above which prediction is suppressed
+        float maxCurvatureCosTheta         = 0.866f;           // Dot product cos(theta) threshold (~30 deg): sharp turns below this cut prediction lookahead to eliminate whiskers
         float minSpeedMmPerSec             = 20.0f;            // Speed threshold (mm/s) below which prediction lookahead is faded out to prevent stationary jitter
         bool  taperTip                     = true;             // Gradually tapers radius towards the predicted tip to eliminate visual popping/snapping
         float tipTaperRatio                = 0.3f;             // Minimum radius multiplier at the tip of the prediction (relative to base radius)

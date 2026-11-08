@@ -303,8 +303,25 @@ void InkEngine::EnsurePrediction() const {
     if (m_config.prediction.minSpeedMmPerSec > 0.0f && m_filteredSpeedMmPerSec < m_config.prediction.minSpeedMmPerSec) {
         return;
     }
-    if (m_config.prediction.suppressOnTurns && m_currentTurnAngleRad > m_config.prediction.turnSuppressionThresholdRad) {
-        return;
+    if (m_config.prediction.suppressOnTurns) {
+        if (m_currentTurnAngleRad > m_config.prediction.turnSuppressionThresholdRad) {
+            return;
+        }
+        if (m_liveModeledPoints.size() >= 3) {
+            const auto& p1 = m_liveModeledPoints[m_liveModeledPoints.size() - 3];
+            const auto& p2 = m_liveModeledPoints[m_liveModeledPoints.size() - 2];
+            const auto& p3 = m_liveModeledPoints.back();
+            float v1x = p2.x - p1.x, v1y = p2.y - p1.y;
+            float v2x = p3.x - p2.x, v2y = p3.y - p2.y;
+            float speed1 = std::hypot(v1x, v1y);
+            float speed2 = std::hypot(v2x, v2y);
+            if (speed1 > 1e-4f && speed2 > 1e-4f) {
+                float cosTheta = (v1x * v2x + v1y * v2y) / (speed1 * speed2);
+                if (cosTheta < m_config.prediction.maxCurvatureCosTheta) {
+                    return; // Sharp direction change: cut prediction lookahead to eliminate whiskers
+                }
+            }
+        }
     }
 
     if (!m_physicsBridge->Predict(m_predictionResultsBuffer)) {

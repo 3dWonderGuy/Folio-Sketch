@@ -195,6 +195,25 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
             add_library(SDL3::SDL3 ALIAS SDL3-static)
         endif()
     endif()
+
+    # --- Vendored Dear ImGui (SDL3 + OpenGL3 backends) ---
+    set(FOLIO_IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
+    if(NOT TARGET imgui)
+        add_library(imgui STATIC
+            "${FOLIO_IMGUI_DIR}/imgui.cpp"
+            "${FOLIO_IMGUI_DIR}/imgui_draw.cpp"
+            "${FOLIO_IMGUI_DIR}/imgui_tables.cpp"
+            "${FOLIO_IMGUI_DIR}/imgui_widgets.cpp"
+            "${FOLIO_IMGUI_DIR}/backends/imgui_impl_sdl3.cpp"
+            "${FOLIO_IMGUI_DIR}/backends/imgui_impl_opengl3.cpp"
+        )
+        target_include_directories(imgui PUBLIC "${FOLIO_IMGUI_DIR}" "${FOLIO_IMGUI_DIR}/backends")
+        target_compile_definitions(imgui PUBLIC IMGUI_DEFINE_MATH_OPERATORS)
+        target_link_libraries(imgui PUBLIC SDL3::SDL3)
+        if(ANDROID)
+            target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_ES3)
+        endif()
+    endif()
 endif()
 
 # ==============================================================================
@@ -208,30 +227,15 @@ add_subdirectory(folio_backends)
 # Defined BEFORE the test suite so it is the primary/default runnable target.
 # ==============================================================================
 if(FOLIO_SKETCH_BUILD_INSPECTOR)
-    # --- Vendored Dear ImGui (SDL3 + OpenGL3 backends) ---
-    set(FOLIO_IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
-    add_library(imgui STATIC
-        "${FOLIO_IMGUI_DIR}/imgui.cpp"
-        "${FOLIO_IMGUI_DIR}/imgui_draw.cpp"
-        "${FOLIO_IMGUI_DIR}/imgui_tables.cpp"
-        "${FOLIO_IMGUI_DIR}/imgui_widgets.cpp"
-        "${FOLIO_IMGUI_DIR}/backends/imgui_impl_sdl3.cpp"
-        "${FOLIO_IMGUI_DIR}/backends/imgui_impl_opengl3.cpp"
-    )
-    target_include_directories(imgui PUBLIC "${FOLIO_IMGUI_DIR}" "${FOLIO_IMGUI_DIR}/backends")
-    target_compile_definitions(imgui PUBLIC IMGUI_DEFINE_MATH_OPERATORS)
-    target_link_libraries(imgui PUBLIC SDL3::SDL3)
-    if(ANDROID)
-        target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_ES3)
-    endif()
-
     # --- OpenGL / GLES ---
     if(NOT ANDROID)
         find_package(OpenGL REQUIRED)
     endif()
 
     set(FOLIO_INSPECTOR_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/inspector/main_inspector.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/main.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/layer_manager.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/input_manager.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspector/gl_loader.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspector/gl_shape_renderer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspector/raw_sensor_layer.cpp"

@@ -826,6 +826,13 @@ int main(int argc, char* argv[]) {
             return RunHeadlessDiagnostics();
         }
     }
+#if defined(__ANDROID__)
+    // On Android, inking scanout is handled directly by FolioInkView via GLFrontBufferedRenderer.
+    // Halting the SDL thread eliminates swapchain contention and EGL/VSYNC overhead on Android.
+    while (true) {
+        SDL_Delay(1000);
+    }
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::cerr << "[folio_ink_inspector] SDL_Init failed: " << SDL_GetError() << std::endl;
         return 1;

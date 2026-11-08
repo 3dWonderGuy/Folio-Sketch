@@ -30,20 +30,34 @@
 #define LOG_TAG "FolioInspectorV2"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOG_SWAP(...) __android_log_print(ANDROID_LOG_VERBOSE, "FolioSwap", __VA_ARGS__)
+#define LOG_SWAP_ERR(...) __android_log_print(ANDROID_LOG_ERROR, "FolioSwap", __VA_ARGS__)
 #else
 #include "inspector/gl_loader.hpp"
+#include <cstdio>
+#define LOG_SWAP(...) do { printf("[FolioSwap] " __VA_ARGS__); printf("\n"); } while(0)
+#define LOG_SWAP_ERR(...) do { fprintf(stderr, "[FolioSwap:ERROR] " __VA_ARGS__); fprintf(stderr, "\n"); } while(0)
 #endif
 
 #include "inspectorV2.0/layer_manager.hpp"
+#include "inspectorV2.0/app_brain.hpp"
+#include "inspectorV2.0/ui_manager.hpp"
 
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
 
 #if defined(__ANDROID__)
-    // On Android, scanout is handled directly by FolioInkView
+    LOGI("[FolioInspectorV2] SDL host thread initialized (C++ Brain Driver)");
+    auto& brain = Folio::V2::AppBrain::Instance();
+
+    // Event-driven loop on Android: waits when idle, consumes 0% CPU and zero GPU swaps while user inks
     while (true) {
-        SDL_Delay(1000);
+        if (brain.CheckAndResetRedraw()) {
+            size_t totalStrokes = brain.GetLayerManager().GetDocumentStrokes().size();
+            LOGI("[FolioInspectorV2] Stroke commit synchronized to Document Model! Total strokes: %zu", totalStrokes);
+        }
+        SDL_Delay(100);
     }
 #endif
 
@@ -84,7 +98,7 @@ int main(int argc, char* argv[]) {
     }
 
 #if !defined(__ANDROID__)
-    if (!InitGlLoader()) {
+    if (!Folio::Debug::InitGlLoader()) {
         std::cerr << "[FolioInspectorV2] Failed to initialize OpenGL loader!" << std::endl;
     }
 #endif
@@ -105,6 +119,8 @@ int main(int argc, char* argv[]) {
 
     Folio::V2::LayerManager layerManager;
     bool needsRedraw = true;
+    uint64_t liveInkingFlushCount = 0;
+    bool wasInkingActive = false;
 
     layerManager.onDocumentDirty = [&needsRedraw]() {
         needsRedraw = true;
@@ -200,48 +216,33 @@ int main(int argc, char* argv[]) {
             } while (SDL_PollEvent(&event));
         }
 
-        // Render Frame
-        SDL_GetWindowSizeInPixels(window, &fbWidth, &fbHeight);
-        layerManager.RenderDocumentCanvas(fbWidth, fbHeight);
+        // Invalidation-driven & active inking lock:
+        // When user is inking on Thread 2, suppress SDL_GL_SwapWindow to prevent DPU swapchain stalls and latency spikes.
         if (layerManager.IsLiveInkingActive()) {
             layerManager.RenderLiveInking(fbWidth, fbHeight);
-        }
-
-        // Dear ImGui Frame (Inspector & Diagnostics Bench)
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplSDL3_NewFrame();
-        ImGui::NewFrame();
-
-        {
-            ImGui::Begin("Inspector V2.0 Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-            ImGui::Text("FPS: %.1f (%.2f ms/frame)", io.Framerate, 1000.0f / io.Framerate);
-            ImGui::Separator();
-
-            auto& canvas = layerManager.GetCanvasState();
-            ImGui::Text("Zoom: %.2fx", canvas.zoom);
-            ImGui::Text("Pan: (%.1f, %.1f)", canvas.panX, canvas.panY);
-            if (ImGui::Button("Reset View")) {
-                canvas.panX = 0.0f;
-                canvas.panY = 0.0f;
-                canvas.zoom = 1.0f;
+            liveInkingFlushCount++;
+            LOG_SWAP("glFlush executed during active live inking (count: %llu)", (unsigned long long)liveInkingFlushCount);
+            wasInkingActive = true;
+            // ZERO SDL_GL_SwapWindow calls during active inking
+        } else if (needsRedraw) {
+            if (layerManager.IsLiveInkingActive()) {
+                LOG_SWAP_ERR("CRITICAL VIOLATION: SDL_GL_SwapWindow requested while IsLiveInkingActive() is TRUE!");
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Clear Canvas (C)")) {
-                layerManager.ClearDocument();
+            if (wasInkingActive) {
+                LOG_SWAP("Stroke completed (ACTION_UP) - presenting dry document frame via SDL_GL_SwapWindow (total inking flushes: %llu)", (unsigned long long)liveInkingFlushCount);
+                wasInkingActive = false;
+                liveInkingFlushCount = 0;
             }
 
-            ImGui::Separator();
-            ImGui::Text("Committed Strokes: %zu", layerManager.GetDocumentStrokes().size());
-            ImGui::Text("Live Inking Active: %s", layerManager.IsLiveInkingActive() ? "YES" : "NO");
+            // Render Document Canvas & ImGui only when dirty / on pen lift / exposed
+            layerManager.RenderDocumentCanvas(fbWidth, fbHeight);
 
-            ImGui::End();
+            // Unified ImGui rendered identically on Linux & Android
+            Folio::V2::UiManager::Instance().Render(fbWidth, fbHeight);
+
+            SDL_GL_SwapWindow(window);
+            needsRedraw = false;
         }
-
-        ImGui::Render();
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        SDL_GL_SwapWindow(window);
-        needsRedraw = false;
     }
 
     ImGui_ImplOpenGL3_Shutdown();

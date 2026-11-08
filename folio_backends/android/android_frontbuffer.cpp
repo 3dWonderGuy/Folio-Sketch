@@ -35,7 +35,6 @@ AndroidFrontBuffer::~AndroidFrontBuffer() {
 
 bool AndroidFrontBuffer::Init(ANativeWindow* window) {
     Shutdown();
-    m_window = window;
 
 #if defined(__ANDROID__)
     EGLDisplay display = eglGetCurrentDisplay();
@@ -156,9 +155,9 @@ void AndroidFrontBuffer::Shutdown() {
     if (!m_initialized) return;
 
 #if defined(__ANDROID__)
-    EGLDisplay display = static_cast<EGLDisplay>(m_display);
-    EGLSurface surface = static_cast<EGLSurface>(m_surface);
-    EGLContext context = static_cast<EGLContext>(m_context);
+    auto display = static_cast<EGLDisplay>(m_display);
+    auto surface = static_cast<EGLSurface>(m_surface);
+    auto context = static_cast<EGLContext>(m_context);
 
     if (display != EGL_NO_DISPLAY) {
         if (surface != EGL_NO_SURFACE) {
@@ -173,7 +172,6 @@ void AndroidFrontBuffer::Shutdown() {
     m_display = nullptr;
     m_surface = nullptr;
     m_context = nullptr;
-    m_window = nullptr;
     m_width = 0;
     m_height = 0;
     m_initialized = false;
@@ -184,9 +182,9 @@ bool AndroidFrontBuffer::BeginWetDraw(int* outWidth, int* outHeight) {
     if (!m_initialized) return false;
 
 #if defined(__ANDROID__)
-    EGLDisplay display = static_cast<EGLDisplay>(m_display);
-    EGLSurface surface = static_cast<EGLSurface>(m_surface);
-    EGLContext context = static_cast<EGLContext>(m_context);
+    auto display = static_cast<EGLDisplay>(m_display);
+    auto surface = static_cast<EGLSurface>(m_surface);
+    auto context = static_cast<EGLContext>(m_context);
 
     if (!eglMakeCurrent(display, surface, surface, context)) {
         LOGE("BeginWetDraw eglMakeCurrent FAILED: 0x%04x", eglGetError());
@@ -204,7 +202,7 @@ bool AndroidFrontBuffer::BeginWetDraw(int* outWidth, int* outHeight) {
     return true;
 }
 
-void AndroidFrontBuffer::EndWetDraw() {
+void AndroidFrontBuffer::EndWetDraw() const {
     if (!m_initialized) return;
 
 #if defined(__ANDROID__)

@@ -1,0 +1,613 @@
+{
+	"archive" : {},
+	"artifacts" : 
+	[
+		{
+			"path" : "libFolioSketch.a"
+		}
+	],
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"target_link_libraries",
+			"target_compile_options",
+			"target_include_directories"
+		],
+		"files" : 
+		[
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 145,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 167,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 177,
+				"parent" : 0
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 154,
+				"parent" : 0
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-Wall"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-Wextra"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-Wno-pedantic"
+				},
+				{
+					"backtrace" : 2,
+					"fragment" : "-pthread"
+				},
+				{
+					"fragment" : "-std=c++20"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 4,
+					"path" : "/home/odysseus/Documents/GitHub/Folio-Sketch/include"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "/home/odysseus/Documents/GitHub/Folio-Sketch/third_party/ink-stroke-modeler"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "/home/odysseus/Documents/GitHub/Folio-Sketch/src"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "/home/odysseus/Documents/GitHub/Folio-Sketch/src/engine"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "/home/odysseus/Documents/GitHub/Folio-Sketch/src/generator"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "/home/odysseus/Documents/GitHub/Folio-Sketch/src/geometry"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "/home/odysseus/Documents/GitHub/Folio-Sketch/src/mesh"
+				},
+				{
+					"backtrace" : 2,
+					"path" : "/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp"
+				}
+			],
+			"language" : "CXX",
+			"languageStandard" : 
+			{
+				"backtraces" : 
+				[
+					2
+				],
+				"standard" : "20"
+			},
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13
+			],
+			"sysroot" : 
+			{
+				"path" : "/home/odysseus/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+			}
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 2,
+			"id" : "absl_base_cpu_detect::@649cb5ab055927a76ab5"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_hardening::@649cb5ab055927a76ab5"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_exponential_biased::@610112b8222b7e6b2b6f"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_log_severity::@649cb5ab055927a76ab5"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_raw_logging_internal::@649cb5ab055927a76ab5"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_spinlock_wait::@649cb5ab055927a76ab5"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_malloc_internal::@649cb5ab055927a76ab5"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_base::@649cb5ab055927a76ab5"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_throw_delegate::@649cb5ab055927a76ab5"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_strerror::@649cb5ab055927a76ab5"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_crc_internal::@e7b73a99dc329af715ea"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_crc32c::@e7b73a99dc329af715ea"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_crc_cord_state::@e7b73a99dc329af715ea"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_stacktrace::@29ce828be0197ec6dd61"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_symbolize::@29ce828be0197ec6dd61"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_hash::@e82b4f9cfb0ccfacbdfd"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_city::@e82b4f9cfb0ccfacbdfd"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_int128::@9d8e9017d0346130c5af"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_status::@eec4915894d7ef1676bd"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_statusor::@eec4915894d7ef1676bd"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_strings::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_strings_internal::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_str_format_internal::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_cord_internal::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_cordz_functions::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_cordz_handle::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_cordz_info::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_cord::@cadd5db28f0587d4097f"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_graphcycles_internal::@f8dca903cb46e5e9bef2"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_kernel_timeout_internal::@f8dca903cb46e5e9bef2"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_synchronization::@f8dca903cb46e5e9bef2"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_time::@b4524c795b0f97a08e67"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_civil_time::@b4524c795b0f97a08e67"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_time_zone::@b4524c795b0f97a08e67"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_source_location::@91b7f7e4da4a6a5cf896"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_params::@e8c17e6131ee074d620e"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_stroke_modeler::@e8c17e6131ee074d620e"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_types::@e8c17e6131ee074d620e"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_internal_types::@0d8fe7679b4005f56759"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_position_modeler::@0d8fe7679b4005f56759"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_stylus_state_modeler::@0d8fe7679b4005f56759"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_utils::@0d8fe7679b4005f56759"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_validation::@0d8fe7679b4005f56759"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_wobble_smoother::@0d8fe7679b4005f56759"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_loop_contraction_mitigation_modeler::@0d8fe7679b4005f56759"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_input_predictor::@f93ad80a16d3662bc20a"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_kalman_predictor::@f93ad80a16d3662bc20a"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_stroke_end_predictor::@f93ad80a16d3662bc20a"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_kalman_filter::@49632fa0d4f7292f4e30"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "ink_stroke_modeler_matrix::@49632fa0d4f7292f4e30"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_tracing_internal::@649cb5ab055927a76ab5"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_debugging_internal::@29ce828be0197ec6dd61"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_demangle_internal::@29ce828be0197ec6dd61"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_decode_rust_punycode::@29ce828be0197ec6dd61"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_demangle_rust::@29ce828be0197ec6dd61"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_utf8_for_code_point::@29ce828be0197ec6dd61"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "absl_leak_check::@29ce828be0197ec6dd61"
+		}
+	],
+	"id" : "FolioSketch::@6890427a1f51a3e7e1df",
+	"name" : "FolioSketch",
+	"nameOnDisk" : "libFolioSketch.a",
+	"paths" : 
+	{
+		"build" : ".",
+		"source" : "."
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13
+			]
+		},
+		{
+			"name" : "Header Files",
+			"sourceIndexes" : 
+			[
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+				21,
+				22,
+				23,
+				24,
+				25,
+				26,
+				27,
+				28,
+				29,
+				30,
+				31
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/engine/ink_engine.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/engine/ink_physics_bridge.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/engine/ink_stroke_finisher.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/geometry/ink_stroke_filter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/geometry/ink_geometry_utils.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/vector/ink_generator_polygon.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/vector/ink_generator_stroke.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/vector/ink_generator_ribbon.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/vector/ink_generator_caps.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/vector/ink_generator_patterns.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/vector/ink_generator_infill.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/vector/ink_ribbon_corner.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/vector/ink_generator_debug.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "src/gpu/ink_mesh_builder.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "include/folio_sketch/folio_sketch.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "include/folio_sketch/core/ink_stroke_data.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "include/folio_sketch/core/ink_config.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "include/folio_sketch/core/stroke_collision.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "include/folio_sketch/engine/ink_engine.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "include/folio_sketch/engine/stroke_width_evaluator.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "include/folio_sketch/engine/stroke_post_processor.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "include/folio_sketch/gpu/ink_mesh.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "include/folio_sketch/geometry/shape_recognizer.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "include/folio_sketch/vector/ink_path.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "include/folio_sketch/vector/ink_generator.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "src/engine/ink_physics_bridge.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "src/engine/ink_stroke_finisher.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "src/geometry/ink_geometry_utils.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "src/geometry/ink_nib_geometry.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "src/geometry/ink_stroke_filter.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "src/vector/ink_generator_internal.hpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "src/vector/ink_ribbon_corner.hpp",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "STATIC_LIBRARY"
+}

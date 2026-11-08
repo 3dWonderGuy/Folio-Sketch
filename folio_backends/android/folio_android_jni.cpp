@@ -13,10 +13,14 @@
 
 #include "folio_sketch/engine/ink_engine.hpp"
 #include "folio_backends/common/gl_capsule_renderer.hpp"
+#include "inspectorV2.0/app_brain.hpp"
+#include "inspectorV2.0/ui_manager.hpp"
 
 #define LOG_TAG "FolioSketchNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOG_SWAP(...) __android_log_print(ANDROID_LOG_VERBOSE, "FolioSwap", __VA_ARGS__)
+#define LOG_SWAP_ERR(...) __android_log_print(ANDROID_LOG_ERROR, "FolioSwap", __VA_ARGS__)
 
 namespace {
 
@@ -41,6 +45,7 @@ struct FolioAndroidSession {
 
     bool isStrokeActive = false;
     bool glInitialized  = false;
+    uint64_t wetFlushCount = 0;
 
     FolioAndroidSession() {
         activeStyle.baseWidth = 12.0f;
@@ -51,6 +56,7 @@ struct FolioAndroidSession {
     void EnsureGl() {
         if (!glInitialized) {
             capsuleRenderer.Init();
+            Folio::V2::UiManager::Instance().Init();
             glInitialized = true;
             LOGI("FolioAndroidSession GL resources initialized");
         }
@@ -85,16 +91,43 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeIngestPacket(
     jfloat x, jfloat y, jfloat pressure,
     jfloat tiltX, jfloat tiltY,
     jlong timestampNs,
-    jboolean isDown, jboolean isUp, jboolean /*isStylus*/)
+    jboolean isDown, jboolean isUp, jboolean isStylus,
+    jint pointerId)
 {
     auto* session = reinterpret_cast<FolioAndroidSession*>(handle);
     if (!session) return;
 
+    const double timeSec = static_cast<double>(timestampNs) * 1e-9;
+
+    // Check if Dear ImGui wants to capture this interaction
+    bool uiCaptured = Folio::V2::UiManager::Instance().ProcessTouch(x, y, isDown, isUp);
+    if (uiCaptured && isDown) {
+        // ImGui widget clicked: request multi-buffered redraw to update UI state
+        Folio::V2::AppBrain::Instance().RequestRedraw();
+        return;
+    }
+
+    // Route packet through AppBrain's InputManager for Palm Rejection & Two-Finger Navigation
+    Folio::V2::PointerPacket pkt;
+    pkt.device       = isStylus ? Folio::V2::DeviceType::Stylus : Folio::V2::DeviceType::Touch;
+    pkt.phase        = isDown ? Folio::V2::InputPhase::Down : (isUp ? Folio::V2::InputPhase::Up : Folio::V2::InputPhase::Move);
+    pkt.pointerId    = static_cast<int32_t>(pointerId);
+    pkt.x            = x;
+    pkt.y            = y;
+    pkt.pressure     = pressure;
+    pkt.tiltX        = tiltX;
+    pkt.tiltY        = tiltY;
+    pkt.timestampSec = timeSec;
+    Folio::V2::AppBrain::Instance().GetLayerManager().ProcessPointer(pkt);
+
+    if (!isStylus) {
+        // Finger touch handled exclusively by InputManager (Pan & Zoom); does NOT draw ink
+        return;
+    }
+
     session->lastX = x;
     session->lastY = y;
     session->lastPressure = pressure;
-
-    const double timeSec = static_cast<double>(timestampNs) * 1e-9;
 
     if (isDown) {
         session->isStrokeActive = true;
@@ -109,18 +142,36 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeIngestPacket(
         Folio::FinishedStrokeData fin = session->engine.FinishStroke();
         if (!fin.modeledPoints.empty()) {
             CommittedNativeStroke stroke;
-            stroke.points = std::move(fin.modeledPoints);
+            stroke.points = fin.modeledPoints;
             stroke.color  = Folio::PackPremultipliedGpuColor(session->activeStyle.color);
             stroke.brush  = session->activeBrush;
+
+            // Commit to both local session and central AppBrain LayerManager
+            Folio::V2::DocumentStroke docStroke;
+            docStroke.points = std::move(fin.modeledPoints);
+            docStroke.color  = stroke.color;
+            docStroke.brush  = stroke.brush;
+            Folio::V2::AppBrain::Instance().GetLayerManager().AddDocumentStroke(std::move(docStroke));
+
             session->committedStrokes.push_back(std::move(stroke));
         } else if (session->lastX > 0.0f) {
             CommittedNativeStroke stroke;
             stroke.points.emplace_back(session->lastX, session->lastY, session->activeStyle.baseWidth * 0.5f, session->lastPressure);
             stroke.color  = Folio::PackPremultipliedGpuColor(session->activeStyle.color);
             stroke.brush  = session->activeBrush;
+
+            Folio::V2::DocumentStroke docStroke;
+            docStroke.points = stroke.points;
+            docStroke.color  = stroke.color;
+            docStroke.brush  = stroke.brush;
+            Folio::V2::AppBrain::Instance().GetLayerManager().AddDocumentStroke(std::move(docStroke));
+
             session->committedStrokes.push_back(std::move(stroke));
         }
         session->isStrokeActive = false;
+
+        // Notify the C++ SDL host brain that a stroke was committed
+        Folio::V2::AppBrain::Instance().RequestRedraw();
     }
 }
 
@@ -169,6 +220,8 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeRenderWet(
     }
 
     glFlush();
+    session->wetFlushCount++;
+    LOG_SWAP("glFlush executed during active live inking (count: %llu)", (unsigned long long)session->wetFlushCount);
 }
 
 JNIEXPORT void JNICALL
@@ -179,9 +232,12 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeRenderDry(
     auto* session = reinterpret_cast<FolioAndroidSession*>(handle);
     if (!session) return;
 
+    LOG_SWAP("Stroke completed (ACTION_UP) - presenting dry document frame (total inking flushes: %llu)", (unsigned long long)session->wetFlushCount);
+    session->wetFlushCount = 0;
+
     session->EnsureGl();
     glViewport(0, 0, width, height);
-    glClearColor(0.96f, 0.96f, 0.98f, 1.0f); // Light off-white paper canvas background
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f); // True Black AMOLED canvas background
     glClear(GL_COLOR_BUFFER_BIT);
 
     jfloat* matrixElements = nullptr;
@@ -204,6 +260,9 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeRenderDry(
     if (matrixElements != nullptr) {
         env->ReleaseFloatArrayElements(surfaceTransform, matrixElements, JNI_ABORT);
     }
+
+    // Render Dear ImGui Diagnostic Bench on the MultiBuffered sublayer
+    Folio::V2::UiManager::Instance().Render(width, height);
 
     glFlush();
 }

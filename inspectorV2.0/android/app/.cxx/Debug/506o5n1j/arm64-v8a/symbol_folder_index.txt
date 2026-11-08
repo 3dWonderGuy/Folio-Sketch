@@ -1,0 +1,1 @@
+/home/odysseus/Documents/GitHub/Folio-Sketch/inspectorV2.0/android/app/build/intermediates/cxx/Debug/506o5n1j/obj/arm64-v8a
