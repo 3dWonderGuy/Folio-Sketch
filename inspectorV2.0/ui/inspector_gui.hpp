@@ -35,8 +35,9 @@ struct InspectorGui {
     bool showShapeBoundingBox       = true;
 
     // Workspace & theme selection
-    int currentWorkspaceTab       = 0; // 0: Modeler, 1: Width & Dynamics, 2: Post-Processing, 3: Shape Snapping, 4: Canvas & Document
+    int currentWorkspaceTab       = 0; // 0: Modeler, 1: Width & Dynamics, 2: Post-Processing, 3: Shape Snapping, 4: Canvas & Document, 5: Brush Studio (Cahier)
     int canvasThemePreset         = 0; // 0: Dark Charcoal Grid (#171A1F), 1: AMOLED Black, 2: Blueprint Blue, 3: Light Paper
+    bool funBrushMultiStroke      = true; // Allow multi-stroke drawing while in Fun Brushes tab
 
     std::vector<float> arcLengthPlotSamples;
 
@@ -51,6 +52,7 @@ void RenderTabDynamics(InspectorGui& gui, LayerManager& layerManager, bool& need
 void RenderTabPostProcessing(InspectorGui& gui, LayerManager& layerManager, bool& needsRedraw);
 void RenderTabShapeSnapping(InspectorGui& gui, LayerManager& layerManager, bool& needsRedraw);
 void RenderTabCanvas(InspectorGui& gui, LayerManager& layerManager, bool& needsRedraw);
+void RenderTabFunBrushes(InspectorGui& gui, LayerManager& layerManager, bool& needsRedraw);
 
 // Canvas overlay rendering (implemented in inspectorV2.0/ui/diagnostics_overlay.cpp)
 void RenderDiagnosticsOverlay(const InspectorGui& gui, LayerManager& layerManager, int fbWidth, int fbHeight, bool drawBackgroundGrid = true);

@@ -5,6 +5,7 @@
 /home/odysseus/Documents/GitHub/Folio-Sketch/include/folio_sketch/engine/ink_engine.hpp
 /home/odysseus/Documents/GitHub/Folio-Sketch/include/folio_sketch/engine/stroke_width_evaluator.hpp
 /home/odysseus/Documents/GitHub/Folio-Sketch/include/folio_sketch/engine/stroke_post_processor.hpp
+/home/odysseus/Documents/GitHub/Folio-Sketch/include/folio_sketch/engine/brush_composer.hpp
 /home/odysseus/Documents/GitHub/Folio-Sketch/include/folio_sketch/gpu/ink_mesh.hpp
 /home/odysseus/Documents/GitHub/Folio-Sketch/include/folio_sketch/geometry/shape_recognizer.hpp
 /home/odysseus/Documents/GitHub/Folio-Sketch/include/folio_sketch/vector/ink_path.hpp

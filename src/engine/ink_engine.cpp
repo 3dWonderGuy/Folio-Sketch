@@ -75,7 +75,7 @@ void InkEngine::BeginStroke(double worldX, double worldY, float pressure, double
     m_smoothedWidth = dynamicWidth;
 
     // 4. Emit immediate touchdown dot (0ms visual feedback while filter buffers)
-    StrokePoint dotPt(startPt.x, startPt.y, dynamicWidth * 0.5f, startPressure, startPt.tiltX, startPt.tiltY);
+    StrokePoint dotPt(startPt.x, startPt.y, dynamicWidth * 0.5f, startPressure, startPt.tiltX, startPt.tiltY, timeSec);
     CapsuleBuilder::BuildCapsuleInstances(
         std::span<const StrokePoint>(&dotPt, 1),
         PackPremultipliedGpuColor(m_activeStyle.color),
@@ -430,7 +430,7 @@ StrokePoint InkEngine::ToStrokePoint(const sm::Result& res, float previousWidth)
         dynamicWidth *= StrokeWidthEvaluator::NibWidthFactor(travelHeading, m_activeStyle.nibAngleRad, m_activeStyle.nibAspect);
     }
 
-    return StrokePoint(res.position.x, res.position.y, dynamicWidth * 0.5f, effectivePressure, tiltX, tiltY);
+    return StrokePoint(res.position.x, res.position.y, dynamicWidth * 0.5f, effectivePressure, tiltX, tiltY, res.time.Value());
 }
 
 void InkEngine::ProcessPhysicsResults(const std::vector<sm::Result>& results) {

@@ -21,6 +21,7 @@
 #include <memory>
 #include <imgui.h>
 #include "folio_sketch/engine/ink_engine.hpp"
+#include "folio_sketch/engine/brush_composer.hpp"
 #include "folio_backends/common/gl_capsule_renderer.hpp"
 #include "inspectorV2.0/input_manager.hpp"
 #include "inspectorV2.0/ui/inspector_gui.hpp"
@@ -38,6 +39,9 @@ struct DocumentStroke {
     std::vector<Folio::StrokePoint> points;
     uint32_t color = 0;
     Folio::Backends::CapsuleBrush brush{};
+    Folio::BrushRecipe recipe{};
+    std::vector<Folio::CapsuleInstance> customInstances{};
+    double finishTimestampSec = 0.0; ///< Pen-up time (input clock); 0 while unfinished
 };
 
 class LayerManager {
@@ -59,11 +63,22 @@ public:
     Folio::InkEngine& GetLiveEngine() noexcept { return m_liveEngine; }
     [[nodiscard]] bool IsLiveInkingActive() const noexcept;
 
-    // Active Stroke Style
+    /// True while a live-animated stroke is being drawn or its post-pen-up settling window is running.
+    [[nodiscard]] bool HasActiveAnimations() const noexcept;
+    /// Current time in the same clock domain as StrokePoint::timestampSec.
+    [[nodiscard]] double NowStrokeClockSec() const noexcept;
+
+    // Active Stroke Style & Multi-Coat Recipe
     [[nodiscard]] Folio::StrokeStyle& GetActiveStyle() noexcept { return m_activeStyle; }
     [[nodiscard]] const Folio::StrokeStyle& GetActiveStyle() const noexcept { return m_activeStyle; }
     [[nodiscard]] Folio::Backends::CapsuleBrush& GetActiveBrush() noexcept { return m_activeBrush; }
     [[nodiscard]] const Folio::Backends::CapsuleBrush& GetActiveBrush() const noexcept { return m_activeBrush; }
+    [[nodiscard]] Folio::BrushRecipe& GetActiveRecipe() noexcept { return m_activeRecipe; }
+    [[nodiscard]] const Folio::BrushRecipe& GetActiveRecipe() const noexcept { return m_activeRecipe; }
+    void SetActiveRecipe(Folio::BrushRecipe recipe) { m_activeRecipe = std::move(recipe); }
+    [[nodiscard]] int GetActivePresetIndex() const noexcept { return m_activePresetIndex; }
+    void SetActivePresetIndex(int idx) noexcept { m_activePresetIndex = idx; }
+    void RebuildDocumentCustomInstances();
 
     // Last Stroke Raw Samples and Debug Points
     [[nodiscard]] const std::vector<Folio::RawInputSample>& GetLastRawSamples() const noexcept {
@@ -150,6 +165,9 @@ private:
     CanvasState                         m_canvasState{};
     Folio::StrokeStyle                  m_activeStyle{};
     Folio::Backends::CapsuleBrush       m_activeBrush{};
+    Folio::BrushRecipe                  m_activeRecipe{};
+    int                                 m_activePresetIndex = 0;
+    float                               m_animationTimeSec = 0.0f;
 
     std::vector<DocumentStroke>         m_documentStrokes;
     std::vector<Folio::RawInputSample>  m_lastRawSamples;
@@ -158,6 +176,7 @@ private:
 
     StylusTelemetry                     m_telemetry{};
     double                              m_lastPacketTimeSec = 0.0;
+    std::chrono::steady_clock::time_point m_lastPacketWall{};
 
     float  m_lastX = 0.0f;
     float  m_lastY = 0.0f;
@@ -183,6 +202,10 @@ private:
     int          m_docWidth          = 0;
     int          m_docHeight         = 0;
     bool         m_docFboValid       = false;
+    unsigned int m_wetComposeFbo     = 0;
+    unsigned int m_wetComposeTex     = 0;
+    int          m_wetComposeW       = 0;
+    int          m_wetComposeH       = 0;
     unsigned int m_blitProgram       = 0;
     unsigned int m_blitVao           = 0;
     unsigned int m_blitVbo           = 0;
@@ -198,7 +221,9 @@ private:
 
     void EnsureDocumentFbo(int w, int h);
     void ShutdownDocumentFbo();
-    void BlitDocumentFboToFrontBuffer(const float* surfaceTransformMatrix);
+    void BlitDocumentFboToFrontBuffer(const float* surfaceTransformMatrix, unsigned int srcTex = 0);
+    void EnsureWetComposeFbo(int w, int h);
+    void RefreshSettlingStroke();
     static void ApplyTransformedScissor(const ScreenRect& logicalRect, int vpWidth, int vpHeight, const float* surfaceTransformMatrix);
 
     struct DelayedPacket {

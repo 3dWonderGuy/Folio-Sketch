@@ -87,6 +87,7 @@ set(FOLIO_SKETCH_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/ink_engine.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/ink_physics_bridge.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/ink_stroke_finisher.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/brush_composer.cpp"
 
     # Geometry & Filtering
     "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/ink_stroke_filter.cpp"
@@ -121,6 +122,7 @@ set(FOLIO_SKETCH_HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/engine/ink_engine.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/engine/stroke_width_evaluator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/engine/stroke_post_processor.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/engine/brush_composer.hpp"
 
     # GPU
     "${CMAKE_CURRENT_SOURCE_DIR}/include/folio_sketch/gpu/ink_mesh.hpp"
@@ -244,6 +246,7 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/ui/tabs/tab_postprocessing.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/ui/tabs/tab_shape_snapping.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/ui/tabs/tab_canvas.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/ui/tabs/tab_fun_brushes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/testbed/testbed_samples.cpp"
     )
 

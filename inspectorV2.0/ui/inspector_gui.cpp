@@ -15,8 +15,10 @@ void InspectorGui::Render(LayerManager& layerManager, int fbWidth, int fbHeight,
     ImGuiIO& io = ImGui::GetIO();
 
     // Sync testbed mode: Tabs 0, 1, 2, 3 are single-stroke testbeds.
-    // Tab 4 (Canvas & Document) is the multi-stroke artwork canvas.
-    layerManager.SetTestbedMode(currentWorkspaceTab != 4);
+    // Tab 4 (Canvas & Document) is multi-stroke artwork canvas.
+    // Tab 5 (Brush Studio) respects funBrushMultiStroke toggle.
+    bool isArtworkTab = (currentWorkspaceTab == 4) || (currentWorkspaceTab == 5 && funBrushMultiStroke);
+    layerManager.SetTestbedMode(!isArtworkTab);
 
     {
         ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_FirstUseEver);
@@ -87,6 +89,7 @@ void InspectorGui::Render(LayerManager& layerManager, int fbWidth, int fbHeight,
             RenderTabPostProcessing(*this, layerManager, needsRedraw);
             RenderTabShapeSnapping(*this, layerManager, needsRedraw);
             RenderTabCanvas(*this, layerManager, needsRedraw);
+            RenderTabFunBrushes(*this, layerManager, needsRedraw);
             ImGui::EndTabBar();
         }
 

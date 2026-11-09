@@ -92,17 +92,20 @@ struct StylusInputPoint {
  * @brief Physics-modeled centerline point with pre-calculated stroke radius.
  */
 struct StrokePoint {
-    double x        = 0.0;    // Smoothed world X (mm)
-    double y        = 0.0;    // Smoothed world Y (mm)
-    float  r        = 0.25f;  // Evaluated stroke radius / half-thickness (mm)
-    float  pressure = 0.65f;  // Modeled pressure [0.0, 1.0]
-    float  tiltX    = 0.0f;   // Stylus X tilt angle (radians)
-    float  tiltY    = 0.0f;   // Stylus Y tilt angle (radians)
+    double x            = 0.0;    // Smoothed world X (mm)
+    double y            = 0.0;    // Smoothed world Y (mm)
+    float  r            = 0.25f;  // Evaluated stroke radius / half-thickness (mm)
+    float  pressure     = 0.65f;  // Modeled pressure [0.0, 1.0]
+    float  tiltX        = 0.0f;   // Stylus X tilt angle (radians)
+    float  tiltY        = 0.0f;   // Stylus Y tilt angle (radians)
+    double timestampSec = 0.0;    // Input birth timestamp (seconds) for live TIME_SINCE_INPUT animations
 
     constexpr StrokePoint() noexcept = default;
     constexpr StrokePoint(double x_, double y_, float r_ = 0.25f,
-                          float pressure_ = 0.65f, float tiltX_ = 0.0f, float tiltY_ = 0.0f) noexcept
-        : x(x_), y(y_), r(r_), pressure(pressure_), tiltX(tiltX_), tiltY(tiltY_) {}
+                          float pressure_ = 0.65f, float tiltX_ = 0.0f, float tiltY_ = 0.0f,
+                          double timestampSec_ = 0.0) noexcept
+        : x(x_), y(y_), r(r_), pressure(pressure_), tiltX(tiltX_), tiltY(tiltY_),
+          timestampSec(timestampSec_) {}
 
     // Implicit conversion to Point2D for geometric utilities and collision math
     constexpr operator Point2D() const noexcept { return Point2D{ x, y }; }

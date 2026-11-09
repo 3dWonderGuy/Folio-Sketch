@@ -169,6 +169,22 @@ int main(int argc, char* argv[]) {
             Folio::V2::InjectTestScribble(layerManager);
             std::cout << "[FolioInspectorV2] Synthetic scribble verified ("
                       << layerManager.GetLastRawSamples().size() << " samples).\n";
+
+            // Verify all Cahier brush recipes through BrushComposer
+            auto presets = Folio::BrushComposer::CreateCahierPresets();
+            std::cout << "[FolioInspectorV2] Validating " << presets.size() << " Cahier Brush Composer recipes...\n";
+            std::vector<Folio::CapsuleInstance> testInstances;
+            for (const auto& r : presets) {
+                testInstances.clear();
+                Folio::BrushComposer::BuildRecipeInstances(
+                    layerManager.GetLastFinishedPoints(),
+                    Folio::ColorRgba(0, 115, 255, 255), 10.0f,
+                    r, 1.25, testInstances
+                );
+                std::cout << "  - Preset [" << r.name << "]: "
+                          << r.coats.size() << " coats -> "
+                          << testInstances.size() << " GPU CapsuleInstances generated.\n";
+            }
             std::cout << "[FolioInspectorV2] All headless diagnostics PASSED.\n";
             return 0;
         }
@@ -198,7 +214,10 @@ int main(int argc, char* argv[]) {
         SDL_Event event;
         const bool hasDelayed = (layerManager.GetInspectorGui().simulatedLatencyMs > 0.0f);
         bool hasEvent = false;
-        if (hasDelayed) {
+        const bool animating = layerManager.HasActiveAnimations();
+        if (animating) {
+            hasEvent = SDL_WaitEventTimeout(&event, 8);
+        } else if (hasDelayed) {
             hasEvent = SDL_WaitEventTimeout(&event, 4);
         } else {
             hasEvent = SDL_WaitEvent(&event);
@@ -220,7 +239,7 @@ int main(int argc, char* argv[]) {
             hasEvent = SDL_PollEvent(&event);
         }
 
-        if (layerManager.FlushDelayedPackets()) {
+        if (layerManager.FlushDelayedPackets() || animating) {
             brain.RequestRedraw();
         }
 
@@ -303,7 +322,8 @@ int main(int argc, char* argv[]) {
         SDL_Event event;
         bool hasEvent = SDL_PollEvent(&event);
         const bool hasDelayed = (layerManager.GetInspectorGui().simulatedLatencyMs > 0.0f);
-        if (!hasEvent && !layerManager.IsLiveInkingActive() && !needsRedraw && !hasDelayed) {
+        const bool animating = layerManager.HasActiveAnimations();
+        if (!hasEvent && !layerManager.IsLiveInkingActive() && !needsRedraw && !hasDelayed && !animating) {
             hasEvent = SDL_WaitEvent(&event);
         }
 

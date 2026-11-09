@@ -28,6 +28,11 @@ LayerManager::LayerManager() {
     m_activeStyle.color     = Folio::ColorRgba(0, 115, 255, 255); // Electric Blue
     m_activeBrush.opacity   = 1.0f;
 
+    auto presets = Folio::BrushComposer::CreateCahierPresets();
+    if (!presets.empty()) {
+        m_activeRecipe = presets[0];
+    }
+
     InitInputRouting();
 }
 
@@ -66,6 +71,7 @@ void LayerManager::InitInputRouting() {
             }
         }
         m_lastPacketTimeSec = pkt.timestampSec;
+        m_lastPacketWall = std::chrono::steady_clock::now();
     };
 
     // 1. Live Inking Fast Path (Bypass System)
@@ -146,6 +152,15 @@ void LayerManager::InitInputRouting() {
                 stroke.points = std::move(fin.modeledPoints);
                 stroke.color  = Folio::PackPremultipliedGpuColor(m_activeStyle.color);
                 stroke.brush  = m_activeBrush;
+                stroke.recipe = m_activeRecipe;
+                stroke.finishTimestampSec = pkt.timestampSec;
+                if (!m_activeRecipe.empty()) {
+                    Folio::BrushComposer::BuildRecipeInstances(
+                        stroke.points, m_activeStyle.color, m_activeStyle.baseWidth,
+                        m_activeRecipe, NowStrokeClockSec(), stroke.customInstances,
+                        stroke.finishTimestampSec
+                    );
+                }
                 m_documentStrokes.push_back(std::move(stroke));
             } else if (m_lastX > 0.0f) {
                 const float worldX = (m_lastX - m_canvasState.panX) / m_canvasState.zoom;
@@ -154,6 +169,13 @@ void LayerManager::InitInputRouting() {
                 stroke.points.emplace_back(worldX, worldY, m_activeStyle.baseWidth * 0.5f, m_lastPressure);
                 stroke.color  = Folio::PackPremultipliedGpuColor(m_activeStyle.color);
                 stroke.brush  = m_activeBrush;
+                stroke.recipe = m_activeRecipe;
+                if (!m_activeRecipe.empty()) {
+                    Folio::BrushComposer::BuildRecipeInstances(
+                        stroke.points, m_activeStyle.color, m_activeStyle.baseWidth,
+                        m_activeRecipe, NowStrokeClockSec(), stroke.customInstances
+                    );
+                }
                 m_documentStrokes.push_back(std::move(stroke));
             }
 
@@ -234,6 +256,39 @@ bool LayerManager::FlushDelayedPackets() {
 
 bool LayerManager::IsLiveInkingActive() const noexcept {
     return m_isStrokeActive;
+}
+
+double LayerManager::NowStrokeClockSec() const noexcept {
+    if (m_lastPacketWall.time_since_epoch().count() == 0) return m_lastPacketTimeSec;
+    return m_lastPacketTimeSec + std::chrono::duration<double>(std::chrono::steady_clock::now() - m_lastPacketWall).count();
+}
+
+bool LayerManager::HasActiveAnimations() const noexcept {
+    if (m_isStrokeActive && (m_activeRecipe.isAnimated || m_activeRecipe.settlingDurationSec > 0.0f)) {
+        return true;
+    }
+    if (!m_documentStrokes.empty()) {
+        const auto& st = m_documentStrokes.back();
+        if (st.recipe.settlingDurationSec > 0.0f && st.finishTimestampSec > 0.0) {
+            return (NowStrokeClockSec() - st.finishTimestampSec) < static_cast<double>(st.recipe.settlingDurationSec);
+        }
+    }
+    return false;
+}
+
+void LayerManager::RefreshSettlingStroke() {
+    if (m_isStrokeActive || m_documentStrokes.empty()) return;
+    auto& st = m_documentStrokes.back();
+    if (st.recipe.settlingDurationSec <= 0.0f || st.finishTimestampSec <= 0.0 || st.points.size() < 2) return;
+    const double now = NowStrokeClockSec();
+    // One extra rebuild after the window closes so the final resting pose is exact.
+    if ((now - st.finishTimestampSec) > static_cast<double>(st.recipe.settlingDurationSec) + 0.1) return;
+    Folio::BrushComposer::BuildRecipeInstances(
+        st.points, Folio::ColorRgba(
+            static_cast<uint8_t>(st.color & 0xFF), static_cast<uint8_t>((st.color >> 8) & 0xFF),
+            static_cast<uint8_t>((st.color >> 16) & 0xFF), 255),
+        m_activeStyle.baseWidth, st.recipe, now, st.customInstances, st.finishTimestampSec
+    );
 }
 
 void LayerManager::SetActiveBrush(const Folio::StrokeStyle& style, const Folio::Backends::CapsuleBrush& brush) {
@@ -380,21 +435,35 @@ void LayerManager::RenderLiveInking(int vpWidth, int vpHeight, const float* surf
 
     Folio::Backends::CanvasTransform transform(m_canvasState.panX, m_canvasState.panY, m_canvasState.zoom);
 
-    m_capsuleRenderer.RenderStroke(
-        combined,
-        Folio::PackPremultipliedGpuColor(m_activeStyle.color),
-        transform,
-        vpWidth, vpHeight,
-        m_activeBrush,
-        /*singlePassWet=*/true,
-        surfaceTransformMatrix
-    );
+    if (!m_activeRecipe.empty()) {
+        std::vector<Folio::CapsuleInstance> wetInstances;
+        Folio::BrushComposer::BuildRecipeInstances(
+            combined, m_activeStyle.color, m_activeStyle.baseWidth,
+            m_activeRecipe, NowStrokeClockSec(), wetInstances
+        );
+        m_capsuleRenderer.UploadInstances(wetInstances);
+        m_capsuleRenderer.Render(
+            transform, vpWidth, vpHeight,
+            m_activeBrush, /*singlePassWet=*/true, surfaceTransformMatrix
+        );
+    } else {
+        m_capsuleRenderer.RenderStroke(
+            combined,
+            Folio::PackPremultipliedGpuColor(m_activeStyle.color),
+            transform,
+            vpWidth, vpHeight,
+            m_activeBrush,
+            /*singlePassWet=*/true,
+            surfaceTransformMatrix
+        );
+    }
 
     glFlush();
 }
 
 void LayerManager::RenderDocumentCanvas(int vpWidth, int vpHeight, const float* surfaceTransformMatrix, bool renderStrokes) {
     EnsureGl();
+    RefreshSettlingStroke();
     glViewport(0, 0, vpWidth, vpHeight);
 
     glClearColor(
@@ -412,15 +481,23 @@ void LayerManager::RenderDocumentCanvas(int vpWidth, int vpHeight, const float* 
         Folio::Backends::CanvasTransform transform(m_canvasState.panX, m_canvasState.panY, m_canvasState.zoom);
 
         for (const auto& stroke : m_documentStrokes) {
-            m_capsuleRenderer.RenderStroke(
-                stroke.points,
-                stroke.color,
-                transform,
-                vpWidth, vpHeight,
-                stroke.brush,
-                /*singlePassWet=*/false,
-                surfaceTransformMatrix
-            );
+            if (!stroke.customInstances.empty()) {
+                m_capsuleRenderer.UploadInstances(stroke.customInstances);
+                m_capsuleRenderer.Render(
+                    transform, vpWidth, vpHeight,
+                    stroke.brush, /*singlePassWet=*/false, surfaceTransformMatrix
+                );
+            } else {
+                m_capsuleRenderer.RenderStroke(
+                    stroke.points,
+                    stroke.color,
+                    transform,
+                    vpWidth, vpHeight,
+                    stroke.brush,
+                    /*singlePassWet=*/false,
+                    surfaceTransformMatrix
+                );
+            }
         }
     }
 
@@ -517,7 +594,31 @@ void LayerManager::EnsureDocumentFbo(int w, int h) {
     m_docFboValid = false;
 }
 
+void LayerManager::EnsureWetComposeFbo(int w, int h) {
+    if (w <= 0 || h <= 0) return;
+    if (m_wetComposeFbo && m_wetComposeW == w && m_wetComposeH == h) return;
+    if (!m_wetComposeFbo) glGenFramebuffers(1, &m_wetComposeFbo);
+    if (!m_wetComposeTex) glGenTextures(1, &m_wetComposeTex);
+    glBindTexture(GL_TEXTURE_2D, m_wetComposeTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    GLint prevFbo = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_wetComposeFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_wetComposeTex, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_wetComposeW = w;
+    m_wetComposeH = h;
+}
+
 void LayerManager::ShutdownDocumentFbo() {
+    if (m_wetComposeTex) { glDeleteTextures(1, &m_wetComposeTex);     m_wetComposeTex = 0; }
+    if (m_wetComposeFbo) { glDeleteFramebuffers(1, &m_wetComposeFbo); m_wetComposeFbo = 0; }
+    m_wetComposeW = m_wetComposeH = 0;
     if (m_docTex)      { glDeleteTextures(1, &m_docTex);         m_docTex = 0; }
     if (m_docFbo)      { glDeleteFramebuffers(1, &m_docFbo);     m_docFbo = 0; }
     if (m_blitVbo)     { glDeleteBuffers(1, &m_blitVbo);         m_blitVbo = 0; }
@@ -527,8 +628,9 @@ void LayerManager::ShutdownDocumentFbo() {
     m_docFboValid = false;
 }
 
-void LayerManager::BlitDocumentFboToFrontBuffer(const float* surfaceTransformMatrix) {
-    if (!m_docFbo || !m_docTex || !m_blitProgram) return;
+void LayerManager::BlitDocumentFboToFrontBuffer(const float* surfaceTransformMatrix, unsigned int srcTex) {
+    if (srcTex == 0) srcTex = m_docTex;
+    if (!m_docFbo || !srcTex || !m_blitProgram) return;
 
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
@@ -536,7 +638,7 @@ void LayerManager::BlitDocumentFboToFrontBuffer(const float* surfaceTransformMat
 
     glUseProgram(m_blitProgram);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_docTex);
+    glBindTexture(GL_TEXTURE_2D, srcTex);
     glUniform1i(m_locBlitTex, 0);
 
     if (m_locBlitTransform >= 0) {
@@ -598,6 +700,7 @@ void LayerManager::RenderStateADocumentEngine(int vpWidth, int vpHeight, const f
                 : (m_telemetry.displayFps * 0.90f + instantFps * 0.10f);
             m_telemetry.frameLatencyMs = 1000.0f / m_telemetry.displayFps;
             m_lastDeltaTime = dt;
+            m_animationTimeSec += dt;
         }
     }
     m_lastRenderTimePoint = startPass;
@@ -648,6 +751,7 @@ void LayerManager::RenderStateBWetScanout(int vpWidth, int vpHeight, const float
                 : (m_telemetry.displayFps * 0.90f + instantFps * 0.10f);
             m_telemetry.frameLatencyMs = 1000.0f / m_telemetry.displayFps;
             m_lastDeltaTime = dt;
+            m_animationTimeSec += dt;
         }
     }
     m_lastRenderTimePoint = startPass;
@@ -678,6 +782,14 @@ void LayerManager::RenderStateBWetScanout(int vpWidth, int vpHeight, const float
 
     if (combined.empty()) return;
 
+    std::vector<Folio::CapsuleInstance> wetInstances;
+    if (!m_activeRecipe.empty()) {
+        Folio::BrushComposer::BuildRecipeInstances(
+            combined, m_activeStyle.color, m_activeStyle.baseWidth,
+            m_activeRecipe, NowStrokeClockSec(), wetInstances
+        );
+    }
+
     // Compute tight screen-space AABB around the newly added modeled segment + active prediction tail
     const size_t startIdx = (m_wetUploadedModeledCount > 2) ? (m_wetUploadedModeledCount - 2) : 0;
     float minSx =  1e9f, minSy =  1e9f;
@@ -691,6 +803,20 @@ void LayerManager::RenderStateBWetScanout(int vpWidth, int vpHeight, const float
         minSy = std::min(minSy, sy - rPx);
         maxSx = std::max(maxSx, sx + rPx);
         maxSy = std::max(maxSy, sy + rPx);
+    }
+
+    if (!wetInstances.empty()) {
+        for (const auto& inst : wetInstances) {
+            float sx0 = inst.pointA.x * m_canvasState.zoom + m_canvasState.panX;
+            float sy0 = inst.pointA.y * m_canvasState.zoom + m_canvasState.panY;
+            float sx1 = inst.pointB.x * m_canvasState.zoom + m_canvasState.panX;
+            float sy1 = inst.pointB.y * m_canvasState.zoom + m_canvasState.panY;
+            float rPx = std::max(inst.radii.x, inst.radii.y) * m_canvasState.zoom + 12.0f;
+            minSx = std::min({minSx, sx0 - rPx, sx1 - rPx});
+            minSy = std::min({minSy, sy0 - rPx, sy1 - rPx});
+            maxSx = std::max({maxSx, sx0 + rPx, sx1 + rPx});
+            maxSy = std::max({maxSy, sy0 + rPx, sy1 + rPx});
+        }
     }
 
     // Also include the latest raw input sample in the dirty rect so red crosshairs/raw polyline are never clipped
@@ -736,28 +862,51 @@ void LayerManager::RenderStateBWetScanout(int vpWidth, int vpHeight, const float
         m_wetUploadedModeledCount = activePoints.size() - 1;
     }
 
-    // 1. Apply tight hardware scissor around the dirty pen tip & prediction region
-    if (unionRect.valid) {
-        ApplyTransformedScissor(unionRect, vpWidth, vpHeight, surfaceTransformMatrix);
-        // Restore background + UI patch from m_docFbo inside the scissor box (erasing old prediction trail with zero glClear!)
-        BlitDocumentFboToFrontBuffer(surfaceTransformMatrix);
-    } else {
-        glDisable(GL_SCISSOR_TEST);
-    }
+    const bool isModeler = (m_inspectorGui.currentWorkspaceTab == 0);
+    const bool drawStroke = !isModeler || m_inspectorGui.showSolidMeshInModeler;
+    const bool diagTab = (m_inspectorGui.currentWorkspaceTab == 0 || m_inspectorGui.currentWorkspaceTab == 1);
+    // Multi-coat / animated strokes are composed off-screen and presented in ONE opaque scissored blit,
+    // so the scan-out never sees an erased-but-not-yet-redrawn rectangle (no flicker / smear).
+    const bool atomicCompose = unionRect.valid && !diagTab && !m_activeRecipe.empty() && m_docFbo != 0;
 
-    // 2. Render wet stroke capsules inside the scissored dirty box (if enabled for current tab)
-    bool isModeler = (m_inspectorGui.currentWorkspaceTab == 0);
-    if (!isModeler || m_inspectorGui.showSolidMeshInModeler) {
-        Folio::Backends::CanvasTransform transform(m_canvasState.panX, m_canvasState.panY, m_canvasState.zoom);
-        m_capsuleRenderer.RenderStroke(
-            combined,
-            Folio::PackPremultipliedGpuColor(m_activeStyle.color),
-            transform,
-            vpWidth, vpHeight,
-            m_activeBrush,
-            /*singlePassWet=*/true,
-            surfaceTransformMatrix
-        );
+    Folio::Backends::CanvasTransform transform(m_canvasState.panX, m_canvasState.panY, m_canvasState.zoom);
+    auto drawWet = [&](const float* mat) {
+        if (!drawStroke) return;
+        if (!wetInstances.empty()) {
+            m_capsuleRenderer.UploadInstances(wetInstances);
+            m_capsuleRenderer.Render(transform, vpWidth, vpHeight, m_activeBrush, /*singlePassWet=*/true, mat);
+        } else {
+            m_capsuleRenderer.RenderStroke(
+                combined, Folio::PackPremultipliedGpuColor(m_activeStyle.color), transform,
+                vpWidth, vpHeight, m_activeBrush, /*singlePassWet=*/true, mat);
+        }
+    };
+
+    if (atomicCompose) {
+        GLint prevFbo = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+        EnsureWetComposeFbo(vpWidth, vpHeight);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, m_wetComposeFbo);
+        glViewport(0, 0, vpWidth, vpHeight);
+        ApplyTransformedScissor(unionRect, vpWidth, vpHeight, nullptr);
+        BlitDocumentFboToFrontBuffer(nullptr);
+        drawWet(nullptr);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
+        glViewport(0, 0, vpWidth, vpHeight);
+        ApplyTransformedScissor(unionRect, vpWidth, vpHeight, surfaceTransformMatrix);
+        BlitDocumentFboToFrontBuffer(surfaceTransformMatrix, m_wetComposeTex);
+    } else {
+        // 1. Apply tight hardware scissor around the dirty pen tip & prediction region
+        if (unionRect.valid) {
+            ApplyTransformedScissor(unionRect, vpWidth, vpHeight, surfaceTransformMatrix);
+            BlitDocumentFboToFrontBuffer(surfaceTransformMatrix);
+        } else {
+            glDisable(GL_SCISSOR_TEST);
+        }
+        // 2. Render wet stroke capsules inside the scissored dirty box
+        drawWet(surfaceTransformMatrix);
     }
 
     // 3. In diagnostic tabs (Workspace 0 & 1), render live splines, crosshairs & prediction trail inside the scissored box!
@@ -823,11 +972,27 @@ void LayerManager::ReplayRawStroke() {
         m_documentStrokes.back().points = m_lastFinishedPoints;
         m_documentStrokes.back().brush = m_activeBrush;
         m_documentStrokes.back().color = Folio::PackPremultipliedGpuColor(m_activeStyle.color);
+        m_documentStrokes.back().recipe = m_activeRecipe;
+        if (!m_activeRecipe.empty()) {
+            Folio::BrushComposer::BuildRecipeInstances(
+                m_documentStrokes.back().points, m_activeStyle.color, m_activeStyle.baseWidth,
+                m_activeRecipe, NowStrokeClockSec(), m_documentStrokes.back().customInstances
+            );
+        } else {
+            m_documentStrokes.back().customInstances.clear();
+        }
     } else if (!m_lastFinishedPoints.empty()) {
         DocumentStroke stroke;
         stroke.points = m_lastFinishedPoints;
         stroke.brush = m_activeBrush;
         stroke.color = Folio::PackPremultipliedGpuColor(m_activeStyle.color);
+        stroke.recipe = m_activeRecipe;
+        if (!m_activeRecipe.empty()) {
+            Folio::BrushComposer::BuildRecipeInstances(
+                stroke.points, m_activeStyle.color, m_activeStyle.baseWidth,
+                m_activeRecipe, NowStrokeClockSec(), stroke.customInstances
+            );
+        }
         m_documentStrokes.push_back(std::move(stroke));
     }
     if (onDocumentDirty) {
@@ -841,11 +1006,27 @@ void LayerManager::SetLastFinishedPoints(std::vector<Folio::StrokePoint> points)
         m_documentStrokes.back().points = m_lastFinishedPoints;
         m_documentStrokes.back().brush = m_activeBrush;
         m_documentStrokes.back().color = Folio::PackPremultipliedGpuColor(m_activeStyle.color);
+        m_documentStrokes.back().recipe = m_activeRecipe;
+        if (!m_activeRecipe.empty()) {
+            Folio::BrushComposer::BuildRecipeInstances(
+                m_documentStrokes.back().points, m_activeStyle.color, m_activeStyle.baseWidth,
+                m_activeRecipe, NowStrokeClockSec(), m_documentStrokes.back().customInstances
+            );
+        } else {
+            m_documentStrokes.back().customInstances.clear();
+        }
     } else if (!m_lastFinishedPoints.empty()) {
         DocumentStroke stroke;
         stroke.points = m_lastFinishedPoints;
         stroke.brush = m_activeBrush;
         stroke.color = Folio::PackPremultipliedGpuColor(m_activeStyle.color);
+        stroke.recipe = m_activeRecipe;
+        if (!m_activeRecipe.empty()) {
+            Folio::BrushComposer::BuildRecipeInstances(
+                stroke.points, m_activeStyle.color, m_activeStyle.baseWidth,
+                m_activeRecipe, NowStrokeClockSec(), stroke.customInstances
+            );
+        }
         m_documentStrokes.push_back(std::move(stroke));
     }
     if (onDocumentDirty) {
@@ -878,6 +1059,24 @@ void LayerManager::ClearDocument() {
     m_isStrokeActive = false;
     m_docFboValid = false;
 
+    if (onDocumentDirty) {
+        onDocumentDirty();
+    }
+}
+
+void LayerManager::RebuildDocumentCustomInstances() {
+    if (m_documentStrokes.empty()) return;
+    auto& stroke = m_documentStrokes.back();
+    stroke.recipe = m_activeRecipe;
+    if (!m_activeRecipe.empty() && !stroke.points.empty()) {
+        Folio::BrushComposer::BuildRecipeInstances(
+            stroke.points, m_activeStyle.color, m_activeStyle.baseWidth,
+            m_activeRecipe, NowStrokeClockSec(), stroke.customInstances
+        );
+    } else {
+        stroke.customInstances.clear();
+    }
+    m_docFboValid = false;
     if (onDocumentDirty) {
         onDocumentDirty();
     }
