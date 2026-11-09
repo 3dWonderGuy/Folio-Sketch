@@ -197,7 +197,7 @@ jobs:
           "$SDKMANAGER" --install "ndk;27.2.12479018" "cmake;3.30.3" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Build Android APK
-        working-directory: src/android-project
+        working-directory: inspectorV2.0/android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
@@ -205,7 +205,7 @@ jobs:
       - name: Package Android APK
         shell: bash
         run: |
-          APK_PATH=$(find src/android-project/app/build/outputs/apk -name "*.apk" | head -n 1)
+          APK_PATH=$(find inspectorV2.0/android/app/build/outputs/apk -name "*.apk" | head -n 1)
           if [ -z "$APK_PATH" ]; then
             echo "Error: Could not find compiled APK!"
             exit 1

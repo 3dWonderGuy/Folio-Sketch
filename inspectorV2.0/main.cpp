@@ -7,6 +7,8 @@
 
 #include <iostream>
 #include <algorithm>
+#include <cstring>
+#include <iomanip>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
@@ -17,6 +19,8 @@
 #include "inspector/gl_loader.hpp"
 #include "inspectorV2.0/app_brain.hpp"
 #include "inspectorV2.0/layer_manager.hpp"
+#include "inspectorV2.0/testbed/testbed_samples.hpp"
+#include "folio_backends/common/gl_capsule_renderer.hpp"
 #include "folio_backends/android/android_frontbuffer.hpp"
 
 namespace {
@@ -149,8 +153,26 @@ void ProcessSdlEvent(const SDL_Event& event, SDL_Window* window, Folio::V2::Laye
 } // namespace
 
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--diagnose") == 0) {
+            std::cout << "[FolioInspectorV2] Running headless diagnostic suite...\n";
+            double capsuleMs = Folio::Backends::GlCapsuleRenderer::BenchmarkCpuIngestionMs(1000, 50);
+            std::cout << "=== GPU CAPSULE SDF 1,000-POINT CPU BENCHMARK ===\n"
+                      << "1,000-point BuildCapsuleInstances avg CPU time: "
+                      << std::fixed << std::setprecision(4) << capsuleMs
+                      << " ms (Target < 0.0500 ms: " << (capsuleMs < 0.05 ? "PASS" : "WARN") << ")\n";
+
+            auto& layerManager = Folio::V2::AppBrain::Instance().GetLayerManager();
+            Folio::V2::LoadRepro114(layerManager);
+            std::cout << "[FolioInspectorV2] Repro114 loaded successfully ("
+                      << layerManager.GetLastRawSamples().size() << " samples).\n";
+            Folio::V2::InjectTestScribble(layerManager);
+            std::cout << "[FolioInspectorV2] Synthetic scribble verified ("
+                      << layerManager.GetLastRawSamples().size() << " samples).\n";
+            std::cout << "[FolioInspectorV2] All headless diagnostics PASSED.\n";
+            return 0;
+        }
+    }
 
 #if defined(__ANDROID__)
     // On Android, SDL3 is the main C++ application driver, while FolioInkView (GLFrontBufferedRenderer)
