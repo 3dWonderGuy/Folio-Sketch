@@ -32,11 +32,10 @@ I could not find a good multiplatfrom inking engine and usualy I had to rely on 
 
 Comprehensive design documents, mathematical proofs, and architectural details are maintained in the [`docs/`](docs/) directory:
 
-- [**System Architecture Overview**](docs/architecture.md): Overall pipeline, hardware event routing, predictive modeling, and component responsibilities.
-- [**Computational Geometry & Mathematical Primitives**](docs/geometry.md): 2D segment intersection algebra, swallowtail loop removal, nib profiles, and normal derivations.
-- [**Vector Ribbon & Infill Generator**](docs/vector_generator.md): Miter bisectors, safe segment limits, corner sweep fans, watertight loop detection, and SVG debugging.
-- [**GPU Mesh Builder & Anti-Aliasing Skirts**](docs/mesh_builder.md): Direct indexed triangle mesh generation, dual-buffer core/skirt anti-aliasing, and vertex buffer layout.
-- [**Android Zero-Latency Inking Guide**](docs/android_low_latency_inking.md): Unbuffered 240Hz–480Hz digitizer packet harvesting, Jetpack `FrontBufferedRenderer` compositor bypass, and unified GPU Capsule SDF pipeline.
+- [**01. Core Architecture (Tier 1)**](docs/01_CORE_ARCHITECTURE.md): Pure headless C++20 math engine, 4-stage pipeline, Google Ink ODE solver, tremor filtering, and data boundaries.
+- [**02. Backends & Hardware Scanout (Tier 2)**](docs/02_BACKENDS_AND_SCANOUT.md): Analytic capsule SDF shaders, persistent VBO streaming, subpixel AA, and Android front-buffer bypass.
+- [**03. Inspector & Diagnostic Workbench Manual**](docs/03_INSPECTOR_GUIDE.md): Headless CI benchmarking (`--diagnose`), sliver tests, diagnostic tabs, and time-travel scrubber.
+- [**04. Production Integration Guide**](docs/04_INTEGRATION_GUIDE.md): Turnkey application integration blueprint, wet-to-dry handoff lifecycle, and host bridge example.
 
 ---
 
