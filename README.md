@@ -1,62 +1,30 @@
 # Folio-Sketch
-*High-Performance Computational 2D Vector Inking Engine Library*
+*High-Performance Computational Universal 2D Vector Inking Engine Library*
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)]()
-[![Backend: ThorSVG](https://img.shields.io/badge/Backend-ThorSVG-blue.svg)](https://www.thorvg.org)
+[![ThorSVG](https://img.shields.io/badge/Backend-ThorSVG-blue.svg)](https://www.thorvg.org)
 
 ## Overview
-**Folio-Sketch** is a standalone, hardware-accelerated 2D computational vector geometry and inking engine. It transforms discrete, variable-radius, pressure- and tilt-modeled stroke centerlines into GPU indexed triangle meshes (`InkMesh`) for real-time hardware rasterization and vector path contours (`InkPath`) with [ThorSVG](https://www.thorvg.org) integration for scalable export and rendering.
+**Folio-Sketch** is a standalone, hardware-accelerated 2D computational vector geometry and inking engine. Whole idea behind this library is to bring a powerful all around inking library to allow any application to have inking engine and best inking feel. This library is build around bringing best possbile natural writing experiance to any device. 
 
-Originally engineered for **FolioNote**, Folio-Sketch provides ultra-low latency, physically modeled stroke tessellation suitable for handwriting, note-taking, sketching, and digital calligraphy applications.
+It transforms discrete, variable-radius, pressure- and tilt-modeled stroke centerlines into GPU Signed Distance Field (SDF) capsule instances (`CapsuleInstance`) and triangle meshes (`InkMesh`)-(**depreciated, not recommened**) for real-time hardware rasterization, as well as vector path contours (`InkPath`) with [ThorSVG](https://www.thorvg.org) integration for scalable export and rendering.
 
----
 
-## Architecture & Directory Layout
+This application consist of 3 major blocks:
 
-```text
-Folio-Sketch/
-├── CMakeLists.txt                 # Modern CMake build system (C++20, static library, tests)
-├── LICENSE                        # GNU AGPLv3
-├── README.md                      # Documentation
-├── include/
-│   └── folio_sketch/
-│       ├── folio_sketch.hpp       # Master umbrella include
-│       ├── ink_engine.hpp         # Central inking facade, Google Ink Modeler & predictive pipeline
-│       ├── ink_config.hpp         # Spring physics parameters, noise filtering & pressure calibration
-│       ├── ink_stroke_data.hpp    # Geometric primitives (StrokePoint, CapType, InfillStyle, InkVertex, InkMesh)
-│       ├── ink_mesh.hpp           # High-performance GPU triangle-strip mesh builder
-│       ├── stroke_collision.hpp   # Two-tier capsule broadphase/narrowphase & stroke slicer
-│       ├── stroke_width_evaluator.hpp # Dynamic width, velocity thinning, and EMA smoothing
-│       ├── stroke_post_processor.hpp  # Topological analysis, loop detection & curve simplification
-│       └── ink_generator.hpp      # Primary vector stroke & infill generator API
-├── src/
-│   ├── engine/
-│   │   └── ink_engine.cpp         # Inking lifecycle, predictive continuation & modeler bridge
-│   ├── generator/
-│   │   ├── ink_generator_internal.hpp # Internal cap tracers and debug state
-│   │   ├── ink_generator_caps.cpp     # Oriented nib profiles & cap tracing
-│   │   ├── ink_generator_ribbon.cpp   # Clean ribbon orchestrator & sub-ribbon assembler
-│   │   ├── ink_generator_stroke.cpp   # Open stroke builder & live inking incremental append
-│   │   ├── ink_generator_polygon.cpp  # Closed shape loops & polygon outlines
-│   │   ├── ink_generator_patterns.cpp # Arc-length patterns (Dashed, Dotted) & Graphite pencil
-│   │   ├── ink_generator_infill.cpp   # Interior polygon infill & drafting hatches
-│   │   ├── ink_generator_debug.cpp    # Visual stroke debugger overlay & diagnostic dumper
-│   │   ├── ink_ribbon_corner.hpp      # Corner join solver (miter clamp, arc fans, nib beveling)
-│   │   └── ink_ribbon_corner.cpp
-│   ├── geometry/
-│   │   ├── ink_nib_geometry.hpp       # Nib profiles (Round, Square, Chisel) & ribbon support offsets
-│   │   ├── ink_stroke_filter.hpp      # Point decimation, Lipschitz slope limiter & hairpin detection
-│   │   ├── ink_stroke_filter.cpp
-│   │   ├── ink_geometry_utils.hpp     # Segment computation, intersection math & swallowtail pruning
-│   │   └── ink_geometry_utils.cpp
-│   └── mesh/
-│       └── ink_mesh_builder.cpp       # GPU quad ribbon and smooth corner fan tessellator
-└── test/
-    ├── CMakeLists.txt
-    ├── repro114.inc               # Tight curvature crescent regression reproducer dataset
-    └── test_ink_generator.cpp     # Invariant validation suite & performance benchmarks
-```
+* **Core** : The main library code, jusut pure C++ code taking care of sprin-mass system modeling, interpolation smoothign filtering tuning.
+* **Backends**: This is sort of shell add on specificaly made and tuned to allow applications to archive sub 5ms inking, your application will have to pass or even route rendering through this shell (main culprit behind latency is buffer swap this shell allows ink to redern into screen rigth up -> more in documentation)
+* **InspectorV2.0**: is a built in application that once imported into any application can be safely deleted, it is a debugger as well as a demo tool showing what this libary can do. Point behind this application is to show how this library is intented to be setup for multiplatfrom use and use of backends
+
+
+**From the Author:** I worked really hard to make this libray have best support for multiplatform applications it should provide equal experiance on any operating system (Android, IOS, Windows, Linux). I also tried to make its use as intuitive as possilbe so it should not take too long to connect it to your application. 
+I could not find a good multiplatfrom inking engine and usualy I had to rely on some type of framework, I wanted something very fast and efficient and able to acess raw hardware power of device and push inking latency to sub 5ms directly competing and even beating some consumer availble applications in quality and feel. I decided to bring something new to community and took on challange to creat high perfofrmance inking engine from scratch with good help of modern available tools. I hope this would be good addition to opensource community. Also I want to say thank to developers behind Rnote, ++Xjounral and google developers who opensourced the Cahier app and underlying libraries. Thank you for taking interest in my library I hope you find it useful
+
+
+
+
+
 
 ---
 
@@ -74,36 +42,25 @@ Comprehensive design documents, mathematical proofs, and architectural details a
 
 ## Core Features
 
-### 1. Miter-Clipped Single Contour Tessellation (`BuildSolidRibbon`)
-* **Continuous Contour**: Emits a single continuous, non-overlapping polygon contour wrapping around the stroke centerline from head to tail with exact endcap closures.
-* **Inner Corner Projection Safety**: Automatically blends between ideal angle bisector miters for gentle curves ($\le 60^\circ$), smooth 3-point circular fillets for sharp corners ($60^\circ$ to $150^\circ$, including $90^\circ$ corners), and zero-projection bevel joins for dense samples or short segment turnarounds.
-* **$180^\circ$ Hairpin Turnaround Domes**: Evaluates directional turnaround reversals using outward elbow normals $\vec{u}_{elbow} = \frac{\vec{u}_{in} - \vec{u}_{out}}{|\vec{u}_{in} - \vec{u}_{out}|}$, ensuring turnaround domes always bow outward in the direction of pen motion without inverted loop spikes.
+### 1. High-Performance Physical Modeling & Vector Pipeline
+* **Google Ink Modeler Integration**: Spring-mass-damper physics solver delivering the most natural, responsive pen feel.
+* **Smart Anti-Wobble & Dynamics**: Built-in hardware jitter and wobble filters, hydrodynamic velocity thinning, corner compensation, and Lipschitz slope limits.
+* **Kalman Prediction Tail**: Zero-perceived-latency continuation with distance-attenuated confidence fading.
+* **Built-in Vector Export & Generation**: Direct conversion into clean vector paths (`InkPath`), single-contour ribbons (`BuildSolidRibbon`), and seamless [ThorSVG](https://www.thorvg.org) integration for scalable export (SVG/PDF).
 
-### 2. Multi-Geometry Oriented Nibs
-* **Round Nib**: 32-vertex regular polygon circle for ballpoint pens, fineliners, and pencil tools.
-* **Square Blade Nib**: Fixed $90^\circ$ rectangular blade ($0.9r \times 2.6r$) for realistic highlighter simulation with thin vertical strokes and thick horizontal bands.
-* **Chisel Diamond Nib**: Fixed $45^\circ$ diamond blade for expressive calligraphy and fountain pen emulation.
-* **Facet Perimeter Traversal**: Square and Chisel corner transitions smoothly traverse intermediate vertices along the nib perimeter, preventing interior cuts, double-fang spikes, and inverted V-notches.
+### 2. Universal Multi-Coat Brush Engine (`BrushComposer`)
+* **Layered Multi-Coat Styling**: Composes continuous ribbons, particle stamps, braided weaves, and musical notations in a unified pass.
+* **Signal Modulators**: Maps physical and temporal signals (arc length, pressure, velocity, tilt, age since input) to visual properties (radius, offset, color, opacity) through waveforms and noise.
+* **Expressive Built-in Presets**:
+  - *Standard Pens*: Ballpoint, Marker, Fountain Pen, and non-darkening Highlighter (set-union blending).
+  - *Natural Media*: Shading Pencil with procedural paper grain and tilt-responsive shading.
+  - *Dynamic Inks*: Gravity-dripping Wet Paint, blinking Holiday Lights, undulating Jelly Wobble, braided Twisted Yarn, Flag Banner, Music Staff, and Graffiti Spray.
 
-### 3. Real-Time Incremental Append (`AppendRibbonSegments`)
-* Generates live inking geometry in $O(1)$ time per frame as new hardware digitizer events arrive.
-* Appends incremental segment capsules directly to the active `BLPath`, eliminating $O(N^2)$ stroke regeneration lag during active drawing.
-
-### 4. Multi-Scale Textured Graphite Engine (`RenderPencilStroke`)
-* Simulates physical pencil-on-paper contact using deterministic 2D toroidal value noise on a $128 \times 128$ periodic lattice.
-* Three concentric pressure contact bands:
-  - **Band 0 (Full contact patch)**: Sparse paper tooth grain with directional tilt spread.
-  - **Band 2 ($p > 0.22$)**: Intermediate mid-tone graphite concentration.
-  - **Band 3 ($p > 0.38$)**: Deep compressed graphite core.
-
-### 5. Architectural Drafting Infill Hatches (`FillInfill`)
-* Renders seamlessly tiling, high-resolution ($256 \times 256$) drafting hatch patterns for closed vector polygons:
-  - 45° Parallel diagonal lines (`HatchDiagonal`)
-  - Intersecting 45° grid (`HatchCross`)
-  - Horizontal lines (`HatchHorizontal`)
-  - Vertical lines (`HatchVertical`)
-  - Fine circular stipple dots (`HatchDots`)
-  - Solid, translucent wash, and linear/radial gradients
+### 3. GPU Analytic Capsule SDF Renderer (`GlCapsuleRenderer`)
+* **Sub-Millisecond Rasterization**: GPU-instanced Euclidean distance evaluation with sub-pixel antialiasing.
+* **Gradient Color Transitions**: Smooth endpoint color interpolation eliminating stepping artifacts.
+* **Procedural Paper Tooth**: Integrated micro-fiber grain shader for realistic graphite texture without texture atlases.
+* **Artifact-Free Scanout**: Offscreen scratch composition for multi-coat/animated strokes delivered via a single scissored blit to eliminate frontbuffer flicker.
 
 ---
 
@@ -123,35 +80,6 @@ Tested on standard modern desktop hardware ($1920 \times 1080$ surface, 120 FPS 
 
 ---
 
-## Building and Integrating
-
-### Standalone Build
-```bash
-git clone https://github.com/3dWonderGuy/Folio-Sketch.git
-cd Folio-Sketch
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-ctest --test-dir build --output-on-failure
-```
-
-### Integration via CMake `FetchContent` or Submodule
-```cmake
-# Add Folio-Sketch subdirectory
-add_subdirectory(third_party/Folio-Sketch)
-
-# Link against the FolioSketch target
-target_link_libraries(your_app PRIVATE FolioSketch::FolioSketch)
-```
-
-Include headers in your code:
-```cpp
-#include <folio_sketch/ink_generator.hpp>
-
-// Tessellate an ink stroke into an InkPath (with ThorSVG Shape conversion)
-std::vector<StrokePoint> points = ...;
-InkPath strokePath = InkGenerator::GenerateStroke(points, CapType::Round, StrokePattern::Solid);
-auto thorvgShape = strokePath.toThorVGShape();
-```
 
 ---
 
