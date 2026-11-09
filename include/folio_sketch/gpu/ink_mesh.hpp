@@ -58,11 +58,11 @@ struct CapsuleVec2 {
  * @brief Per-instance attribute layout streamed to GPU Capsule SDF shader.
  */
 struct CapsuleInstance {
-    CapsuleVec2 pointA{};                ///< Segment start in world coordinates (mm)
-    CapsuleVec2 pointB{};                ///< Segment end in world coordinates (mm)
-    CapsuleVec2 radii{};                 ///< (radiusA, radiusB) for smooth tapering
-    uint32_t    colorRgba = 0xFF000000u; ///< Packed 32-bit premultiplied RGBA
-    float       alphaFade = 1.0f;        ///< Per-instance alpha multiplier (distance-attenuated prediction tail)
+    CapsuleVec2 pointA{};                   ///< Segment start in world coordinates (mm)
+    CapsuleVec2 pointB{};                   ///< Segment end in world coordinates (mm)
+    CapsuleVec2 radii{};                    ///< (radiusA, radiusB) for smooth tapering
+    uint32_t    colorRgba    = 0xFF000000u; ///< Packed 32-bit premultiplied RGBA at pointA (start)
+    uint32_t    colorRgbaEnd = 0xFF000000u; ///< Packed 32-bit premultiplied RGBA at pointB (end) for smooth gradient & union
 };
 static_assert(sizeof(CapsuleInstance) == 32, "CapsuleInstance must stay a tightly packed 32-byte POD");
 static_assert(std::is_trivially_copyable_v<CapsuleInstance>, "CapsuleInstance must be a plain POD");

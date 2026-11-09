@@ -136,6 +136,16 @@ void RenderTabFunBrushes(InspectorGui& gui, LayerManager& layerManager, bool& ne
 
         ImGui::Checkbox("Live Wobble Animation", &activeRecipe.isAnimated);
 
+        ImGui::SeparatorText("Pen Behavior (applies to every brush)");
+        recipeModified |= ImGui::Checkbox("Pressure", &activeRecipe.usePressure);
+        ImGui::SameLine();
+        recipeModified |= ImGui::Checkbox("Velocity", &activeRecipe.useVelocity);
+        ImGui::SameLine();
+        recipeModified |= ImGui::Checkbox("Tilt", &activeRecipe.useTilt);
+        recipeModified |= ImGui::SliderFloat("Stroke Opacity", &activeRecipe.opacity, 0.05f, 1.0f, "%.2f");
+        recipeModified |= ImGui::SliderFloat("Paper Grain", &activeRecipe.grain, 0.0f, 1.0f, "%.2f");
+        recipeModified |= ImGui::Checkbox("No Overlap Darkening (union)", &activeRecipe.unionOverlap);
+
         // =====================================================================
         // Interactive Multi-Coat & Modulator Inspector
         // =====================================================================
@@ -157,7 +167,7 @@ void RenderTabFunBrushes(InspectorGui& gui, LayerManager& layerManager, bool& ne
                 char headerTitle[128];
                 snprintf(headerTitle, sizeof(headerTitle), "[Coat %d] %s (Mode: %s)###CoatHeader",
                          cIdx + 1, coat.name.c_str(),
-                         (coat.emissionMode == Folio::CoatEmissionMode::ContinuousRibbon) ? "Ribbon" : "Particles");
+                         (coat.emissionMode == Folio::CoatEmissionMode::ContinuousRibbon) ? "Ribbon" : (coat.emissionMode == Folio::CoatEmissionMode::ParticleStamp ? "Particles" : "Special"));
 
                 if (ImGui::TreeNode(headerTitle)) {
                     // Coat Name
@@ -170,7 +180,7 @@ void RenderTabFunBrushes(InspectorGui& gui, LayerManager& layerManager, bool& ne
                     }
 
                     // Emission Mode
-                    const char* modes[] = { "Continuous Ribbon", "Particle Stamp" };
+                    const char* modes[] = { "Continuous Ribbon", "Particle Stamp", "Musical Notes", "Yarn Strand Bumps" };
                     int curMode = static_cast<int>(coat.emissionMode);
                     if (ImGui::Combo("Emission Mode", &curMode, modes, IM_ARRAYSIZE(modes))) {
                         coat.emissionMode = static_cast<Folio::CoatEmissionMode>(curMode);
@@ -182,12 +192,17 @@ void RenderTabFunBrushes(InspectorGui& gui, LayerManager& layerManager, bool& ne
                     recipeModified |= ImGui::SliderFloat("World Offset X", &coat.worldOffsetX, -20.0f, 20.0f, "%.2f mm");
                     recipeModified |= ImGui::SliderFloat("World Offset Y", &coat.worldOffsetY, -20.0f, 20.0f, "%.2f mm");
 
-                    if (coat.emissionMode == Folio::CoatEmissionMode::ParticleStamp) {
+                    if (coat.emissionMode == Folio::CoatEmissionMode::YarnStrandBumps) {
+                        recipeModified |= ImGui::SliderFloat("Twist Length (brush sizes)", &coat.yarnPeriodBrushSizes, 1.0f, 8.0f, "%.1f");
+                        recipeModified |= ImGui::SliderFloat("Strand Sway", &coat.yarnAmplitudeRatio, 0.05f, 0.8f, "%.2f");
+                    }
+                    if (coat.emissionMode != Folio::CoatEmissionMode::ContinuousRibbon && coat.emissionMode != Folio::CoatEmissionMode::YarnStrandBumps) {
+                        recipeModified |= ImGui::Checkbox("Flat-Based Triangle (flag)", &coat.triangleFan);
                         recipeModified |= ImGui::SliderFloat("Particle Spacing", &coat.particleGapMm, 0.5f, 30.0f, "%.1f mm");
                         recipeModified |= ImGui::SliderFloat("Particle Length", &coat.particleLengthMm, 0.5f, 30.0f, "%.1f mm");
                         recipeModified |= ImGui::SliderFloat("Tip/Base Radius Ratio", &coat.radiusEndRatio, 0.01f, 3.0f, "%.2f");
 
-                        const char* orients[] = { "Follow Tangent", "Perpendicular Alternate", "Gravity Down (+Y)", "Fixed Angle (45°)" };
+                        const char* orients[] = { "Follow Tangent", "Perpendicular Alternate", "Gravity Down (+Y)", "Fixed Angle (45°)", "Hang Down From Stroke (flat base)" };
                         int curOrient = static_cast<int>(coat.particleOrientation);
                         if (ImGui::Combo("Orientation", &curOrient, orients, IM_ARRAYSIZE(orients))) {
                             coat.particleOrientation = static_cast<Folio::ParticleOrientation>(curOrient);
@@ -303,6 +318,7 @@ void RenderTabFunBrushes(InspectorGui& gui, LayerManager& layerManager, bool& ne
         }
 
         if (recipeModified) {
+            layerManager.ApplyRecipeBrushSettings();
             layerManager.RebuildDocumentCustomInstances();
             needsRedraw = true;
         }

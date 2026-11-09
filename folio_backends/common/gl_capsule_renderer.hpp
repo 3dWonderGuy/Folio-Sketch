@@ -110,6 +110,14 @@ public:
                 const float* surfaceTransform = nullptr);
 
     /**
+     * @brief Renders subset [firstInstance, firstInstance + instanceCount) from the currently uploaded VBO.
+     */
+    void RenderRange(size_t firstInstance, size_t instanceCount,
+                     const CanvasTransform& transform, int vpWidth, int vpHeight,
+                     const CapsuleBrush& brush = {}, bool singlePassWet = false,
+                     const float* surfaceTransform = nullptr);
+
+    /**
      * @brief Convenience helper: uploads points and immediately renders them.
      */
     void RenderStroke(std::span<const StrokePoint> points,
@@ -141,7 +149,8 @@ private:
     static unsigned int CompileShader(unsigned int type, const char* src);
     void EnsureCapacity(size_t requiredCount);
     void EnsureLayer(int w, int h);
-    void DrawInstances(const CanvasTransform& transform, int vpWidth, int vpHeight,
+    void DrawInstances(size_t firstInstance, size_t instanceCount,
+                       const CanvasTransform& transform, int vpWidth, int vpHeight,
                        const CapsuleBrush& brush, const float* surfaceTransform = nullptr) const;
 
     // Shader programs & locations

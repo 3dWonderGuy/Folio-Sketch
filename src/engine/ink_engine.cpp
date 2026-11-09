@@ -374,11 +374,11 @@ void InkEngine::EnsurePrediction() const {
                     float midDist = accumDist + 0.5f * segLen;
                     accumDist += segLen;
 
-                    if (midDist <= fadeStart) {
-                        cap.alphaFade = 1.0f;
-                    } else {
+                    if (midDist > fadeStart) {
                         float t = std::clamp((midDist - fadeStart) / fadeSpan, 0.0f, 1.0f);
-                        cap.alphaFade = std::lerp(1.0f, m_config.prediction.fadeEndAlpha, t);
+                        float fade = std::lerp(1.0f, m_config.prediction.fadeEndAlpha, t);
+                        cap.colorRgba    = PackPremultipliedGpuColor(m_activeStyle.color, fade);
+                        cap.colorRgbaEnd = cap.colorRgba;
                     }
                 }
             }

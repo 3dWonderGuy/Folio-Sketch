@@ -75,7 +75,9 @@ public:
     [[nodiscard]] const Folio::Backends::CapsuleBrush& GetActiveBrush() const noexcept { return m_activeBrush; }
     [[nodiscard]] Folio::BrushRecipe& GetActiveRecipe() noexcept { return m_activeRecipe; }
     [[nodiscard]] const Folio::BrushRecipe& GetActiveRecipe() const noexcept { return m_activeRecipe; }
-    void SetActiveRecipe(Folio::BrushRecipe recipe) { m_activeRecipe = std::move(recipe); }
+    void SetActiveRecipe(Folio::BrushRecipe recipe) { m_activeRecipe = std::move(recipe); ApplyRecipeBrushSettings(); }
+    /// Pushes recipe-level settings (opacity, grain, union, pressure/velocity/tilt) into the active brush, style and modeler.
+    void ApplyRecipeBrushSettings();
     [[nodiscard]] int GetActivePresetIndex() const noexcept { return m_activePresetIndex; }
     void SetActivePresetIndex(int idx) noexcept { m_activePresetIndex = idx; }
     void RebuildDocumentCustomInstances();

@@ -53,7 +53,7 @@ float GetSourceValue(ModulatorSource src, const PointContext& ctx) noexcept {
 float EvaluateWaveform(ModulatorWaveform wf, float x, float rawLinearArg, const PointContext& ctx, uint32_t seed) noexcept {
     switch (wf) {
         case ModulatorWaveform::Linear:
-            return x;
+            return rawLinearArg;
 
         case ModulatorWaveform::SineWave:
             return std::sin(x);
@@ -119,9 +119,9 @@ float EvaluateWaveform(ModulatorWaveform wf, float x, float rawLinearArg, const 
         }
 
         case ModulatorWaveform::TravelingWaveJelly: {
-            // Google jelly_wobble: wave along distanceRemaining + live phase that decelerates via EaseOut over 0.90s after pen lift
+            // Google jelly_wobble: smooth width undulation along stroke over time + EaseOut settling over 0.90s after pen lift
             float bw = std::max(ctx.baseWidth, 1.0f);
-            float distCycles = ctx.distanceRemaining / (bw * 1.5f);
+            float distCycles = ctx.arcLength / (bw * 3.8f);
             float activePhaseTime = ctx.timeSinceInput;
             if (ctx.timeSinceStrokeEnd > 0.0f) {
                 float uEnd = std::clamp(ctx.timeSinceStrokeEnd / 0.90f, 0.0f, 1.0f);
@@ -130,7 +130,7 @@ float EvaluateWaveform(ModulatorWaveform wf, float x, float rawLinearArg, const 
                 float ageAtPenUp = std::max(0.0f, ctx.timeSinceInput - ctx.timeSinceStrokeEnd);
                 activePhaseTime = ageAtPenUp + easeEnd * 0.90f;
             }
-            return std::sin((distCycles - activePhaseTime * 2.4f) * kTwoPi);
+            return std::sin((distCycles - activePhaseTime * 2.0f) * kTwoPi);
         }
     }
     return 0.0f;
@@ -166,7 +166,9 @@ EvaluatedMods EvaluateCoatModulators(const BrushCoatSpec& coat, const PointConte
         float phaseArg = rawLinearArg * kTwoPi + mod.phase;
         float wave = EvaluateWaveform(mod.waveform, phaseArg, rawLinearArg, ctx, mod.seed);
         float effAmp = (mod.amplitudeRatio != 0.0f) ? (mod.amplitudeRatio * baseWidth) : mod.amplitude;
-        float outVal = mod.bias + effAmp * wave;
+        // When amplitudeRatio is used the bias is also expressed in brush sizes
+        float effBias = (mod.amplitudeRatio != 0.0f) ? (mod.bias * baseWidth) : mod.bias;
+        float outVal = effBias + effAmp * wave;
 
         switch (mod.target) {
             case ModulatorTarget::RadiusScale:
@@ -369,8 +371,49 @@ void BrushComposer::BuildRecipeInstances(
     }
     outInstances.reserve(approxCount);
 
+    auto emit = [&](CapsuleVec2 a, CapsuleVec2 b, float ra, float rb, uint32_t c) {
+        CapsuleInstance i{};
+        i.pointA = a; i.pointB = b; i.radii = { ra, rb };
+        i.colorRgba = c; i.colorRgbaEnd = c;
+        outInstances.push_back(i);
+    };
+
     // 2. Synthesize each coat sequentially
     for (const auto& coat : recipe.coats) {
+        if (coat.emissionMode == CoatEmissionMode::YarnStrandBumps) {
+            const float period = std::max(coat.yarnPeriodBrushSizes, 0.5f) * baseWidth;
+            const float amp    = coat.yarnAmplitudeRatio * baseWidth;
+            const float R0     = baseWidth * 0.5f * coat.widthScale;
+            const float step   = std::max((coat.particleGapRatio > 0.0f) ? coat.particleGapRatio * baseWidth : 1.45f * R0, 0.4f);
+            size_t seg = 0;
+            uint32_t idx = 0;
+            for (float s = 0.0f; s <= totalLen + step * 0.5f; s += step, ++idx) {
+                const float sc = std::min(s, totalLen);
+                while (seg + 2 < N && arcLengths[seg + 1] < sc) ++seg;
+                const float sl = arcLengths[seg + 1] - arcLengths[seg];
+                const float t = (sl > 1e-5f) ? std::clamp((sc - arcLengths[seg]) / sl, 0.0f, 1.0f) : 0.0f;
+                const float px = static_cast<float>(points[seg].x + (points[seg + 1].x - points[seg].x) * t);
+                const float py = static_cast<float>(points[seg].y + (points[seg + 1].y - points[seg].y) * t);
+                const float pr = points[seg].r + (points[seg + 1].r - points[seg].r) * t;
+                const CapsuleVec2 nrm{ normals[seg].x, normals[seg].y };
+                const float th = kTwoPi * sc / period;
+                const float latA = amp * std::sin(th);
+                // The strand moving toward -normal passes OVER; the swap happens at the sway extremes (no overlap there)
+                const bool aFront = std::cos(th) < 0.0f;
+                for (int o = 0; o < 2; ++o) {
+                    const int strand = (o == 0) ? (aFront ? 1 : 0) : (aFront ? 0 : 1);
+                    const float lat = (strand == 0) ? latA : -latA;
+                    const float jitter = 0.88f + 0.24f * Hash1D(idx * 2u + static_cast<uint32_t>(strand), 77u);
+                    const float R = ((pr > 0.01f) ? pr : baseWidth * 0.5f) * coat.widthScale * jitter;
+                    const float light = ((idx & 1u) ? 0.05f : -0.03f) + ((o == 0) ? -0.10f : 0.0f);
+                    float al = 1.0f;
+                    ColorRgba col = ComputeCoatColor(coat, baseColor, (strand == 1) ? coat.hueOffsetDeg : 0.0f, light, al);
+                    CapsuleVec2 pos{ px + nrm.x * lat, py + nrm.y * lat };
+                    emit(pos, pos, R, R, PackPremultipliedGpuColor(col, al * coat.opacityScale));
+                }
+            }
+            continue;
+        }
         if (coat.emissionMode == CoatEmissionMode::ContinuousRibbon) {
             for (size_t i = 0; i < N - 1; ++i) {
                 const auto& ptA = points[i];
@@ -409,21 +452,16 @@ void BrushComposer::BuildRecipeInstances(
                     static_cast<float>(ptB.y) + normals[i + 1].y * modB.lateralOffset + modB.worldOffsetY
                 };
 
-                float avgAlpha = 1.0f;
-                ColorRgba col = ComputeCoatColor(
-                    coat, baseColor,
-                    (modA.hueShiftDeg + modB.hueShiftDeg) * 0.5f,
-                    (modA.lightnessShift + modB.lightnessShift) * 0.5f,
-                    avgAlpha
-                );
-                float finalAlpha = avgAlpha * ((modA.opacityScale + modB.opacityScale) * 0.5f);
+                float alphaA = 1.0f, alphaB = 1.0f;
+                ColorRgba colA = ComputeCoatColor(coat, baseColor, modA.hueShiftDeg, modA.lightnessShift, alphaA);
+                ColorRgba colB = ComputeCoatColor(coat, baseColor, modB.hueShiftDeg, modB.lightnessShift, alphaB);
 
                 CapsuleInstance inst{};
                 inst.pointA = posA;
                 inst.pointB = posB;
                 inst.radii = { rA, rB };
-                inst.colorRgba = PackPremultipliedGpuColor(col, finalAlpha);
-                inst.alphaFade = 1.0f;
+                inst.colorRgba    = PackPremultipliedGpuColor(colA, alphaA * modA.opacityScale);
+                inst.colorRgbaEnd = PackPremultipliedGpuColor(colB, alphaB * modB.opacityScale);
 
                 outInstances.push_back(inst);
             }
@@ -497,6 +535,10 @@ void BrushComposer::BuildRecipeInstances(
                     case ParticleOrientation::FixedAngle:
                         dir = { 0.7071f, 0.7071f };
                         break;
+                    case ParticleOrientation::NormalHangDown:
+                        dir = norm;
+                        if (dir.y < 0.0f) dir = { -dir.x, -dir.y };
+                        break;
                 }
 
                 if (coat.particleAngleRad != 0.0f) {
@@ -513,14 +555,63 @@ void BrushComposer::BuildRecipeInstances(
                 float alpha = 1.0f;
                 ColorRgba col = ComputeCoatColor(coat, baseColor, mod.hueShiftDeg, mod.lightnessShift, alpha);
                 float finalAlpha = alpha * mod.opacityScale;
+                const uint32_t packed = PackPremultipliedGpuColor(col, finalAlpha);
+
+                if (coat.emissionMode == CoatEmissionMode::MusicalNotes) {
+                    const float bw = baseWidth;
+                    auto P = [&](float u, float v) {
+                        return CapsuleVec2{ px + tan.x * u * bw - norm.x * v * bw, py + tan.y * u * bw - norm.y * v * bw };
+                    };
+                    if (pIdx == 0) {
+                        // Treble clef: vertical spine + spiral, in brush-size units (v is "up")
+                        static const float kClef[][2] = {
+                            {0.02f, 0.95f}, {-0.12f, 0.78f}, {-0.12f, 0.55f}, {0.04f, 0.32f}, {0.16f, 0.05f},
+                            {0.12f, -0.25f}, {0.0f, -0.40f}, {-0.14f, -0.32f}, {-0.10f, -0.10f}, {0.08f, -0.08f},
+                            {0.14f, 0.12f}, {0.05f, 0.30f}, {-0.10f, 0.28f}
+                        };
+                        for (size_t k = 0; k + 1 < sizeof(kClef) / sizeof(kClef[0]); ++k) {
+                            emit(P(kClef[k][0], kClef[k][1]), P(kClef[k + 1][0], kClef[k + 1][1]), 0.035f * bw, 0.035f * bw, packed);
+                        }
+                        emit(P(0.02f, 0.95f), P(0.04f, -0.78f), 0.03f * bw, 0.03f * bw, packed);
+                        emit(P(0.04f, -0.78f), P(-0.06f, -0.90f), 0.04f * bw, 0.04f * bw, packed);
+                    } else if (pIdx >= 2) {
+                        const int step = static_cast<int>(Hash1D(pIdx, coat.modulators.empty() ? 4242u : coat.modulators[0].seed) * 6.999f);
+                        const float v = (static_cast<float>(step) - 3.0f) * 0.175f;
+                        const bool up = (v < 0.18f);
+                        const float sgn = up ? 1.0f : -1.0f;
+                        emit(P(-0.05f, v - 0.03f), P(0.05f, v + 0.03f), 0.115f * bw, 0.115f * bw, packed);
+                        const float sx = up ? 0.105f : -0.105f;
+                        const float top = v + 0.85f * sgn;
+                        emit(P(sx, v), P(sx, top), 0.024f * bw, 0.024f * bw, packed);
+                        if (pIdx % 3 == 0) {
+                            emit(P(sx, top), P(sx + 0.16f, top - 0.20f * sgn), 0.034f * bw, 0.022f * bw, packed);
+                            emit(P(sx + 0.16f, top - 0.20f * sgn), P(sx + 0.12f, top - 0.46f * sgn), 0.022f * bw, 0.016f * bw, packed);
+                        }
+                    }
+                    continue;
+                }
+
+                if (coat.triangleFan) {
+                    // Flat-based triangle: base along the stroke, apex hanging toward 'dir'
+                    const float W = ((pr > 0.01f) ? pr : baseWidth * 0.5f) * coat.widthScale;
+                    const float H = std::max(lenBase * mod.particleLength, 0.1f);
+                    constexpr int K = 9;
+                    const float rr = W / K * 1.15f;
+                    const CapsuleVec2 apex{ center.x + dir.x * H, center.y + dir.y * H };
+                    for (int k = 0; k < K; ++k) {
+                        const float o = -(W - rr) + 2.0f * (W - rr) * (static_cast<float>(k) + 0.5f) / K;
+                        CapsuleVec2 b0{ center.x + tan.x * o + dir.x * rr, center.y + tan.y * o + dir.y * rr };
+                        emit(b0, apex, rr, rr * 0.12f, packed);
+                    }
+                    continue;
+                }
 
                 CapsuleInstance inst{};
                 inst.pointA = startPos;
                 inst.pointB = endPos;
                 inst.radii = { rStart, rEnd };
-                inst.colorRgba = PackPremultipliedGpuColor(col, finalAlpha);
-                inst.alphaFade = 1.0f;
-
+                inst.colorRgba = packed;
+                inst.colorRgbaEnd = packed;
                 outInstances.push_back(inst);
             }
         }
@@ -546,96 +637,51 @@ std::vector<BrushRecipe> BrushComposer::CreateCahierPresets() {
     }
 
     // =========================================================================
-    // 1. Graffiti Spray (cahier: graffiti.brushfamily)
-    // Exact Google specification: 3 coats, 20-deg slanted tip, outer halo + outline + rainbow core
+    // Graffiti Spray (cahier: graffiti.brushfamily) - opaque halo + black outline + hue-mirrored core
     // =========================================================================
     {
         BrushRecipe r;
         r.name = "Graffiti Spray";
-        r.description = "Google Graffiti: 3-coat street art brush with outer spray halo, dark border, and rainbow core.";
-
-        // Coat 0: Outer Spray Halo (scale_x=1.15, scale_y=1.40, noise size 0.95..1.05, seed=3)
-        BrushCoatSpec c0;
-        c0.name = "Outer Spray Halo";
-        c0.widthScale = 1.30f;
-        c0.opacityScale = 0.40f;
-        c0.colorMode = CoatColorMode::InheritBase;
-        c0.modulators.push_back({
-            ModulatorSource::ArcLength, ModulatorWaveform::ValueNoise1D,
-            ModulatorTarget::RadiusScale, 0.20f, 0.0f, 0.0f, 0.05f, 0.0f, 1.0f, 3u
-        });
-        r.coats.push_back(c0);
-
-        // Coat 1: Dark Outline Backer (scale_x=0.90, scale_y=1.22, fixed black, noise seed=1)
-        BrushCoatSpec c1;
-        c1.name = "Dark Outline Backer";
-        c1.widthScale = 1.05f;
-        c1.colorMode = CoatColorMode::FixedColor;
-        c1.fixedColor = ColorRgba(15, 15, 20, 255);
-        c1.modulators.push_back({
-            ModulatorSource::ArcLength, ModulatorWaveform::ValueNoise1D,
-            ModulatorTarget::RadiusScale, 0.20f, 0.0f, 0.0f, 0.08f, 0.0f, 1.0f, 1u
-        });
-        r.coats.push_back(c1);
-
-        // Coat 2: Inner Core with Mirrored Hue Cycle (scale_x=0.45, scale_y=0.60, period=10*baseWidth)
-        BrushCoatSpec c2;
-        c2.name = "Rainbow Vibrant Core";
-        c2.widthScale = 0.55f;
-        c2.colorMode = CoatColorMode::InheritBase;
-        c2.modulators.push_back({
-            ModulatorSource::ArcLength, ModulatorWaveform::ValueNoise1D,
-            ModulatorTarget::RadiusScale, 0.25f, 0.0f, 0.0f, 0.15f, 0.0f, 1.0f, 5u
-        });
-        BrushModulator hueMod;
-        hueMod.source = ModulatorSource::ArcLength;
-        hueMod.waveform = ModulatorWaveform::MirrorCycle;
-        hueMod.target = ModulatorTarget::HueShiftDeg;
-        hueMod.periodInBrushSizes = 10.0f; // Exact Google period = 10.0 x brush size
-        hueMod.amplitude = 115.0f;        // Exact Google range = 2.007 rad (~115 deg)
-        hueMod.bias = 0.0f;
-        c2.modulators.push_back(hueMod);
-        r.coats.push_back(c2);
-
+        r.description = "Google Graffiti: base-color halo, thick black outline and a core whose hue shifts smoothly along the stroke.";
+        auto noise = [](uint32_t seed, float lo, float hi) {
+            BrushModulator m;
+            m.source = ModulatorSource::ArcLength; m.waveform = ModulatorWaveform::ValueNoise1D;
+            m.target = ModulatorTarget::RadiusScale; m.frequency = 0.2f;
+            m.bias = (lo + hi) * 0.5f; m.amplitude = (hi - lo) * 0.5f; m.seed = seed; return m;
+        };
+        BrushCoatSpec c0; c0.name = "Outer Halo"; c0.widthScale = 1.30f; c0.modulators.push_back(noise(3u, 0.95f, 1.05f)); r.coats.push_back(c0);
+        BrushCoatSpec c1; c1.name = "Black Outline"; c1.widthScale = 1.05f; c1.colorMode = CoatColorMode::FixedColor;
+        c1.fixedColor = ColorRgba(12, 12, 16, 255); c1.modulators.push_back(noise(3u, 0.95f, 1.10f)); r.coats.push_back(c1);
+        BrushCoatSpec c2; c2.name = "Hue-Shifting Core"; c2.widthScale = 0.55f; c2.modulators.push_back(noise(3u, 0.8f, 1.2f));
+        BrushModulator hue; hue.source = ModulatorSource::ArcLength; hue.waveform = ModulatorWaveform::MirrorCycle;
+        hue.target = ModulatorTarget::HueShiftDeg; hue.periodInBrushSizes = 10.0f; hue.amplitude = 115.0f;
+        c2.modulators.push_back(hue); r.coats.push_back(c2);
         presets.push_back(r);
     }
 
     // =========================================================================
-    // 2. Flag Banner (cahier: flag_banner.brushfamily)
-    // Exact Google specification: inverted sharp triangle pennants (gap=1.2x baseWidth) + string
+    // Flag Banner (cahier: flag_banner.brushfamily) - flat-based triangles hanging from a string
     // =========================================================================
     {
         BrushRecipe r;
         r.name = "Flag Banner";
-        r.description = "Google Flag Banner: Hanging triangular pennants with rainbow hues along dark string.";
-
-        // Coat 0: Pennant Flags (gravity-oriented downward sharp triangle, gap = 1.20 x baseWidth)
+        r.description = "Google Flag Banner: rainbow triangular flags whose flat top sits on the string and hang downward.";
         BrushCoatSpec flags;
         flags.name = "Pennant Flags";
         flags.emissionMode = CoatEmissionMode::ParticleStamp;
-        flags.particleOrientation = ParticleOrientation::GravityDown;
+        flags.triangleFan = true;
+        flags.particleOrientation = ParticleOrientation::NormalHangDown;
         flags.particleGapRatio = 1.20f;
-        flags.particleLengthRatio = 1.20f;
-        flags.widthScale = 1.0f;
-        flags.radiusEndRatio = 0.04f; // Sharp pinch tip
-        BrushModulator hueMod;
-        hueMod.source = ModulatorSource::ParticleIndex;
-        hueMod.waveform = ModulatorWaveform::Linear;
-        hueMod.target = ModulatorTarget::HueShiftDeg;
-        hueMod.frequency = 0.1666f; // 6-step rainbow cycle
-        hueMod.amplitude = 360.0f;
-        flags.modulators.push_back(hueMod);
+        flags.particleLengthRatio = 1.25f;
+        flags.startSkipBrushSizes = 0.7f;
+        flags.endSkipBrushSizes = 0.7f;
+        flags.widthScale = 0.95f;
+        BrushModulator hue; hue.source = ModulatorSource::ParticleIndex; hue.waveform = ModulatorWaveform::Linear;
+        hue.target = ModulatorTarget::HueShiftDeg; hue.frequency = 1.0f; hue.amplitude = 60.0f;
+        flags.modulators.push_back(hue);
         r.coats.push_back(flags);
-
-        // Coat 1: Dark Hanging String (width = 0.10 x baseWidth)
-        BrushCoatSpec stringCoat;
-        stringCoat.name = "Banner String";
-        stringCoat.emissionMode = CoatEmissionMode::ContinuousRibbon;
-        stringCoat.widthScale = 0.10f;
-        stringCoat.colorMode = CoatColorMode::FixedColor;
-        stringCoat.fixedColor = ColorRgba(20, 20, 25, 255);
-        r.coats.push_back(stringCoat);
-
+        BrushCoatSpec str; str.name = "String"; str.widthScale = 0.10f; str.colorMode = CoatColorMode::FixedColor;
+        str.fixedColor = ColorRgba(15, 15, 18, 255); r.coats.push_back(str);
         presets.push_back(r);
     }
 
@@ -709,36 +755,20 @@ std::vector<BrushRecipe> BrushComposer::CreateCahierPresets() {
     }
 
     // =========================================================================
-    // 4. Twisted Yarn (cahier: twisted_yarn.brushfamily)
-    // Exact Google specification: 2 intertwined strands oscillating out of phase
+    // Twisted Yarn (cahier: twisted_yarn.brushfamily) - two bumpy strands weaving over/under
     // =========================================================================
     {
         BrushRecipe r;
         r.name = "Twisted Yarn";
-        r.description = "Google Twisted Yarn: two strands that pass over/under each other and swap colors at the crossings.";
-        for (int k = 0; k < 2; ++k) {
-            BrushCoatSpec c;
-            c.name = (k == 0) ? "Yarn Strand A" : "Yarn Strand B";
-            c.widthScale = 0.50f;
-            BrushModulator lat;
-            lat.source = ModulatorSource::ArcLength;
-            lat.waveform = ModulatorWaveform::SineWave;
-            lat.target = ModulatorTarget::LateralOffset;
-            lat.periodInBrushSizes = 3.0f;
-            lat.amplitudeRatio = 0.50f;
-            lat.phase = (k == 0) ? 0.0f : kPi;
-            c.modulators.push_back(lat);
-            BrushModulator sw;
-            sw.source = ModulatorSource::ArcLength;
-            sw.waveform = ModulatorWaveform::AlternateSwap;
-            sw.target = ModulatorTarget::HueShiftDeg;
-            sw.periodInBrushSizes = 3.0f;
-            sw.bias = 90.0f;
-            sw.amplitude = (k == 0) ? 90.0f : -90.0f;
-            sw.phase = kPi * 0.5f;
-            c.modulators.push_back(sw);
-            r.coats.push_back(c);
-        }
+        r.description = "Google Twisted Yarn: two solid-color strands built from stacked round bumps that weave over and under each other.";
+        BrushCoatSpec y;
+        y.name = "Yarn Strands";
+        y.emissionMode = CoatEmissionMode::YarnStrandBumps;
+        y.widthScale = 0.55f;
+        y.yarnPeriodBrushSizes = 3.0f;
+        y.yarnAmplitudeRatio = 0.38f;
+        y.hueOffsetDeg = 180.0f; // second strand = opposite hue
+        r.coats.push_back(y);
         presets.push_back(r);
     }
 
@@ -842,138 +872,108 @@ std::vector<BrushRecipe> BrushComposer::CreateCahierPresets() {
     }
 
     // =========================================================================
-    // 8. Pressure Wave (cahier: pressure_wave.brushfamily)
-    // Exact Google specification: Main stroke + oscillating wave (amplitude=0.38 x baseWidth)
+    // Pens: Ballpoint, Marker, Fountain, Highlighter
+    // =========================================================================
+    {
+        BrushRecipe r; r.name = "Ballpoint Pen"; r.description = "Thin, crisp, near-constant-width line.";
+        r.usePressure = true;
+        BrushCoatSpec c; c.name = "Ink"; c.widthScale = 0.40f; r.coats.push_back(c);
+        presets.push_back(r);
+    }
+    {
+        BrushRecipe r; r.name = "Marker"; r.description = "Wide opaque felt-tip marker with constant width.";
+        r.usePressure = false;
+        BrushCoatSpec c; c.name = "Felt"; c.widthScale = 1.10f; r.coats.push_back(c);
+        presets.push_back(r);
+    }
+    {
+        BrushRecipe r; r.name = "Fountain Pen"; r.description = "Pressure and speed sensitive line: thick when slow, thin when fast.";
+        r.usePressure = true; r.useVelocity = true;
+        BrushCoatSpec c; c.name = "Nib"; c.widthScale = 0.80f; r.coats.push_back(c);
+        presets.push_back(r);
+    }
+    {
+        BrushRecipe r; r.name = "Highlighter"; r.description = "Wide translucent stroke; overlaps never darken (set-union), joins are seamless.";
+        r.usePressure = false; r.opacity = 0.38f; r.unionOverlap = true;
+        BrushCoatSpec c; c.name = "Highlight"; c.widthScale = 1.9f; r.coats.push_back(c);
+        presets.push_back(r);
+    }
+    // =========================================================================
+    // Shading Pencil (cahier: shading_pencil.brushfamily)
+    // Grainy graphite body: opacity follows pressure, width grows with tilt, plus loose graphite specks
     // =========================================================================
     {
         BrushRecipe r;
-        r.name = "Pressure Wave";
-        r.description = "Google Pressure Wave: Base stroke with an undulating internal wave scaling with pressure.";
-
-        // Coat 0: Base Envelope
-        BrushCoatSpec base;
-        base.name = "Base Stroke";
-        base.widthScale = 0.80f;
-        BrushModulator pMod;
-        pMod.source = ModulatorSource::Pressure;
-        pMod.waveform = ModulatorWaveform::Linear;
-        pMod.target = ModulatorTarget::RadiusScale;
-        pMod.bias = 0.75f;
-        pMod.amplitude = 0.50f;
-        base.modulators.push_back(pMod);
-        r.coats.push_back(base);
-
-        // Coat 1: Wave
-        BrushCoatSpec wave;
-        wave.name = "Oscillating Wave";
-        wave.widthScale = 0.25f;
-        BrushModulator waveMod;
-        waveMod.source = ModulatorSource::ArcLength;
-        waveMod.waveform = ModulatorWaveform::SineWave;
-        waveMod.target = ModulatorTarget::LateralOffset;
-        waveMod.periodInBrushSizes = 2.0f;
-        waveMod.amplitudeRatio = 0.38f;
-        wave.modulators.push_back(waveMod);
-        r.coats.push_back(wave);
-
+        r.name = "Shading Pencil";
+        r.description = "Google Shading Pencil: paper-grain graphite; light pressure is faint, tilt widens it to shade, specks add texture.";
+        r.usePressure = false; r.useTilt = true;
+        r.grain = 0.85f; r.grainScale = 2.4f; r.unionOverlap = true;
+        BrushCoatSpec body; body.name = "Graphite Body"; body.widthScale = 0.55f;
+        BrushModulator op; op.source = ModulatorSource::Pressure; op.waveform = ModulatorWaveform::Linear;
+        op.target = ModulatorTarget::OpacityScale; op.frequency = 1.0f; op.bias = 0.12f; op.amplitude = 0.88f;
+        body.modulators.push_back(op);
+        BrushModulator tilt; tilt.source = ModulatorSource::Tilt; tilt.waveform = ModulatorWaveform::Linear;
+        tilt.target = ModulatorTarget::RadiusScale; tilt.frequency = 0.83f; tilt.bias = 1.0f; tilt.amplitude = 2.0f;
+        body.modulators.push_back(tilt);
+        r.coats.push_back(body);
+        BrushCoatSpec specks; specks.name = "Graphite Specks";
+        specks.emissionMode = CoatEmissionMode::ParticleStamp;
+        specks.particleGapRatio = 0.22f; specks.particleLengthRatio = 0.0f; specks.particleLengthMm = 0.1f;
+        specks.widthScale = 0.10f; specks.opacityScale = 0.55f;
+        BrushModulator lat; lat.source = ModulatorSource::ParticleIndex; lat.waveform = ModulatorWaveform::HashRandom;
+        lat.target = ModulatorTarget::LateralOffset; lat.amplitudeRatio = 0.9f; lat.bias = -0.5f; lat.seed = 31u;
+        specks.modulators.push_back(lat);
+        BrushModulator sz; sz.source = ModulatorSource::ParticleIndex; sz.waveform = ModulatorWaveform::HashRandom;
+        sz.target = ModulatorTarget::RadiusScale; sz.amplitude = 1.2f; sz.bias = 0.4f; sz.seed = 57u;
+        specks.modulators.push_back(sz);
+        r.coats.push_back(specks);
         presets.push_back(r);
     }
 
     // =========================================================================
-    // 9. Music Staff (cahier: music.brushfamily)
-    // Exact Google specification: 5 staff lines (offsets 0, +/-0.35, +/-0.70) + stamped notes
+    // Music Staff (cahier: music.brushfamily) - staff lines, treble clef, notes with stems/flags, bar lines
     // =========================================================================
     {
         BrushRecipe r;
         r.name = "Music Staff";
-        r.description = "Google Music: 5 continuous staff lines with scattered musical notes and bar marks.";
-
-        // 5 Staff Lines
+        r.description = "Google Music: five staff lines carrying a treble clef, real notes (head, stem, flags) and bar lines.";
         const float staffOffsets[5] = { -0.70f, -0.35f, 0.0f, 0.35f, 0.70f };
         for (int i = 0; i < 5; ++i) {
-            BrushCoatSpec line;
-            line.name = std::string("Staff Line ") + std::to_string(i + 1);
-            line.widthScale = 0.05f;
-            line.lateralOffsetRatio = staffOffsets[i];
-            line.colorMode = CoatColorMode::FixedColor;
-            line.fixedColor = ColorRgba(30, 30, 35, 220);
-            r.coats.push_back(line);
+            BrushCoatSpec line; line.name = std::string("Staff Line ") + std::to_string(i + 1);
+            line.widthScale = 0.05f; line.lateralOffsetRatio = staffOffsets[i]; r.coats.push_back(line);
         }
-
-        // Coat 5: Quarter Notes
-        BrushCoatSpec notes;
-        notes.name = "Quarter Notes";
-        notes.emissionMode = CoatEmissionMode::ParticleStamp;
-        notes.particleGapRatio = 1.20f;
-        notes.particleLengthRatio = 0.70f;
-        notes.widthScale = 0.35f;
-        notes.radiusEndRatio = 0.70f;
-        notes.particleOrientation = ParticleOrientation::FollowTangent;
-        notes.colorMode = CoatColorMode::FixedColor;
-        notes.fixedColor = ColorRgba(20, 20, 25, 255);
-        BrushModulator noteMod;
-        noteMod.source = ModulatorSource::ParticleIndex;
-        noteMod.waveform = ModulatorWaveform::HashRandom;
-        noteMod.target = ModulatorTarget::LateralOffset;
-        noteMod.amplitudeRatio = 0.50f;
-        noteMod.bias = -0.25f;
-        noteMod.seed = 777u;
-        notes.modulators.push_back(noteMod);
+        BrushCoatSpec notes; notes.name = "Clef & Notes";
+        notes.emissionMode = CoatEmissionMode::MusicalNotes;
+        notes.particleGapRatio = 1.20f; notes.particleOrientation = ParticleOrientation::FollowTangent;
+        BrushModulator seedMod; seedMod.seed = 4242u; seedMod.amplitude = 0.0f; seedMod.target = ModulatorTarget::OpacityScale; seedMod.bias = 1.0f;
+        notes.modulators.push_back(seedMod);
         r.coats.push_back(notes);
-
-        // Coat 6: Bar Lines
-        BrushCoatSpec bar;
-        bar.name = "Measure Bar Lines";
-        bar.emissionMode = CoatEmissionMode::ParticleStamp;
-        bar.particleGapRatio = 4.00f;
-        bar.particleLengthRatio = 1.40f;
-        bar.widthScale = 0.06f;
-        bar.radiusEndRatio = 1.0f;
+        BrushCoatSpec bar; bar.name = "Bar Lines";
+        bar.emissionMode = CoatEmissionMode::ParticleStamp; bar.particleGapRatio = 4.0f;
+        bar.particleLengthRatio = 1.40f; bar.widthScale = 0.05f;
         bar.particleOrientation = ParticleOrientation::PerpendicularAlternate;
-        bar.colorMode = CoatColorMode::FixedColor;
-        bar.fixedColor = ColorRgba(30, 30, 35, 200);
+        bar.lateralOffsetRatio = 0.0f; bar.startSkipBrushSizes = 2.5f;
         r.coats.push_back(bar);
-
         presets.push_back(r);
     }
 
     // =========================================================================
-    // 10. Jelly Wobble (cahier: jelly_wobble.brushfamily)
-    // Exact Google specification: Dynamic ripple along path and time
+    // Jelly Wobble (cahier: jelly_wobble.brushfamily) - single color, smoothly undulating width
     // =========================================================================
     {
         BrushRecipe r;
         r.name = "Jelly Wobble";
-        r.description = "Google Jelly Wobble: live traveling ripple that slows to rest after pen lift.";
+        r.description = "Google Jelly Wobble: one unified color; width undulates smoothly (0.75x-1.25x) while drawing and settles after pen lift.";
         r.isAnimated = true;
         r.settlingDurationSec = 0.95f;
-
         BrushModulator rad;
         rad.source = ModulatorSource::TimeSinceInput;
         rad.waveform = ModulatorWaveform::TravelingWaveJelly;
         rad.target = ModulatorTarget::RadiusScale;
         rad.bias = 1.0f; rad.amplitude = 0.25f;
-        BrushModulator lat = rad;
-        lat.target = ModulatorTarget::LateralOffset;
-        lat.bias = 0.0f; lat.amplitude = 0.0f; lat.amplitudeRatio = 0.15f;
-
-        BrushCoatSpec body;
-        body.name = "Gelatin Base";
-        body.widthScale = 1.10f;
-        body.opacityScale = 0.85f;
+        BrushCoatSpec body; body.name = "Jelly"; body.widthScale = 1.0f;
         body.modulators.push_back(rad);
-        body.modulators.push_back(lat);
         r.coats.push_back(body);
-
-        BrushCoatSpec glint;
-        glint.name = "Glint Highlight";
-        glint.widthScale = 0.30f;
-        glint.lateralOffsetRatio = -0.30f;
-        glint.colorMode = CoatColorMode::FixedColor;
-        glint.fixedColor = ColorRgba(255, 255, 255, 220);
-        glint.modulators.push_back(lat);
-        r.coats.push_back(glint);
-
         presets.push_back(r);
     }
 

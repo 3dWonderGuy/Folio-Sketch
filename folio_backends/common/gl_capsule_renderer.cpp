@@ -55,7 +55,7 @@ bool GlCapsuleRenderer::Init() {
         "layout(location = 2) in vec2 aPointB;\n"
         "layout(location = 3) in vec2 aRadii;\n"
         "layout(location = 4) in vec4 aColor;\n"
-        "layout(location = 5) in float aAlphaFade;\n"
+        "layout(location = 5) in vec4 aColorEnd;\n"
         "uniform vec4 uTransform; // (panX, panY, zoom, unused)\n"
         "uniform vec2 uViewport;  // (width, height)\n"
         "uniform mat4 uSurfaceTransform;\n"
@@ -64,7 +64,7 @@ bool GlCapsuleRenderer::Init() {
         "flat out vec2 vPointB;\n"
         "flat out vec2 vRadii;\n"
         "flat out vec4 vColor;\n"
-        "flat out float vAlphaFade;\n"
+        "flat out vec4 vColorEnd;\n"
         "void main() {\n"
         "    vec2 delta = aPointB - aPointA;\n"
         "    float segLen = length(delta);\n"
@@ -83,23 +83,28 @@ bool GlCapsuleRenderer::Init() {
         "    vPointB     = aPointB;\n"
         "    vRadii      = aRadii;\n"
         "    vColor      = aColor;\n"
-        "    vAlphaFade  = aAlphaFade;\n"
+        "    vColorEnd   = aColorEnd;\n"
         "}\n";
 
     // Fragment Shader (Analytic Capsule SDF):
     // Evaluates Euclidean distance to segment [vPointA, vPointB],
-    // linearly interpolates radius r(t) = mix(rA, rB, t), and applies smoothstep falloff.
+    // linearly interpolates radius r(t) = mix(rA, rB, t) and color mix(vColor, vColorEnd, t),
+    // and applies smoothstep falloff + high-frequency micro-fiber paper graphite grain.
     std::string fSrc = std::string(glslHeader) +
         "in vec2 vWorldPos;\n"
         "flat in vec2 vPointA;\n"
         "flat in vec2 vPointB;\n"
         "flat in vec2 vRadii;\n"
         "flat in vec4 vColor;\n"
-        "flat in float vAlphaFade;\n"
+        "flat in vec4 vColorEnd;\n"
         "uniform vec4 uTransform; // (panX, panY, zoom, unused)\n"
         "uniform vec2 uGrain;     // (grain strength 0..1, grain cells per world unit)\n"
         "out vec4 fragColor;\n"
-        "float hash21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n"
+        "float hash21(vec2 p) {\n"
+        "    vec3 p3 = fract(vec3(p.xyx) * 0.1031);\n"
+        "    p3 += dot(p3, p3.yzx + 33.33);\n"
+        "    return fract((p3.x + p3.y) * p3.z);\n"
+        "}\n"
         "float vnoise(vec2 p) {\n"
         "    vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);\n"
         "    return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x),\n"
@@ -123,10 +128,17 @@ bool GlCapsuleRenderer::Init() {
         "    float tooth = 1.0;\n"
         "    if (uGrain.x > 0.0) {\n"
         "        vec2 gp = vWorldPos * uGrain.y;\n"
-        "        float n = 0.6 * vnoise(gp) + 0.4 * vnoise(gp * 2.7 + 17.0);\n"
-        "        tooth = mix(1.0, smoothstep(0.25, 0.75, n), uGrain.x);\n"
+        "        float n1 = vnoise(gp * 1.1);\n"
+        "        float n2 = vnoise(gp * 3.1 + vec2(17.3, 9.2));\n"
+        "        float n3 = hash21(floor(gp * 6.5));\n"
+        "        float fiber = 0.45 * n1 + 0.35 * n2 + 0.20 * n3;\n"
+        "        float edgeRatio = clamp(dist / max(r, 1e-4), 0.0, 1.0);\n"
+        "        float edgeRough = fiber - 0.28 * (edgeRatio * edgeRatio);\n"
+        "        float grainMask = smoothstep(0.22, 0.68, edgeRough);\n"
+        "        tooth = mix(1.0, grainMask, uGrain.x);\n"
         "    }\n"
-        "    fragColor = (vColor * vAlphaFade) * (edgeAlpha * tooth);\n"
+        "    vec4 segCol = mix(vColor, vColorEnd, t);\n"
+        "    fragColor = segCol * (edgeAlpha * tooth);\n"
         "}\n";
 
     // Composite shader: fullscreen quad sampling offscreen layer with brush opacity
@@ -255,10 +267,10 @@ bool GlCapsuleRenderer::Init() {
                           reinterpret_cast<const void*>(offsetof(CapsuleInstance, colorRgba)));
     glVertexAttribDivisor(4, 1);
 
-    // Attribute 5: float alphaFade
+    // Attribute 5: uint32 colorRgbaEnd
     glEnableVertexAttribArray(5);
-    glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, sizeof(CapsuleInstance),
-                          reinterpret_cast<const void*>(offsetof(CapsuleInstance, alphaFade)));
+    glVertexAttribPointer(5, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(CapsuleInstance),
+                          reinterpret_cast<const void*>(offsetof(CapsuleInstance, colorRgbaEnd)));
     glVertexAttribDivisor(5, 1);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -342,8 +354,11 @@ void GlCapsuleRenderer::EnsureLayer(int w, int h) {
     m_layerH = h;
 }
 
-void GlCapsuleRenderer::DrawInstances(const CanvasTransform& transform, int vpWidth, int vpHeight,
+void GlCapsuleRenderer::DrawInstances(size_t firstInstance, size_t instanceCount,
+                                      const CanvasTransform& transform, int vpWidth, int vpHeight,
                                       const CapsuleBrush& brush, const float* surfaceTransform) const {
+    if (instanceCount == 0 || firstInstance >= m_instanceCount) return;
+    const size_t clampedCount = std::min(instanceCount, m_instanceCount - firstInstance);
     glUseProgram(m_program);
     glUniform4f(m_locTransform, transform.panX, transform.panY, transform.zoom, 0.0f);
     glUniform2f(m_locViewport, static_cast<float>(vpWidth), static_cast<float>(vpHeight));
@@ -364,14 +379,48 @@ void GlCapsuleRenderer::DrawInstances(const CanvasTransform& transform, int vpWi
     }
 
     glBindVertexArray(m_vao);
-    glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(m_instanceCount));
+    if (firstInstance > 0) {
+        glBindBuffer(GL_ARRAY_BUFFER, m_instanceVbo);
+        const size_t baseBytes = firstInstance * sizeof(CapsuleInstance);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(CapsuleInstance),
+                              reinterpret_cast<const void*>(baseBytes + offsetof(CapsuleInstance, pointA)));
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(CapsuleInstance),
+                              reinterpret_cast<const void*>(baseBytes + offsetof(CapsuleInstance, pointB)));
+        glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, sizeof(CapsuleInstance),
+                              reinterpret_cast<const void*>(baseBytes + offsetof(CapsuleInstance, radii)));
+        glVertexAttribPointer(4, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(CapsuleInstance),
+                              reinterpret_cast<const void*>(baseBytes + offsetof(CapsuleInstance, colorRgba)));
+        glVertexAttribPointer(5, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(CapsuleInstance),
+                              reinterpret_cast<const void*>(baseBytes + offsetof(CapsuleInstance, colorRgbaEnd)));
+    }
+    glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(clampedCount));
+    if (firstInstance > 0) {
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(CapsuleInstance),
+                              reinterpret_cast<const void*>(offsetof(CapsuleInstance, pointA)));
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(CapsuleInstance),
+                              reinterpret_cast<const void*>(offsetof(CapsuleInstance, pointB)));
+        glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, sizeof(CapsuleInstance),
+                              reinterpret_cast<const void*>(offsetof(CapsuleInstance, radii)));
+        glVertexAttribPointer(4, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(CapsuleInstance),
+                              reinterpret_cast<const void*>(offsetof(CapsuleInstance, colorRgba)));
+        glVertexAttribPointer(5, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(CapsuleInstance),
+                              reinterpret_cast<const void*>(offsetof(CapsuleInstance, colorRgbaEnd)));
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
     glBindVertexArray(0);
 }
 
 void GlCapsuleRenderer::Render(const CanvasTransform& transform, int vpWidth, int vpHeight,
                                const CapsuleBrush& brush, bool singlePassWet,
                                const float* surfaceTransform) {
-    if (!m_program || !m_vao || m_instanceCount == 0 || vpWidth <= 0 || vpHeight <= 0) return;
+    RenderRange(0, m_instanceCount, transform, vpWidth, vpHeight, brush, singlePassWet, surfaceTransform);
+}
+
+void GlCapsuleRenderer::RenderRange(size_t firstInstance, size_t instanceCount,
+                                    const CanvasTransform& transform, int vpWidth, int vpHeight,
+                                    const CapsuleBrush& brush, bool singlePassWet,
+                                    const float* surfaceTransform) {
+    if (!m_program || !m_vao || instanceCount == 0 || firstInstance >= m_instanceCount || vpWidth <= 0 || vpHeight <= 0) return;
 
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
@@ -380,29 +429,42 @@ void GlCapsuleRenderer::Render(const CanvasTransform& transform, int vpWidth, in
     // Live wet stroke or direct solid pass: bypass layer FBO allocations, clears and blits
     if (singlePassWet || (!brush.unionOverlap && brush.opacity >= 0.999f)) {
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-        DrawInstances(transform, vpWidth, vpHeight, brush, surfaceTransform);
+        DrawInstances(firstInstance, instanceCount, transform, vpWidth, vpHeight, brush, surfaceTransform);
         glUseProgram(0);
         return;
     }
 
-    // Committed stroke with union overlap: offscreen MAX union pass then composite
+    // Coat / stroke with union overlap: offscreen MAX union pass then composite
     GLint prevFbo = 0;
     GLint vp[4] = {0, 0, vpWidth, vpHeight};
+    GLboolean scissorWasEnabled = glIsEnabled(GL_SCISSOR_TEST);
+    GLint prevScissor[4] = {0, 0, vpWidth, vpHeight};
+    if (scissorWasEnabled) {
+        glGetIntegerv(GL_SCISSOR_BOX, prevScissor);
+    }
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
     glGetIntegerv(GL_VIEWPORT, vp);
     EnsureLayer(vp[2], vp[3]);
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_layerFbo);
     glViewport(0, 0, vp[2], vp[3]);
+    if (scissorWasEnabled) {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(prevScissor[0], prevScissor[1], prevScissor[2], prevScissor[3]);
+    }
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glBlendEquation(GL_MAX);
     glBlendFunc(GL_ONE, GL_ONE);
-    DrawInstances(transform, vpWidth, vpHeight, brush, surfaceTransform);
+    DrawInstances(firstInstance, instanceCount, transform, vpWidth, vpHeight, brush, surfaceTransform);
     glBlendEquation(GL_FUNC_ADD);
 
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
     glViewport(vp[0], vp[1], vp[2], vp[3]);
+    if (scissorWasEnabled) {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(prevScissor[0], prevScissor[1], prevScissor[2], prevScissor[3]);
+    }
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     glUseProgram(m_compositeProgram);
     glActiveTexture(GL_TEXTURE0);

@@ -25,14 +25,17 @@ namespace Folio {
 
 enum class CoatEmissionMode : uint8_t {
     ContinuousRibbon = 0, ///< Connected continuous capsule chain along centerline
-    ParticleStamp    = 1  ///< Discrete tapered capsules emitted at spatial intervals along stroke
+    ParticleStamp    = 1, ///< Discrete tapered capsules emitted at spatial intervals along stroke
+    MusicalNotes     = 2, ///< Treble clef + note heads, stems & flags composed from capsules
+    YarnStrandBumps  = 3  ///< Two intertwined bumpy yarn strands (over/under weave)
 };
 
 enum class ParticleOrientation : uint8_t {
     FollowTangent          = 0, ///< Aligned along stroke tangent direction (e.g. musical notes)
     PerpendicularAlternate = 1, ///< Alternates +/- 90 degrees across tangent (e.g. holiday lights)
     GravityDown            = 2, ///< Points straight down in world space (+Y) regardless of stroke travel (e.g. wet paint drips)
-    FixedAngle             = 3  ///< Fixed angle relative to canvas
+    FixedAngle             = 3, ///< Fixed angle relative to canvas
+    NormalHangDown         = 4  ///< Perpendicular to tangent (normal), always pointing downward (+Y >= 0) so flat base aligns with stroke
 };
 
 enum class CoatColorMode : uint8_t {
@@ -129,12 +132,17 @@ struct BrushCoatSpec {
     float               worldOffsetY               = 0.0f;  ///< Constant drop-shadow offset Y (mm)
     float               worldOffsetYRatio          = 0.0f;  ///< Drop shadow Y in multiples of brush baseWidth
 
-    // Color & Opacity
+    // Color, Opacity, Grain & Set-Union Blending
     CoatColorMode       colorMode           = CoatColorMode::InheritBase;
     ColorRgba           fixedColor          = ColorRgba(0, 0, 0, 255);
     float               hueOffsetDeg        = 0.0f;  ///< Constant hue shift
     float               lightnessOffset     = 0.0f;  ///< Constant lightness shift
     float               opacityScale        = 1.0f;  ///< Layer opacity multiplier [0.0, 1.0]
+
+    // Special emission parameters
+    bool                triangleFan         = false; ///< Particle is a flat-based triangle (flag) built from a capsule fan
+    float               yarnPeriodBrushSizes = 3.0f; ///< Yarn: length of one full twist
+    float               yarnAmplitudeRatio  = 0.38f; ///< Yarn: strand sway in brush sizes
 
     // Dynamic signal modulators
     std::vector<BrushModulator> modulators;
@@ -149,6 +157,13 @@ struct BrushRecipe {
     std::string                description;
     bool                       isAnimated          = false; ///< True if recipe uses live time modulators
     float                      settlingDurationSec = 0.0f;  ///< Post-input animation settling window (seconds, e.g. 1.0s for wet paint)
+    float                      opacity             = 1.0f;  ///< Whole-stroke opacity (set-union composited, e.g. highlighter)
+    float                      grain               = 0.0f;  ///< Paper tooth / pencil grain [0, 1]
+    float                      grainScale          = 2.0f;  ///< Grain cells per mm
+    bool                       unionOverlap        = false; ///< Overlapping capsules never double-darken
+    bool                       usePressure         = true;  ///< Modulate stroke radius with stylus pressure
+    bool                       useVelocity         = false; ///< Fountain pen velocity thinning
+    bool                       useTilt             = false; ///< Stylus tilt shading spread
     std::vector<BrushCoatSpec> coats;
 
     [[nodiscard]] bool empty() const noexcept { return coats.empty(); }

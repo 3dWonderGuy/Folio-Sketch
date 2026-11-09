@@ -291,6 +291,21 @@ void LayerManager::RefreshSettlingStroke() {
     );
 }
 
+void LayerManager::ApplyRecipeBrushSettings() {
+    m_activeBrush.opacity      = m_activeRecipe.opacity;
+    m_activeBrush.grain        = m_activeRecipe.grain;
+    m_activeBrush.grainScale   = m_activeRecipe.grainScale;
+    m_activeBrush.unionOverlap = m_activeRecipe.unionOverlap || m_activeRecipe.opacity < 0.999f;
+    m_activeStyle.usePressure  = m_activeRecipe.usePressure;
+    m_activeStyle.useVelocity  = m_activeRecipe.useVelocity;
+    m_activeStyle.useTilt      = m_activeRecipe.useTilt;
+    auto cfg = m_liveEngine.GetConfig();
+    cfg.dynamics.usePressure = m_activeRecipe.usePressure;
+    cfg.dynamics.useVelocity = m_activeRecipe.useVelocity;
+    cfg.dynamics.useTilt     = m_activeRecipe.useTilt;
+    m_liveEngine.SetConfig(cfg);
+}
+
 void LayerManager::SetActiveBrush(const Folio::StrokeStyle& style, const Folio::Backends::CapsuleBrush& brush) {
     m_activeStyle = style;
     m_activeBrush = brush;
@@ -444,7 +459,7 @@ void LayerManager::RenderLiveInking(int vpWidth, int vpHeight, const float* surf
         m_capsuleRenderer.UploadInstances(wetInstances);
         m_capsuleRenderer.Render(
             transform, vpWidth, vpHeight,
-            m_activeBrush, /*singlePassWet=*/true, surfaceTransformMatrix
+            m_activeBrush, /*singlePassWet=*/!m_activeBrush.unionOverlap, surfaceTransformMatrix
         );
     } else {
         m_capsuleRenderer.RenderStroke(
@@ -874,11 +889,11 @@ void LayerManager::RenderStateBWetScanout(int vpWidth, int vpHeight, const float
         if (!drawStroke) return;
         if (!wetInstances.empty()) {
             m_capsuleRenderer.UploadInstances(wetInstances);
-            m_capsuleRenderer.Render(transform, vpWidth, vpHeight, m_activeBrush, /*singlePassWet=*/true, mat);
+            m_capsuleRenderer.Render(transform, vpWidth, vpHeight, m_activeBrush, /*singlePassWet=*/!m_activeBrush.unionOverlap, mat);
         } else {
             m_capsuleRenderer.RenderStroke(
                 combined, Folio::PackPremultipliedGpuColor(m_activeStyle.color), transform,
-                vpWidth, vpHeight, m_activeBrush, /*singlePassWet=*/true, mat);
+                vpWidth, vpHeight, m_activeBrush, /*singlePassWet=*/!m_activeBrush.unionOverlap, mat);
         }
     };
 
