@@ -136,7 +136,7 @@ void InkEngine::AppendPoint(double worldX, double worldY, float pressure, double
 
     // 2. Filter speed using physical acceleration/deceleration constraints
     if (m_evalConfig.dynamics.useAccelerationFiltering) {
-        m_filteredSpeedMmPerSec = StrokeWidthEvaluator::FilterSpeedWithAcceleration(
+        m_filteredSpeedMmPerSec = StrokeWidthEvaluator::VelocityNoiseFilter(
             rawSpeed,
             m_filteredSpeedMmPerSec,
             dt,
@@ -397,7 +397,7 @@ float InkEngine::EvaluateTapWidth(float pressure, float /*tiltX*/, float /*tiltY
     return w;
 }
 
-StrokePoint InkEngine::ToStrokePoint(const sm::Result& res, float previousWidth) const {
+StrokePoint InkEngine::ToStrokePoint(const sm::Result& res, float previousWidth, float dt) const {
     float speed = (res.velocity.x != 0.0f || res.velocity.y != 0.0f)
                       ? std::hypot(res.velocity.x, res.velocity.y)
                       : 0.0f;
@@ -417,7 +417,7 @@ StrokePoint InkEngine::ToStrokePoint(const sm::Result& res, float previousWidth)
 
     float dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidth(
         m_activeStyle.baseWidth, pForEval, vForEval,
-        previousWidth, m_zoomScale, m_evalConfig, m_currentTurnAngleRad);
+        previousWidth, m_zoomScale, m_evalConfig, m_currentTurnAngleRad, dt);
 
     return StrokePoint(res.position.x, res.position.y, dynamicWidth * 0.5f, effectivePressure, tiltX, tiltY, res.time.Value());
 }
@@ -439,7 +439,7 @@ void InkEngine::ProcessPhysicsResults(const std::vector<sm::Result>& results) {
 
         // 2. Filter speed with acceleration limits on the modeled path
         if (m_evalConfig.dynamics.useAccelerationFiltering) {
-            m_filteredSpeedMmPerSec = StrokeWidthEvaluator::FilterSpeedWithAcceleration(
+            m_filteredSpeedMmPerSec = StrokeWidthEvaluator::VelocityNoiseFilter(
                 resSpeed,
                 m_filteredSpeedMmPerSec,
                 dt,
@@ -472,7 +472,7 @@ void InkEngine::ProcessPhysicsResults(const std::vector<sm::Result>& results) {
             }
         }
 
-        StrokePoint pt = ToStrokePoint(res, m_smoothedWidth);
+        StrokePoint pt = ToStrokePoint(res, m_smoothedWidth, dt);
 
         // 4. Clamp spatial radius slope (dr/ds) against previous point to prevent bloat during slow movements
         if (m_evalConfig.dynamics.enableSpatialSlopeClamping && !m_liveModeledPoints.empty()) {

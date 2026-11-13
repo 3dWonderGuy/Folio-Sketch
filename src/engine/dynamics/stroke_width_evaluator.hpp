@@ -44,7 +44,7 @@ public:
      * @param aspect Ratio of minor-to-major axis (e.g. 0.1 for sharp calligraphy, 1.0 for round).
      * @return Directional width multiplier in [aspect, 1.0].
      */
-    [[nodiscard]] static float ComputeDirectionalThinningFactor(float travelHeadingRad, float nibAngleRad, float aspect) noexcept {
+    [[nodiscard]] static float DirectionThinner(float travelHeadingRad, float nibAngleRad, float aspect) noexcept {
         if (aspect >= 0.999f) return 1.0f;
         const float a = aspect < 0.02f ? 0.02f : aspect;
         const float th = travelHeadingRad - nibAngleRad;
@@ -57,20 +57,24 @@ public:
     // 1. INERTIAL ACCELERATION & CORNER COMPENSATION EVALUATORS
     // =========================================================================
 
+    // Stage one, clean up raw speed with VelocityNoiseFilter()
+    // Stage two, evaluate dynamic width modulation with InkFlowSimulator()
+    // Stage three, prevent radius runaway with ClampSpatialRadiusSlope()
+
     /**
-     * @brief Filters raw input speed through basicaly a reate clamper
-     * @param rawSpeed speed (mm/s).
+     * @brief Filters raw input speed through an inertial slew rate clamper.
+     * @param rawSpeed Speed (mm/s).
      * @param previousFilteredSpeed Previous filtered speed (mm/s).
      * @param dt Elapsed time interval (seconds).
      * @param maxAccel Maximum positive acceleration (mm/s^2).
      * @param maxDecel Maximum deceleration limit (mm/s^2).
      * @return Inertially clamped speed in mm/s (>= 0.0f).
      */
-    [[nodiscard]] static float FilterSpeedWithAcceleration(float rawSpeed,
-                                                           float previousFilteredSpeed,
-                                                           float dt,
-                                                           float maxAccel,
-                                                           float maxDecel) noexcept {
+    [[nodiscard]] static float VelocityNoiseFilter(float rawSpeed,
+                                             float previousFilteredSpeed,
+                                             float dt,
+                                             float maxAccel,
+                                             float maxDecel) noexcept {
         if (dt <= 1e-5f) {
             return previousFilteredSpeed;
         }
@@ -99,7 +103,7 @@ public:
      * @param dt Elapsed time interval (seconds) since last sample.
      * @return Dynamic width modulation multiplier.
      */
-    [[nodiscard]] static float ComputeDynamicWidthModulator(float filteredSpeedMmPerSec,
+    [[nodiscard]] static float InkFlowSimulator(float filteredSpeedMmPerSec,
                                                            float turnAngleRad,
                                                            float zoomScale,
                                                            const InkingConfig& config,
@@ -146,7 +150,7 @@ public:
      * @param targetRadius Calculated unconstrained target radius (mm).
      * @param previousRadius Radius of previous modeled point (mm).
      * @param segmentLengthMm Arc length between previous point and current point (mm).
-     * @param maxSlope Maximum allowable dr/ds slope ratio.
+     * @param maxSlope Maximum allowable dr/ds slope change.
      * @return Spatially bounded radius (mm).
      */
     [[nodiscard]] static float ClampSpatialRadiusSlope(float targetRadius,
@@ -170,7 +174,7 @@ public:
      *
      * Pipeline Steps:
      * 1. ScaleWidthByPressure(): Modulates tool baseWidth by hardware pressure curve.
-     * 2. ComputeDynamicWidthModulator(): Evaluates speed thinning, corner compensation, and dwell accumulation.
+     * 2. InkFlowSimulator(): Evaluates speed thinning, corner compensation, and dwell accumulation.
      * 3. Multiplies factors to establish instantaneous target thickness.
      * 4. ApplySmoothingEMA(): Dampens transitions against previous point to eliminate jitter.
      *
@@ -196,7 +200,7 @@ public:
                                                      float turnAngleRad = 0.0f,
                                                      float dt = 0.0f) noexcept {
         float pressureWidth = ScaleWidthByPressure(baseWidth, pressure, config);
-        float rawModFactor = ComputeDynamicWidthModulator(speed, turnAngleRad, zoomScale, config, dt);
+        float rawModFactor = InkFlowSimulator(speed, turnAngleRad, zoomScale, config, dt);
 
         float smoothedModFactor = rawModFactor;
         if (previousWidth > 0.0f && pressureWidth > 0.0f) {
