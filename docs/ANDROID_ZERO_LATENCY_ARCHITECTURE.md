@@ -17,11 +17,11 @@ Achieving sub-2ms latency is not simply a matter of "optimizing C++ code." It is
 ```
 Folio-Sketch/
 ├── CMakeLists.txt                      <-- Primary build file; defines 'folio_sketch', 'folio_backends', and 'main'
-├── include/folio_sketch/
+├── src/
 │   ├── core/
 │   │   ├── ink_config.hpp              <-- STRICT CONFIG: Modeler spring-mass physics & Kalman prediction constants
-│   │   ├── raw_input.hpp               <-- RawInputSample representation (x, y, pressure, tilt, time)
-│   │   └── stroke_point.hpp            <-- Modeled stroke vertices (x, y, r, pressure)
+│   │   ├── ink_stroke_data.hpp         <-- StylusInputPoint representation (x, y, pressure, tilt, time)
+│   │   └── stroke_presets.hpp          <-- Brush factory presets & signal modulator helpers
 │   └── engine/
 │       └── ink_engine.hpp              <-- Core C++ inking pipeline: Modeler + Predictor + Outline Builder
 ├── folio_backends/

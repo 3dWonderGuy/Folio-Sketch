@@ -1,49 +1,64 @@
-# FolioSketch Engine Module (`src/engine`)
+# FolioSketch Engine Module
 
-This directory contains the internal implementation of the inking engine pipeline. It transforms raw digitizer/stylus inputs (coordinates, timestamp, pressure, tilt) into smoothed, variable-width inking strokes.
+The engine module is the physical modeling, orchestration, width dynamics, and procedural brush rendering core of Folio-Sketch.
 
 ---
 
-### Pipeline Architecture
-
-When drawing, input samples pass through four sequential stages coordinated by `InkEngine`:
+### Directory Architecture
 
 ```
-[Raw Stylus Touch] (x, y, pressure, dt)
-         │
-         ▼
- 1. InkPhysicsBridge      (Google Ink Stroke Modeler spring-mass filter & Kalman prediction)
-         │
-         ▼
- 2. StrokeWidthEvaluator  (Pressure gamma, velocity thinning, corner compensation -> assigns radius 'r')
-         │
-         ▼
- 3. InkStrokeFinisher     (On pen lift: tap-dot synthesis, tail tapering, collision capsules)
-         │
-         ▼
- 4. StrokePostProcessor   (RDP curve simplification & Gaussian smoothing)
-         │
-         ▼
-[FinishedStrokeData]     (Centerline + Capsule Instances + Vector Outline + Collision Data)
+src/engine/
+├── ink_engine.hpp / .cpp           <-- Primary facade & state orchestrator
+├── physics/                        <-- Spring-mass ODE modeling & trailing relaxation
+│   ├── ink_physics_bridge.hpp / .cpp
+│   └── ink_stroke_finisher.hpp / .cpp
+├── dynamics/                       <-- Dynamic stroke width & pressure dynamics
+│   └── stroke_width_evaluator.hpp
+├── brush/                          <-- Multi-coat procedural brushes & signal modulators
+│   └── brush_composer.hpp / .cpp
+└── post_processing/                <-- Post-stroke optimization, decimation & shape snapping
+    ├── stroke_post_processor.hpp
+    └── shape_recognizer.hpp
 ```
 
 ---
 
-### File Inventory & Responsibilities
-
-| File | Role | Description |
-| :--- | :--- | :--- |
-| `ink_engine.cpp` | **Orchestrator** | Implements the public facade defined in `include/folio_sketch/engine/ink_engine.hpp` (`BeginStroke`, `AppendPoint`, `FinishStroke`, `CancelStroke`). Manages scratch buffers and calls each pipeline stage. |
-| `ink_physics_bridge.hpp` / `.cpp` | **Physics Solver** | Private bridge to Google's `ink-stroke-modeler`. Applies spring-mass-damper physics, wobble suppression, and Kalman latency prediction. |
-| `ink_stroke_finisher.hpp` / `.cpp` | **Finalization Stage** | Handles stroke completion edge cases: synthesizes dots for stationary taps, applies tail-tapering on flicks, and computes 1D collision capsules for hit-testing/eraser tools. |
+### 1. Root Facade (`ink_engine.hpp / .cpp`)
+* **Role:** The main public entry point and orchestrator for active stroke gestures.
+* **Key Components:**
+  - Manages the lifecycle of a stroke (`StartStroke`, `UpdateStroke`, `FinishStroke`, `CancelStroke`).
+  - Coordinates real-time physics smoothing, Kalman prediction, dynamic width evaluation, and GPU capsule synthesis.
+  - Produces both live GPU capsule representations and completed stroke representations (`FinishedStrokeData`).
 
 ---
 
-### Architecture & Design Notes
+### 2. Physics Subsystem (`physics/`)
+* **`ink_physics_bridge.hpp / .cpp`**: Adapts raw hardware `StylusInputPoint` packets into Google's `ink::stroke_model::StrokeModeler` spring-mass-damper ODE simulator.
+* **`ink_stroke_finisher.hpp / .cpp`**: Flushes trailing spring-mass iterations upon stylus lift-off to guarantee smooth tail settling and single-tap edge-case resolution.
 
-1. **Private Dependency Insulation (PIMPL):**
-   `ink_physics_bridge.hpp` is intentionally kept inside `src/engine/` rather than the public `include/` directory. Google's `ink-stroke-modeler` depends on Abseil headers; keeping this bridge private ensures consumer applications linking against `FolioSketch` do not need Google Modeler or Abseil headers in their search paths.
+---
 
-2. **Accompanying Public Math Modules (`include/folio_sketch/engine/`):**
-   - `stroke_width_evaluator.hpp`: Dynamic line thickness evaluation (header-only).
-   - `stroke_post_processor.hpp`: Ramer-Douglas-Peucker (RDP) vertex decimation and Gaussian radius smoothing (header-only).
+### 3. Dynamics Subsystem (`dynamics/`)
+* **`stroke_width_evaluator.hpp`**: Pure mathematical dynamic width evaluator:
+  - Non-linear digitizer pressure calibration (deadzones, saturation, gamma curves).
+  - Hydrodynamic velocity thinning (fountain pen physics).
+  - Stylus tilt shading expansion.
+  - Corner turn-rate compensation (prevents bloat around sharp vertices).
+  - Cone-slope bounding ($|dr/ds| \le \text{slopeMax}$).
+
+---
+
+### 4. Brush Subsystem (`brush/`)
+* **`brush_composer.hpp / .cpp`**: Universal multi-coat procedural brush composer inspired by Google Ink Cahier / BrushFamily:
+  - 12 standard built-in presets (Ballpoint, Marker, Fountain Pen, Highlighter, Pencil, Wet Paint, Graffiti, Holiday Lights, Twisted Yarn, Music Staff, Custom).
+  - Procedural signal modulators mapping physical inputs (pressure, tilt, velocity, arc length, age) through waveforms to geometric/color targets.
+  - Compiles directly into GPU-instanced `CapsuleInstance` streams for frontbuffer scanout.
+
+---
+
+### 5. Post-Processing Subsystem (`post_processing/`)
+* **`stroke_post_processor.hpp`**:
+  - **Submerged Disk Culling**: Prunes occluded intermediate disks swallowed by overlapping neighbors.
+  - **RDP Curve Simplification**: Shape-preserving Ramer-Douglas-Peucker decimation for minimal memory footprint and fast vector export.
+* **`shape_recognizer.hpp`**:
+  - **QuickShape Recognition**: Real-time shape classification and primitive fitting ("draw-and-hold to snap" for straight lines, circles, ellipses, triangles, rectangles, and squares).

@@ -58,7 +58,7 @@ To eliminate visual popping and frame tearing:
 The following minimal, self-contained C++ class encapsulates the bridge between host windowing events and the Folio engine:
 
 ```cpp
-#include "folio_sketch/engine/ink_engine.hpp"
+#include "engine/ink_engine.hpp"
 #include "folio_backends/common/gl_capsule_renderer.hpp"
 
 class CanvasInkingBridge {
@@ -74,11 +74,11 @@ public:
         m_uploadedCount = 0;
         m_renderer.Reset();
 
-        Folio::RawInputSample sample{
-            .xMm = xPx * m_pxToMm,
-            .yMm = yPx * m_pxToMm,
+        Folio::StylusInputPoint sample{
+            .x = xPx * m_pxToMm,
+            .y = yPx * m_pxToMm,
             .pressure = pressure,
-            .timestampNs = timestampNs
+            .timeNs = static_cast<int64_t>(timestampNs)
         };
         m_engine.StartStroke(sample);
     }
@@ -86,11 +86,11 @@ public:
     void OnPointerMotion(float xPx, float yPx, float pressure, uint64_t timestampNs) {
         if (!m_active) return;
 
-        Folio::RawInputSample sample{
-            .xMm = xPx * m_pxToMm,
-            .yMm = yPx * m_pxToMm,
+        Folio::StylusInputPoint sample{
+            .x = xPx * m_pxToMm,
+            .y = yPx * m_pxToMm,
             .pressure = pressure,
-            .timestampNs = timestampNs
+            .timeNs = static_cast<int64_t>(timestampNs)
         };
         auto newCapsules = m_engine.ProcessSample(sample);
 

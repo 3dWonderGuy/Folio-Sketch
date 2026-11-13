@@ -5,11 +5,11 @@
  * =========================================================================================
  */
 
-#include "folio_sketch/engine/ink_engine.hpp"
-#include "folio_sketch/engine/stroke_width_evaluator.hpp"
-#include "folio_sketch/engine/stroke_post_processor.hpp"
-#include "ink_physics_bridge.hpp"
-#include "ink_stroke_finisher.hpp"
+#include "engine/ink_engine.hpp"
+#include "engine/dynamics/stroke_width_evaluator.hpp"
+#include "engine/post_processing/stroke_post_processor.hpp"
+#include "engine/physics/ink_physics_bridge.hpp"
+#include "engine/physics/ink_stroke_finisher.hpp"
 
 #include <ink_stroke_modeler/stroke_modeler.h>
 #include <algorithm>
@@ -216,7 +216,7 @@ FinishedStrokeData InkEngine::FinishStroke() {
 
     // Build 2D vector outline for SVG / Clipboard / PDF export
     data.outlinePath = InkGenerator::GenerateStroke(
-        m_liveModeledPoints, m_activeStyle.capType, m_activeStyle.pattern);
+        m_liveModeledPoints, CapType::Round, m_activeStyle.pattern);
 
     // Stage 6: Reset active state for next stroke
     CancelStroke();
@@ -390,14 +390,10 @@ void InkEngine::EnsurePrediction() const {
 // 3. MATHEMATICAL THICKNESS & MODELING
 // -----------------------------------------------------------------------------
 
-float InkEngine::EvaluateTapWidth(float pressure, float tiltX, float tiltY) const noexcept {
-    const bool isPencil = (m_activeStyle.pattern == StrokePattern::TexturedPencil);
+float InkEngine::EvaluateTapWidth(float pressure, float /*tiltX*/, float /*tiltY*/) const noexcept {
     float pForEval = m_evalConfig.dynamics.usePressure ? pressure : -1.0f;
     float w = StrokeWidthEvaluator::CalculateDynamicWidth(
-        m_activeStyle.baseWidth, pForEval, 0.0f, tiltX, tiltY, -1.0f, m_zoomScale, m_evalConfig, isPencil);
-    if (m_activeStyle.nibAspect < 0.999f) {
-        w *= m_activeStyle.nibAspect;
-    }
+        m_activeStyle.baseWidth, pForEval, 0.0f, -1.0f, m_zoomScale, m_evalConfig);
     return w;
 }
 
@@ -414,21 +410,14 @@ StrokePoint InkEngine::ToStrokePoint(const sm::Result& res, float previousWidth)
     }
     float effectivePressure = (res.pressure >= 0.0f) ? res.pressure : 0.65f;
 
-    const bool isPencil = (m_activeStyle.pattern == StrokePattern::TexturedPencil);
     float pForEval = m_evalConfig.dynamics.usePressure ? effectivePressure : -1.0f;
     float vForEval = m_evalConfig.dynamics.useVelocity
                          ? (m_evalConfig.dynamics.useAccelerationFiltering ? m_filteredSpeedMmPerSec : speed)
                          : 0.0f;
 
-    float dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidthWithTiltRad(
-        m_activeStyle.baseWidth, pForEval, vForEval, tiltRad,
-        previousWidth, m_zoomScale, m_evalConfig, isPencil, m_currentTurnAngleRad);
-
-    // Anisotropic nib width evaluation (calligraphy / chisel pen)
-    if (m_activeStyle.nibAspect < 0.999f && (res.velocity.x != 0.0f || res.velocity.y != 0.0f)) {
-        float travelHeading = std::atan2(static_cast<float>(res.velocity.y), static_cast<float>(res.velocity.x));
-        dynamicWidth *= StrokeWidthEvaluator::NibWidthFactor(travelHeading, m_activeStyle.nibAngleRad, m_activeStyle.nibAspect);
-    }
+    float dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidth(
+        m_activeStyle.baseWidth, pForEval, vForEval,
+        previousWidth, m_zoomScale, m_evalConfig, m_currentTurnAngleRad);
 
     return StrokePoint(res.position.x, res.position.y, dynamicWidth * 0.5f, effectivePressure, tiltX, tiltY, res.time.Value());
 }

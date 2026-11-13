@@ -20,8 +20,8 @@ graph TD
         J --> K[AndroidFrontBuffer: Direct Hardware Scanout]
     end
 
-    subgraph "Tier 3: inspector/ (Isolated Lab & Reference App)"
-        L[main_inspector.cpp] --> B
+    subgraph "Tier 3: inspectorV2.0/ (Isolated Lab & Reference App)"
+        L[main.cpp] --> B
         L --> I
         L --> K
     end
@@ -37,7 +37,7 @@ graph TD
 ## 1. The Three Tiers
 
 ### Tier 1: `folio_sketch` Core (Headless C++20 Library)
-- **Zero OS / Graphics Dependencies**: No OpenGL, GLES, Vulkan, Android NDK, or SDL headers in `include/folio_sketch/`.
+- **Zero OS / Graphics Dependencies**: No OpenGL, GLES, Vulkan, Android NDK, or SDL headers in `src/`.
 - **Pure Mathematics & Geometry**: Mass-spring ODE smoothing, Kalman tip lookahead prediction with distance-attenuated alpha fading, anisotropic calligraphy/chisel nib angle evaluation.
 - **Data Generation**: Generates 32-byte trivially copyable POD `CapsuleInstance` spans for GPU rasterizers and continuous cubic Bézier `InkPath` vector ribbons for static storage.
 
@@ -46,8 +46,8 @@ graph TD
 - **100% Pure C++**: Zero Java or Kotlin code, zero JNI bindings. Uses `ANativeWindow` and `EGL_FRONT_BUFFER_AUTO_REFRESH_ANDROID` on Android.
 - **GlCapsuleRenderer**: Standalone GLES 3.0 / GL 3.3 instanced Euclidean SDF quad renderer with persistent dynamic VBO streaming (`glBufferSubData`) and single-pass live wet stroke mode.
 
-### Tier 3: `inspector/` (Diagnostic Playground & Living Reference)
-- Isolated diagnostic tool and interactive playground (moved from `src/debug/`).
+### Tier 3: `inspectorV2.0/` (Diagnostic Playground & Living Reference)
+- Isolated diagnostic tool and interactive playground.
 - Exercises raw sensor telemetry, modeler curves, nib geometry, RDP post-processing simplification, hold-to-snap shapes, and front-buffer wet/dry presentation.
 
 ---
@@ -65,7 +65,6 @@ Host applications like **FolioNote** use a two-layer rendering model:
 
 | Directory | Layer | Description |
 | :--- | :--- | :--- |
-| [`include/folio_sketch/`](../include/folio_sketch/) | Core Public API | Headless C++20 API (`ink_engine.hpp`, `raw_input.hpp`, `ink_mesh.hpp`, etc.). |
-| [`src/`](../src/) | Core Implementation | Pure C++20 math, geometry, and mesh building (`engine/`, `geometry/`, `gpu/`, `mesh/`, `vector/`). |
+| [`src/`](../src/) | Core Implementation & Headers | Pure C++20 math, geometry, and mesh building (`core/`, `engine/`, `geometry/`, `gpu/`, `mesh/`, `vector/`). |
 | [`folio_backends/`](../folio_backends/) | Hardware Plugs | Hardware bypass backends (`common/gl_capsule_renderer`, `android/android_frontbuffer`). |
-| [`inspector/`](../inspector/) | Reference Playground | Standalone interactive inspector and testbench. |
+| [`inspectorV2.0/`](../inspectorV2.0/) | Reference Playground | Standalone interactive inspector and testbench. |

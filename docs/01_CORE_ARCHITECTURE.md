@@ -56,16 +56,19 @@
 
 ## Data Boundaries
 
-### Ingestion: `RawInputSample`
+### Ingestion: `StylusInputPoint`
 Hardware stylus and touch inputs are passed directly to `Folio::InkEngine` as raw physical measurements:
 ```cpp
-struct RawInputSample {
-    float xMm{0.0f};          // Physical horizontal coordinate in millimeters
-    float yMm{0.0f};          // Physical vertical coordinate in millimeters
-    float pressure{0.0f};     // Normalized stylus pressure in [0.0, 1.0]
-    float tiltRad{0.0f};      // Stylus tilt altitude angle in radians [0, pi/2]
-    float orientationRad{0.0f};// Stylus azimuth angle in radians [-pi, pi]
-    uint64_t timestampNs{0};  // Monotonic hardware timestamp in nanoseconds
+struct StylusInputPoint {
+    double  x            = 0.0;   // Physical horizontal coordinate in millimeters
+    double  y            = 0.0;   // Physical vertical coordinate in millimeters
+    float   pressure     = 1.0f;  // Normalized stylus pressure in [0.0, 1.0]
+    double  timeSeconds  = 0.0;   // Timestamp (seconds)
+    float   speed        = 0.0f;  // Speed (mm/s)
+    float   tiltX        = 0.0f;  // Stylus X tilt angle in radians
+    float   tiltY        = 0.0f;  // Stylus Y tilt angle in radians
+    int64_t timeNs       = 0;     // Hardware timestamp in nanoseconds
+    float   tiltRad      = 0.0f;  // Stylus tilt altitude in radians
 };
 ```
 Operating in physical millimeters (`mm`) guarantees that stroke width, smoothing, and physics remain invariant to screen DPI, pixel density, or display scaling.

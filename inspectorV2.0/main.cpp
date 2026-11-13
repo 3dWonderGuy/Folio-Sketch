@@ -16,7 +16,7 @@
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_opengl3.h>
 
-#include "inspector/gl_loader.hpp"
+#include "inspectorV2.0/gl_loader.hpp"
 #include "inspectorV2.0/app_brain.hpp"
 #include "inspectorV2.0/layer_manager.hpp"
 #include "inspectorV2.0/testbed/testbed_samples.hpp"

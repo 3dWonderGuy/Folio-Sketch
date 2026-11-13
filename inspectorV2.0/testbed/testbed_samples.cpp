@@ -17,7 +17,7 @@ void InjectTestScribble(LayerManager& layerManager) {
     samples.clear();
     for (int i = 0; i < 260; ++i) {
         const float t = static_cast<float>(i) * 0.045f;
-        Folio::RawInputSample s{};
+        Folio::StylusInputPoint s{};
         s.x = 520.0f + std::cos(t) * (140.0f + 18.0f * t) * 0.55f + std::sin(t * 2.3f) * 60.0f;
         s.y = 420.0f + std::sin(t * 1.15f) * 150.0f;
         s.pressure = 0.35f + 0.5f * (0.5f + 0.5f * std::sin(t * 0.8f));
@@ -35,7 +35,7 @@ void LoadRepro114(LayerManager& layerManager) {
         double x, y;
         float r, p, tilt, pad;
     } kRepro114Points[] = {
-#include "../../inspector/repro114.inc"
+#include "repro114.inc"
     };
 
     auto& samples = layerManager.GetMutableRawSamples();
@@ -43,7 +43,7 @@ void LoadRepro114(LayerManager& layerManager) {
     samples.reserve(sizeof(kRepro114Points) / sizeof(kRepro114Points[0]));
     double t = 0.0;
     for (const auto& pt : kRepro114Points) {
-        Folio::RawInputSample s{};
+        Folio::StylusInputPoint s{};
         s.x = pt.x;
         s.y = pt.y;
         s.pressure = (pt.p > 0.001f) ? pt.p : 1.0f;

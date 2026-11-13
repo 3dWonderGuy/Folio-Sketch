@@ -1,6 +1,6 @@
 # Computational Geometry & Mathematical Primitives
 
-The geometry subsystem ([`src/geometry/`](../src/geometry/) and [`include/folio_sketch/ink_stroke_data.hpp`](../include/folio_sketch/ink_stroke_data.hpp)) provides low-level mathematical primitives, vector algebra, segment tangent/normal computation, segment-segment intersection tests, swallowtail loop removal, and oriented nib models.
+The geometry subsystem ([`src/geometry/`](../src/geometry/) and [`src/core/ink_stroke_data.hpp`](../src/core/ink_stroke_data.hpp)) provides low-level mathematical primitives, vector algebra, segment tangent/normal computation, segment-segment intersection tests, swallowtail loop removal, and oriented nib models.
 
 ---
 

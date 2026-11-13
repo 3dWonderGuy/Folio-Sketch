@@ -10,20 +10,14 @@
 
 It transforms discrete, variable-radius, pressure- and tilt-modeled stroke centerlines into GPU Signed Distance Field (SDF) capsule instances (`CapsuleInstance`) and triangle meshes (`InkMesh`)-(**depreciated, not recommened**) for real-time hardware rasterization, as well as vector path contours (`InkPath`) with [ThorSVG](https://www.thorvg.org) integration for scalable export and rendering.
 
-
-This application consist of 3 major blocks:
-
+**This application consist of 3 major blocks:**
 * **Core** : The main library code, jusut pure C++ code taking care of sprin-mass system modeling, interpolation smoothign filtering tuning.
-* **Backends**: This is sort of shell add on specificaly made and tuned to allow applications to archive sub 5ms inking, your application will have to pass or even route rendering through this shell (main culprit behind latency is buffer swap this shell allows ink to redern into screen rigth up -> more in documentation)
+* **Backends**: This is sort of shell add on specificaly made and tuned to allow applications to archive sub 5ms inking, your application will have to pass or even route rendering through this shell (main culprit behind latency is buffer swap this shell allows ink to render into screen rigth up -> more in documentation)
 * **InspectorV2.0**: is a built in application that once imported into any application can be safely deleted, it is a debugger as well as a demo tool showing what this libary can do. Point behind this application is to show how this library is intented to be setup for multiplatfrom use and use of backends
 
 
 **From the Author:** I worked really hard to make this libray have best support for multiplatform applications it should provide equal experiance on any operating system (Android, IOS, Windows, Linux). I also tried to make its use as intuitive as possilbe so it should not take too long to connect it to your application. 
 I could not find a good multiplatfrom inking engine and usualy I had to rely on some type of framework, I wanted something very fast and efficient and able to acess raw hardware power of device and push inking latency to sub 5ms directly competing and even beating some consumer availble applications in quality and feel. I decided to bring something new to community and took on challange to creat high perfofrmance inking engine from scratch with good help of modern available tools. I hope this would be good addition to opensource community. Also I want to say thank to developers behind Rnote, ++Xjounral and google developers who opensourced the Cahier app and underlying libraries. Thank you for taking interest in my library I hope you find it useful
-
-
-
-
 
 
 ---

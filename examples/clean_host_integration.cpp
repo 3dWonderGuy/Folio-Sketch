@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <functional>
 #include <span>
-#include "folio_sketch/engine/ink_engine.hpp"
+#include "engine/ink_engine.hpp"
 #include "folio_backends/common/gl_capsule_renderer.hpp"
 
 namespace HostApp {
@@ -38,7 +38,7 @@ public:
         m_active = true;
         m_uploadedCount = 0;
 
-        Folio::RawInputSample sample{
+        Folio::StylusInputPoint sample{
             .x = xPx * m_pxToMm,
             .y = yPx * m_pxToMm,
             .pressure = pressure,
@@ -52,7 +52,7 @@ public:
                          const Folio::Backends::CanvasTransform& transform) {
         if (!m_active) return;
 
-        Folio::RawInputSample sample{
+        Folio::StylusInputPoint sample{
             .x = xPx * m_pxToMm,
             .y = yPx * m_pxToMm,
             .pressure = pressure,

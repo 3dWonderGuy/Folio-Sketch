@@ -1,6 +1,6 @@
 # Vector Ribbon & Infill Generator
 
-The vector generator ([`src/generator/`](../src/generator/) and [`include/folio_sketch/ink_generator.hpp`](../include/folio_sketch/ink_generator.hpp)) converts discrete modeled stroke points into continuous, clean 2D vector boundaries represented as [`InkPath`](../include/folio_sketch/ink_path.hpp) structures, ready for direct rendering or ThorSVG shape conversion.
+The vector generator ([`src/vector/`](../src/vector/) and [`src/vector/ink_generator.hpp`](../src/vector/ink_generator.hpp)) converts discrete modeled stroke points into continuous, clean 2D vector boundaries represented as [`InkPath`](../src/vector/ink_path.hpp) structures, ready for direct rendering or ThorSVG shape conversion.
 
 ---
 

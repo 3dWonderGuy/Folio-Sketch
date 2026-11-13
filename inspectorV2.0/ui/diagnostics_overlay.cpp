@@ -8,7 +8,7 @@
 #include "inspectorV2.0/ui/diagnostics_overlay.hpp"
 #include "inspectorV2.0/ui/inspector_gui.hpp"
 #include "inspectorV2.0/layer_manager.hpp"
-#include "folio_sketch/geometry/shape_recognizer.hpp"
+#include "engine/post_processing/shape_recognizer.hpp"
 #include <imgui.h>
 #include <algorithm>
 #include <cmath>

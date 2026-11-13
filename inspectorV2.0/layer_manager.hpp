@@ -20,8 +20,8 @@
 #include <functional>
 #include <memory>
 #include <imgui.h>
-#include "folio_sketch/engine/ink_engine.hpp"
-#include "folio_sketch/engine/brush_composer.hpp"
+#include "engine/ink_engine.hpp"
+#include "engine/brush/brush_composer.hpp"
 #include "folio_backends/common/gl_capsule_renderer.hpp"
 #include "inspectorV2.0/input_manager.hpp"
 #include "inspectorV2.0/ui/inspector_gui.hpp"
@@ -83,10 +83,10 @@ public:
     void RebuildDocumentCustomInstances();
 
     // Last Stroke Raw Samples and Debug Points
-    [[nodiscard]] const std::vector<Folio::RawInputSample>& GetLastRawSamples() const noexcept {
+    [[nodiscard]] const std::vector<Folio::StylusInputPoint>& GetLastRawSamples() const noexcept {
         return m_lastRawSamples;
     }
-    [[nodiscard]] std::vector<Folio::RawInputSample>& GetMutableRawSamples() noexcept {
+    [[nodiscard]] std::vector<Folio::StylusInputPoint>& GetMutableRawSamples() noexcept {
         return m_lastRawSamples;
     }
     [[nodiscard]] const std::vector<Folio::StrokePoint>& GetLastFinishedPoints() const noexcept {
@@ -172,7 +172,7 @@ private:
     float                               m_animationTimeSec = 0.0f;
 
     std::vector<DocumentStroke>         m_documentStrokes;
-    std::vector<Folio::RawInputSample>  m_lastRawSamples;
+    std::vector<Folio::StylusInputPoint>  m_lastRawSamples;
     std::vector<Folio::StrokePoint>     m_lastRawModeledPoints;
     std::vector<Folio::StrokePoint>     m_lastFinishedPoints;
 

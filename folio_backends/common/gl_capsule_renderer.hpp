@@ -15,8 +15,8 @@
 #include <vector>
 #include <cstdint>
 #include <cstddef>
-#include "folio_sketch/core/ink_stroke_data.hpp"
-#include "folio_sketch/gpu/ink_mesh.hpp"
+#include "core/ink_stroke_data.hpp"
+#include "pipelines/capsule/ink_capsule.hpp"
 
 #if __has_include(<imgui.h>)
 #include <imgui.h>

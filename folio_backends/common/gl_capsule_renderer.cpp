@@ -13,8 +13,8 @@
 #elif defined(_WIN32)
 #if __has_include("gl_loader.hpp")
 #include "gl_loader.hpp"
-#elif __has_include("inspector/gl_loader.hpp")
-#include "inspector/gl_loader.hpp"
+#elif __has_include("inspectorV2.0/gl_loader.hpp")
+#include "inspectorV2.0/gl_loader.hpp"
 #else
 #include <GL/gl.h>
 #endif

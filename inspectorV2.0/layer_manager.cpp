@@ -92,7 +92,7 @@ void LayerManager::InitInputRouting() {
         const float worldX = (pkt.x - m_canvasState.panX) / m_canvasState.zoom;
         const float worldY = (pkt.y - m_canvasState.panY) / m_canvasState.zoom;
 
-        Folio::RawInputSample sample{};
+        Folio::StylusInputPoint sample{};
         sample.x = worldX;
         sample.y = worldY;
         sample.pressure = pkt.pressure;
@@ -118,7 +118,7 @@ void LayerManager::InitInputRouting() {
         const float worldX = (pkt.x - m_canvasState.panX) / m_canvasState.zoom;
         const float worldY = (pkt.y - m_canvasState.panY) / m_canvasState.zoom;
 
-        Folio::RawInputSample sample{};
+        Folio::StylusInputPoint sample{};
         sample.x = worldX;
         sample.y = worldY;
         sample.pressure = pkt.pressure;

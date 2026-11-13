@@ -16,7 +16,7 @@
 #include <cstdint>
 #include <functional>
 #include <unordered_map>
-#include "folio_sketch/core/raw_input.hpp"
+#include "core/ink_stroke_data.hpp"
 #include "folio_backends/common/gl_capsule_renderer.hpp"
 
 namespace Folio::V2 {

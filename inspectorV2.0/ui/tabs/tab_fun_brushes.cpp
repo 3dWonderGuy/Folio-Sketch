@@ -7,7 +7,7 @@
 
 #include "inspectorV2.0/ui/inspector_gui.hpp"
 #include "inspectorV2.0/layer_manager.hpp"
-#include "folio_sketch/engine/brush_composer.hpp"
+#include "engine/brush/brush_composer.hpp"
 #include <imgui.h>
 #include <vector>
 #include <string>
