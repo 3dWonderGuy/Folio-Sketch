@@ -5,7 +5,7 @@
  * @brief Physics Engine Bridge: Google Ink Stroke Modeler Integration
  * =========================================================================================
  *
- * Encapsulates the Google Ink Stroke Modeler spring-mass-damper physics engine.
+ * Basicaly a guy doing talking between our google-ink-stroke-modeler and folio engine.
  * Converts raw hardware digitizer telemetry (position, pressure, tilt) into physical
  * inputs, applies configuration parameters (mass, drag, wobble filters), and computes
  * smoothed centerline points and forward Kalman predictions.
@@ -18,14 +18,17 @@
 
 // Forward declaration of Google Ink Stroke Modeler classes
 namespace ink::stroke_model {
+
     class StrokeModeler;
     struct Result;
+
 }
 
 namespace Folio {
 
 class InkPhysicsBridge {
 public:
+
     InkPhysicsBridge();
     ~InkPhysicsBridge();
 
@@ -63,6 +66,7 @@ public:
     bool Predict(std::vector<ink::stroke_model::Result>& outPredictions);
 
 private:
+    // smart pointer to Google Ink Stroke Modeler instance
     std::unique_ptr<ink::stroke_model::StrokeModeler> m_modeler;
 };
 

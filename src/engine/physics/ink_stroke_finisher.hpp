@@ -7,7 +7,8 @@
  *
  * Implements the completion stage of a stroke gesture:
  * 1. Single-tap / click edge-case handling (synthesizing a circular dot if stationary).
- * 2. Optional flick tail-tapering (smoothly tapering stroke release).
+ * 2. Optional flick tail-tapering (smoothly tapering stroke release, importnat on high latency
+ *   stylus devices to avoid abrupt stroke termination).
  * 3. Swept segment generation for distance hit-testing and point-based eraser tools.
  */
 
@@ -19,6 +20,7 @@ namespace Folio {
 
 class InkStrokeFinisher {
 public:
+
     /**
      * @brief Ensures a tap/click produces a visible dot if the tremor filter swallowed lateral motion.
      */

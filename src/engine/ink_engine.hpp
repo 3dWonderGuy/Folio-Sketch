@@ -34,15 +34,13 @@ class InkPhysicsBridge;
 
 /**
  * @struct FinishedStrokeData
- * @brief Completed inking stroke container encapsulating collision segments, modeled centerline,
- *        GPU capsule instances, and 2D vector outline polygon.
+ * @brief Completed inking stroke container encapsulating collision segments and modeled centerline.
+ *        Rendering geometry (capsules, vector outlines, raster dabs) is built on demand.
  */
 struct FinishedStrokeData {
     std::vector<Segment1D>       liveSegments;
     std::vector<StrokePoint>     rawModeledPoints; ///< Modeler points before simplification / Gaussian smoothing
     std::vector<StrokePoint>     modeledPoints;    ///< Post-processed centerline points
-    std::vector<CapsuleInstance> capsules;
-    InkPath                      outlinePath;
 
     FinishedStrokeData() = default;
 };

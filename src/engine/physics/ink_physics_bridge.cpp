@@ -27,6 +27,7 @@ namespace {
  * Converts physical mm coordinates, time, pressure, and calculates polar tilt/orientation.
  */
 sm::Input MakeGoogleInput(sm::Input::EventType type, const StylusInputPoint& pt) {
+        
     sm::Input input;
     input.event_type = type;
     input.position = { static_cast<float>(pt.x), static_cast<float>(pt.y) };

@@ -6,7 +6,7 @@
  */
 
 #include "engine/ink_engine.hpp"
-#include "engine/dynamics/stroke_width_evaluator.hpp"
+#include "engine/stylus_dynamics.hpp"
 #include "engine/post_processing/stroke_post_processor.hpp"
 #include "engine/physics/ink_physics_bridge.hpp"
 #include "engine/physics/ink_stroke_finisher.hpp"
@@ -136,7 +136,7 @@ void InkEngine::AppendPoint(double worldX, double worldY, float pressure, double
 
     // 2. Filter speed using physical acceleration/deceleration constraints
     if (m_evalConfig.dynamics.useAccelerationFiltering) {
-        m_filteredSpeedMmPerSec = StrokeWidthEvaluator::VelocityNoiseFilter(
+        m_filteredSpeedMmPerSec = StylusDynamics::FilterVelocity(
             rawSpeed,
             m_filteredSpeedMmPerSec,
             dt,
@@ -209,14 +209,6 @@ FinishedStrokeData InkEngine::FinishStroke() {
     data.rawModeledPoints = std::move(rawPointsBeforePost);
     data.modeledPoints = m_liveModeledPoints;
     data.liveSegments  = InkStrokeFinisher::BuildCollisionSegments(m_liveModeledPoints);
-
-    // Build GPU capsules
-    CapsuleBuilder::BuildCapsuleInstances(
-        m_liveModeledPoints, PackPremultipliedGpuColor(m_activeStyle.color), data.capsules);
-
-    // Build 2D vector outline for SVG / Clipboard / PDF export
-    data.outlinePath = InkGenerator::GenerateStroke(
-        m_liveModeledPoints, CapType::Round, m_activeStyle.pattern);
 
     // Stage 6: Reset active state for next stroke
     CancelStroke();
@@ -391,16 +383,18 @@ void InkEngine::EnsurePrediction() const {
 // -----------------------------------------------------------------------------
 
 float InkEngine::EvaluateTapWidth(float pressure, float /*tiltX*/, float /*tiltY*/) const noexcept {
-    float pForEval = m_evalConfig.dynamics.usePressure ? pressure : -1.0f;
-    float w = StrokeWidthEvaluator::CalculateDynamicWidth(
-        m_activeStyle.baseWidth, pForEval, 0.0f, -1.0f, m_zoomScale, m_evalConfig);
-    return w;
+    if (!m_evalConfig.dynamics.usePressure || pressure < 0.0f) {
+        return m_activeStyle.baseWidth;
+    }
+    float p = StylusDynamics::EvaluatePressure(pressure, m_evalConfig);
+    float minFrac = std::min(m_evalConfig.dynamics.minWidthMultiplier, m_evalConfig.dynamics.maxWidthMultiplier);
+    float maxFrac = std::max(m_evalConfig.dynamics.minWidthMultiplier, m_evalConfig.dynamics.maxWidthMultiplier);
+    return m_activeStyle.baseWidth * std::clamp(minFrac + p * (maxFrac - minFrac), minFrac, maxFrac);
 }
 
 StrokePoint InkEngine::ToStrokePoint(const sm::Result& res, float previousWidth, float dt) const {
-    float speed = (res.velocity.x != 0.0f || res.velocity.y != 0.0f)
-                      ? std::hypot(res.velocity.x, res.velocity.y)
-                      : 0.0f;
+    (void)previousWidth;
+    (void)dt;
     float tiltRad = (res.tilt >= 0.0f) ? res.tilt : 0.0f;
     float tiltX = 0.0f;
     float tiltY = 0.0f;
@@ -409,15 +403,7 @@ StrokePoint InkEngine::ToStrokePoint(const sm::Result& res, float previousWidth,
         tiltY = tiltRad * std::sin(res.orientation);
     }
     float effectivePressure = (res.pressure >= 0.0f) ? res.pressure : 0.65f;
-
-    float pForEval = m_evalConfig.dynamics.usePressure ? effectivePressure : -1.0f;
-    float vForEval = m_evalConfig.dynamics.useVelocity
-                         ? (m_evalConfig.dynamics.useAccelerationFiltering ? m_filteredSpeedMmPerSec : speed)
-                         : 0.0f;
-
-    float dynamicWidth = StrokeWidthEvaluator::CalculateDynamicWidth(
-        m_activeStyle.baseWidth, pForEval, vForEval,
-        previousWidth, m_zoomScale, m_evalConfig, m_currentTurnAngleRad, dt);
+    float dynamicWidth = EvaluateTapWidth(effectivePressure, tiltX, tiltY);
 
     return StrokePoint(res.position.x, res.position.y, dynamicWidth * 0.5f, effectivePressure, tiltX, tiltY, res.time.Value());
 }
@@ -439,7 +425,7 @@ void InkEngine::ProcessPhysicsResults(const std::vector<sm::Result>& results) {
 
         // 2. Filter speed with acceleration limits on the modeled path
         if (m_evalConfig.dynamics.useAccelerationFiltering) {
-            m_filteredSpeedMmPerSec = StrokeWidthEvaluator::VelocityNoiseFilter(
+            m_filteredSpeedMmPerSec = StylusDynamics::FilterVelocity(
                 resSpeed,
                 m_filteredSpeedMmPerSec,
                 dt,
@@ -478,7 +464,7 @@ void InkEngine::ProcessPhysicsResults(const std::vector<sm::Result>& results) {
         if (m_evalConfig.dynamics.enableSpatialSlopeClamping && !m_liveModeledPoints.empty()) {
             float ds = static_cast<float>(std::hypot(pt.x - m_liveModeledPoints.back().x,
                                                      pt.y - m_liveModeledPoints.back().y));
-            pt.r = StrokeWidthEvaluator::ClampSpatialRadiusSlope(
+            pt.r = StylusDynamics::ClampSpatialSlope(
                 pt.r,
                 m_liveModeledPoints.back().r,
                 ds,
