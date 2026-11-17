@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "_deps/abseil-cpp-build/absl/container",
+		"source" : "/home/odysseus/Documents/GitHub/FolioNote/third_party/abseil-cpp/absl/container"
+	}
+}

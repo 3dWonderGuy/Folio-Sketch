@@ -1,0 +1,90 @@
+name: Folio-Sketch Nightly
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Every night at 02:00 UTC
+  workflow_dispatch:
+
+jobs:
+  nightly-build:
+    name: Build & Publish Nightly (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            os: ubuntu-24.04
+          - platform: windows-x64
+            os: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install System Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build build-essential \
+            libgl1-mesa-dev libglu1-mesa-dev libasound2-dev libpulse-dev \
+            libudev-dev libevdev-dev libx11-dev libxcursor-dev libxinerama-dev \
+            libxi-dev libxrandr-dev libxss-dev libxxf86vm-dev libwayland-dev \
+            libxkbcommon-dev libdrm-dev libgbm-dev libxtst-dev
+
+      - name: Setup Ninja (Windows)
+        if: runner.os == 'Windows'
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      - name: Configure & Compile (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFOLIO_SKETCH_STANDALONE=ON -DFOLIO_SKETCH_BUILD_INSPECTOR=ON
+          cmake --build build --config Release
+          tar -czvf folio-sketch-nightly-linux-x86_64.tar.gz -C build folio_ink_inspector libFolioSketch.a
+
+      - name: Configure & Compile (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFOLIO_SKETCH_STANDALONE=ON -DFOLIO_SKETCH_BUILD_INSPECTOR=ON
+          cmake --build build --config Release
+          powershell Compress-Archive -Path build\folio_ink_inspector.exe, build\FolioSketch.lib -DestinationPath folio-sketch-nightly-windows-x64.zip
+
+      - name: Upload Nightly Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: folio-sketch-nightly-${{ matrix.platform }}
+          path: |
+            folio-sketch-nightly-linux-x86_64.tar.gz
+            folio-sketch-nightly-windows-x64.zip
+
+  publish-nightly:
+    name: Publish Nightly Pre-release
+    needs: nightly-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: nightly-artifacts
+
+      - name: Prepare Nightly Release Assets
+        run: |
+          mkdir -p dist
+          find nightly-artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} dist/ \;
+
+      - name: Create or Update Nightly Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "Folio-Sketch Nightly Build"
+          body: "Automated nightly rolling build of Folio-Sketch core libraries and inspector."
+          prerelease: true
+          files: dist/*
