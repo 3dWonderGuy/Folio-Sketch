@@ -82,6 +82,7 @@ public:
     static BrushRecipe CreateFountain();
     static BrushRecipe CreateHighlighter();
     static BrushRecipe CreatePencil();
+    static BrushRecipe CreateCalligraphy();
 
     /**
      * @brief Delegates recipe synthesis to CapsuleBuilder for callers using BrushComposer.

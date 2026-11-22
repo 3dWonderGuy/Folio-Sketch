@@ -289,6 +289,7 @@ float ModulatorEvaluator::GetSourceValue(ModulatorSource src, const PointContext
         case ModulatorSource::TimeSeconds:        return ctx.timeSeconds;
         case ModulatorSource::TimeSinceInput:     return ctx.timeSinceInput;
         case ModulatorSource::TimeSinceStrokeEnd: return ctx.timeSinceStrokeEnd;
+        case ModulatorSource::InkFlow:            return ctx.inkFlow;
     }
     return 0.0f;
 }

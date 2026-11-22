@@ -499,6 +499,18 @@ void InkEngine::ProcessPhysicsResults(const std::vector<sm::Result>& results) {
         }
 
         StrokePoint pt = ToStrokePoint(res);
+        pt.speed = m_filteredSpeedMmPerSec;
+
+        // 3.5 Apply ink flow modulation (velocity thinning + corner anti-bloat + dwell) if velocity enabled
+        if (m_evalConfig.dynamics.useVelocity) {
+            float flow = StylusDynamics::SimulateInkFlow(
+                m_filteredSpeedMmPerSec,
+                m_currentTurnAngleRad,
+                m_zoomScale,
+                m_evalConfig,
+                dt);
+            pt.r *= flow;
+        }
 
         // 4. Clamp spatial radius slope (dr/ds) against previous point to prevent bloat during slow movements
         if (m_evalConfig.dynamics.enableSpatialSlopeClamping && !m_liveModeledPoints.empty()) {

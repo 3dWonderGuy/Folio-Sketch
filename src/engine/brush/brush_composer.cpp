@@ -61,7 +61,7 @@ BrushRecipe BrushComposer::RecipeFromStyle(const StrokeStyle& style) {
         primary.BindPressureToWidth(0.2f, 1.5f);
     }
     if (style.useVelocity) {
-        primary.BindVelocityToWidth(0.3f, 1500.0f);
+        primary.BindFlowToWidth(0.3f, 1.0f);
     }
     if (style.useTilt) {
         primary.BindTiltToWidth(1.0f, 2.8f);

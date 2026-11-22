@@ -29,6 +29,8 @@ struct PointContext {
     float timeSinceInput     = 0.0f; // Elapsed time since last input sample (s)
     float timeSinceStrokeEnd = 0.0f; // Elapsed time since pointer lift (s)
     float baseWidth          = 0.5f; // Brush base width (mm)
+    float inkFlow            = 1.0f; // Hydrodynamic flow factor (anti-blobbing, corner & velocity compensated)
+    float turnAngleRad       = 0.0f; // Angular turn delta across this segment (radians)
 };
 
 /**

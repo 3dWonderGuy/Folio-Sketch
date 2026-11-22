@@ -9,6 +9,9 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(MSVC)
     set(CMAKE_OBJECT_PATH_MAX 1024)
+    # Statically link MSVC C/C++ runtime (/MT in Release, /MTd in Debug)
+    # This prevents 'VCRUNTIME140.dll / MSVCP140.dll missing' errors on target machines
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     add_compile_options(/FS /bigobj /utf-8 /MP)
     add_compile_definitions(
         NOMINMAX

@@ -145,6 +145,100 @@ public:
     }
 
     /**
+     * @brief Computes velocity thinning multiplier (hydrodynamic fountain pen simulation).
+     * @param speedMmPerSec Pen speed in mm/s.
+     * @param zoomScale Viewport zoom scale.
+     * @param config Active inking configuration.
+     * @return Thinning factor in [minWidthMultiplier, 1.0].
+     */
+    [[nodiscard]] static float ComputeVelocityThinning(float speedMmPerSec,
+                                                       float zoomScale,
+                                                       const InkingConfig& config) noexcept {
+        if (!config.dynamics.useVelocity || speedMmPerSec <= 0.0f) {
+            return 1.0f;
+        }
+
+        float speed = speedMmPerSec * zoomScale;
+        float maxSpeed = std::max(1.0f, config.dynamics.velocityThinningMaxSpeed);
+        float normalizedSpeed = std::clamp(speed / maxSpeed, 0.0f, 1.0f);
+        float minThin = std::clamp(config.dynamics.minWidthMultiplier, 0.01f, 1.0f);
+        return 1.0f - normalizedSpeed * (1.0f - minThin);
+    }
+
+    /**
+     * @brief Evaluates dynamic ink flow modulation from motion velocity, corner turn dynamics, and dwell time.
+     *
+     * Anti-blobbing / ink flow simulation pipeline:
+     * 1. Corner turn compensation: Prevents momentary direction reversal slowdowns from bloating vertices.
+     * 2. Base hydrodynamic speed thinning: Starvation thinning at high pen velocities.
+     * 3. Time dwell accumulation: If timeDwellMultiplier > 0, dwell time increases flow (Mode B: spray/bleed).
+     *
+     * @param filteredSpeedMmPerSec Inertially filtered pen speed (mm/s).
+     * @param turnAngleRad Angular turn delta between consecutive segments in radians [0, pi].
+     * @param zoomScale Canvas viewport zoom scale.
+     * @param config Active inking configuration.
+     * @param dt Elapsed time interval (seconds) since last sample.
+     * @return Dynamic ink flow factor.
+     */
+    [[nodiscard]] static float SimulateInkFlow(float filteredSpeedMmPerSec,
+                                               float turnAngleRad,
+                                               float zoomScale,
+                                               const InkingConfig& config,
+                                               float dt = 0.0f) noexcept {
+        if (!config.dynamics.useVelocity && config.dynamics.timeDwellMultiplier <= 0.0f) {
+            return 1.0f;
+        }
+
+        float effectiveSpeed = filteredSpeedMmPerSec;
+
+        // 1. Corner turn-rate compensation (prevents false slowdowns from bloating sharp corners)
+        if (config.dynamics.useCornerCompensation &&
+            turnAngleRad > config.dynamics.cornerCompensationThresholdRad) {
+            float maxSpeed = std::max(1.0f, config.dynamics.velocityThinningMaxSpeed);
+            float cruisingSpeed = 0.4f * maxSpeed;
+
+            constexpr float kPi = std::numbers::pi_v<float>;
+            float denom = std::max(1e-4f, kPi - config.dynamics.cornerCompensationThresholdRad);
+            float t = std::clamp((turnAngleRad - config.dynamics.cornerCompensationThresholdRad) / denom, 0.0f, 1.0f);
+            float smoothT = t * t * (3.0f - 2.0f * t);
+            effectiveSpeed = std::max(effectiveSpeed, std::lerp(effectiveSpeed, cruisingSpeed, smoothT));
+        }
+
+        // 2. Base hydrodynamic speed factor (fountain pen starvation thinning at high speeds)
+        float modFactor = ComputeVelocityThinning(effectiveSpeed, zoomScale, config);
+
+        // 3. Optional Time-Dwell Accumulator (Mode A vs Mode B)
+        // - timeDwellMultiplier == 0.0f (Mode A: Note-Taking): Time has zero effect (stationary locked).
+        // - timeDwellMultiplier  > 0.0f (Mode B: Spray/Bleed): Low-speed dwell accumulates ink over dt.
+        if (config.dynamics.timeDwellMultiplier > 0.0f && dt > 0.0f) {
+            float maxSpeed = std::max(1.0f, config.dynamics.velocityThinningMaxSpeed);
+            float stationaryWeight = 1.0f - std::clamp(effectiveSpeed / maxSpeed, 0.0f, 1.0f);
+            float dwellGrowth = config.dynamics.timeDwellMultiplier * dt * stationaryWeight;
+            modFactor += dwellGrowth;
+        }
+
+        return modFactor;
+    }
+
+    /**
+     * @brief Computes directional thinning factor for chisel/calligraphy blades.
+     * @param travelHeadingRad Instantaneous direction of stroke motion in radians.
+     * @param nibAngleRad Fixed orientation angle of the chisel blade in radians.
+     * @param aspect Ratio of minor-to-major axis (e.g. 0.1 for sharp calligraphy, 1.0 for round).
+     * @return Directional width multiplier in [aspect, 1.0].
+     */
+    [[nodiscard]] static float DirectionThinner(float travelHeadingRad,
+                                                float nibAngleRad,
+                                                float aspect) noexcept {
+        if (aspect >= 0.999f) return 1.0f;
+        const float a = aspect < 0.02f ? 0.02f : aspect;
+        const float th = travelHeadingRad - nibAngleRad;
+        const float s = std::sin(th);
+        const float c = std::cos(th);
+        return std::sqrt(s * s + a * a * c * c);
+    }
+
+    /**
      * @brief Clamps spatial slope (dv/ds) to prevent a stroke attribute from changing too abruptly over arc length.
      * @param targetValue Unconstrained target value (e.g., radius in mm, opacity).
      * @param previousValue Value at the previous modeled point.

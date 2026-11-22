@@ -25,6 +25,7 @@ enum class BrushPreset : uint8_t {
     FountainPen,
     Highlighter,
     Pencil,
+    CalligraphyChisel,
     WetPaint,
     Graffiti,
     HolidayLights,
@@ -110,7 +111,8 @@ enum class ModulatorSource : uint8_t {
     TimeSeconds        = 8,  ///< Global elapsed time (seconds)
     TimeSinceInput     = 9,  ///< Age of point since stylus input
     TimeSinceStrokeEnd = 10, ///< Elapsed time since stroke finished (seconds)
-    DistanceRemaining  = 11  ///< Distance from current point to end of stroke (mm)
+    DistanceRemaining  = 11, ///< Distance from current point to end of stroke (mm)
+    InkFlow            = 12  ///< Dynamic hydrodynamic ink flow factor [0.0, 1.0+] (velocity & corner compensated)
 };
 
 enum class ModulatorWaveform : uint8_t {
@@ -385,6 +387,39 @@ struct BrushCoatSpec {
             1.0f / std::max(maxSpeedMmPerSec, 1.0f)
         );
     }
+
+    BrushCoatSpec& BindFlowToWidth(float minScale = 0.2f, float maxScale = 1.0f) {
+        return Bind(
+            ModulatorSource::InkFlow,
+            ModulatorTarget::RadiusScale,
+            ModulatorWaveform::Linear,
+            minScale,
+            maxScale - minScale,
+            1.0f
+        );
+    }
+
+    BrushCoatSpec& BindFlowToOpacity(float minOpacity = 0.2f, float maxOpacity = 1.0f) {
+        return Bind(
+            ModulatorSource::InkFlow,
+            ModulatorTarget::OpacityScale,
+            ModulatorWaveform::Linear,
+            minOpacity,
+            maxOpacity - minOpacity,
+            1.0f
+        );
+    }
+
+    BrushCoatSpec& BindFlowToLightness(float deltaLightnessAtMinFlow = -0.3f) {
+        return Bind(
+            ModulatorSource::InkFlow,
+            ModulatorTarget::LightnessShift,
+            ModulatorWaveform::Linear,
+            deltaLightnessAtMinFlow,
+            -deltaLightnessAtMinFlow,
+            1.0f
+        );
+    }
 };
 
 // =============================================================================
@@ -494,6 +529,18 @@ struct BrushRecipe {
     BrushRecipe& BindVelocityToWidth(float minScale = 0.3f, float maxSpeedMmPerSec = 1500.0f) {
         EnsureBaseCoat();
         coats.front().BindVelocityToWidth(minScale, maxSpeedMmPerSec);
+        return *this;
+    }
+
+    BrushRecipe& BindFlowToWidth(float minScale = 0.2f, float maxScale = 1.0f) {
+        EnsureBaseCoat();
+        coats.front().BindFlowToWidth(minScale, maxScale);
+        return *this;
+    }
+
+    BrushRecipe& BindFlowToOpacity(float minOpacity = 0.2f, float maxOpacity = 1.0f) {
+        EnsureBaseCoat();
+        coats.front().BindFlowToOpacity(minOpacity, maxOpacity);
         return *this;
     }
 };

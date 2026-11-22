@@ -249,7 +249,9 @@ std::vector<BrushRecipe> BrushComposer::CreateFolioPresets() {
         r.description = "Pressure and speed sensitive line: thick when slow, thin when fast.";
         r.usePressure = true;
         r.useVelocity = true;
-        r.AddCoat("Nib", CoatRole::BasePigment, 0.80f);
+        r.AddCoat("Nib", CoatRole::BasePigment, 0.80f)
+         .BindPressureToWidth(0.3f, 1.4f)
+         .BindFlowToWidth(0.35f, 1.0f);
         presets.push_back(r);
     }
     {
@@ -417,9 +419,10 @@ BrushRecipe BrushComposer::GetPresetRecipe(BrushPreset preset) {
         case BrushPreset::BallpointPen:  return findByName("Ballpoint Pen");
         case BrushPreset::Marker:        return findByName("Marker");
         case BrushPreset::FountainPen:   return findByName("Fountain Pen");
-        case BrushPreset::Highlighter:   return findByName("Highlighter");
-        case BrushPreset::Pencil:        return findByName("Shading Pencil");
-        case BrushPreset::WetPaint:      return findByName("Wet Paint (Gravity Drips)");
+        case BrushPreset::Highlighter:       return findByName("Highlighter");
+        case BrushPreset::Pencil:            return findByName("Shading Pencil");
+        case BrushPreset::CalligraphyChisel: return findByName("Calligraphy Chisel");
+        case BrushPreset::WetPaint:          return findByName("Wet Paint (Gravity Drips)");
         case BrushPreset::Graffiti:      return findByName("Graffiti Spray");
         case BrushPreset::HolidayLights: return findByName("Holiday Lights");
         case BrushPreset::TwistedYarn:   return findByName("Twisted Yarn");
@@ -439,5 +442,6 @@ BrushRecipe BrushComposer::CreateMarker() { return GetPresetRecipe(BrushPreset::
 BrushRecipe BrushComposer::CreateFountain() { return GetPresetRecipe(BrushPreset::FountainPen); }
 BrushRecipe BrushComposer::CreateHighlighter() { return GetPresetRecipe(BrushPreset::Highlighter); }
 BrushRecipe BrushComposer::CreatePencil() { return GetPresetRecipe(BrushPreset::Pencil); }
+BrushRecipe BrushComposer::CreateCalligraphy() { return GetPresetRecipe(BrushPreset::CalligraphyChisel); }
 
 } // namespace Folio

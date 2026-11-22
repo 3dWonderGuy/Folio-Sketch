@@ -39,6 +39,8 @@ jobs:
           mkdir release-windows
           copy build\folio_ink_inspector.exe release-windows\FolioInkInspector.exe
           copy build\FolioSketch.lib release-windows\
+          if exist build\*.dll copy build\*.dll release-windows\
+          for /R build %%f in (*.dll) do copy "%%f" release-windows\
           powershell Compress-Archive -Path release-windows\* -DestinationPath FolioSketch-Windows-x64-${{ github.ref_name }}.zip
 
       - name: Upload Windows Asset

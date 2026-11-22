@@ -104,6 +104,9 @@ void CapsuleBuilder::BuildRecipeInstances(
     // 1. Arc length, normal, and telemetry pre-pass
     std::vector<float> arcLengths(N, 0.0f);
     std::vector<float> pIntegrals(N, 0.0f);
+    std::vector<float> speeds(N, 0.0f);
+    std::vector<float> turnAngles(N, 0.0f);
+    std::vector<float> flows(N, 1.0f);
     std::vector<CapsuleVec2> normals(N);
     std::vector<CapsuleVec2> tangents(N);
 
@@ -121,6 +124,10 @@ void CapsuleBuilder::BuildRecipeInstances(
         curPIntegral += avgP * segLen;
         pIntegrals[i] = curPIntegral;
 
+        double dt = points[i].timestampSec - points[i - 1].timestampSec;
+        float segSpeed = (dt > 1e-5) ? static_cast<float>(segLen / dt) : points[i].speed;
+        speeds[i] = (segSpeed > 0.0f) ? segSpeed : points[i].speed;
+
         if (segLen > 1e-5f) {
             tangents[i - 1] = { dx / segLen, dy / segLen };
             normals[i - 1]  = { -dy / segLen, dx / segLen };
@@ -128,9 +135,23 @@ void CapsuleBuilder::BuildRecipeInstances(
             tangents[i - 1] = { 1.0f, 0.0f };
             normals[i - 1]  = { 0.0f, 1.0f };
         }
+
+        if (i >= 2) {
+            float dot = tangents[i - 1].x * tangents[i - 2].x + tangents[i - 1].y * tangents[i - 2].y;
+            dot = std::clamp(dot, -1.0f, 1.0f);
+            turnAngles[i - 1] = std::acos(dot);
+        }
+
+        // Flow factor calculation: higher speed -> hydrodynamic thinning
+        float maxSpd = 1500.0f;
+        float normSpeed = std::clamp(speeds[i] / maxSpd, 0.0f, 1.0f);
+        flows[i] = 1.0f - normSpeed * 0.7f;
     }
     tangents[N - 1] = tangents[N - 2];
     normals[N - 1]  = normals[N - 2];
+    speeds[0]       = speeds[1];
+    flows[0]        = flows[1];
+    turnAngles[N - 1] = turnAngles[N - 2];
 
     const float invTotalLen = (totalLen > 1e-4f) ? (1.0f / totalLen) : 0.0f;
     const float timeSeconds = static_cast<float>(currentTimeSec);
@@ -202,18 +223,20 @@ void CapsuleBuilder::BuildRecipeInstances(
                 const auto& ptB = points[i + 1];
 
                 PointContext ctxA{
-                    arcLengths[i], totalLen - arcLengths[i], ptA.pressure, pIntegrals[i], 0.0f,
+                    arcLengths[i], totalLen - arcLengths[i], ptA.pressure, pIntegrals[i], speeds[i],
                     std::sqrt(ptA.tiltX * ptA.tiltX + ptA.tiltY * ptA.tiltY),
                     std::atan2(tangents[i].y, tangents[i].x),
                     arcLengths[i] * invTotalLen,
-                    0.0f, timeSeconds, ageOf(ptA.timestampSec), tEnd, baseWidth
+                    0.0f, timeSeconds, ageOf(ptA.timestampSec), tEnd, baseWidth,
+                    flows[i], turnAngles[i]
                 };
                 PointContext ctxB{
-                    arcLengths[i + 1], totalLen - arcLengths[i + 1], ptB.pressure, pIntegrals[i + 1], 0.0f,
+                    arcLengths[i + 1], totalLen - arcLengths[i + 1], ptB.pressure, pIntegrals[i + 1], speeds[i + 1],
                     std::sqrt(ptB.tiltX * ptB.tiltX + ptB.tiltY * ptB.tiltY),
                     std::atan2(tangents[i + 1].y, tangents[i + 1].x),
                     arcLengths[i + 1] * invTotalLen,
-                    0.0f, timeSeconds, ageOf(ptB.timestampSec), tEnd, baseWidth
+                    0.0f, timeSeconds, ageOf(ptB.timestampSec), tEnd, baseWidth,
+                    flows[i + 1], turnAngles[i + 1]
                 };
 
                 EvaluatedMods modA = ModulatorEvaluator::EvaluateCoatModulators(coat, ctxA, baseWidth);
@@ -283,14 +306,18 @@ void CapsuleBuilder::BuildRecipeInstances(
                 };
                 CapsuleVec2 norm{ -tan.y, tan.x };
 
+                float ptSpeed = speeds[segIdx] + (speeds[segIdx + 1] - speeds[segIdx]) * t;
+                float ptFlow  = flows[segIdx] + (flows[segIdx + 1] - flows[segIdx]) * t;
+
                 PointContext ctx{
-                    s, totalLen - s, pp, pInteg, 0.0f, 0.0f,
+                    s, totalLen - s, pp, pInteg, ptSpeed, 0.0f,
                     std::atan2(tan.y, tan.x),
                     s * invTotalLen,
                     static_cast<float>(pIdx),
                     timeSeconds,
                     ageOf(ptA.timestampSec + (ptB.timestampSec - ptA.timestampSec) * t),
-                    tEnd, baseWidth
+                    tEnd, baseWidth,
+                    ptFlow, turnAngles[segIdx]
                 };
 
                 EvaluatedMods mod = ModulatorEvaluator::EvaluateCoatModulators(coat, ctx, baseWidth);
