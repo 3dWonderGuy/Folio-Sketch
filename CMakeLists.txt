@@ -19,6 +19,10 @@ if(MSVC)
         _CRT_SECURE_NO_WARNINGS
         _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS
     )
+elseif(WIN32 AND MINGW)
+    # Statically link libgcc, libstdc++, and winpthread to prevent
+    # 'libgcc_s_seh-1.dll / libstdc++-6.dll / libwinpthread-1.dll not found' errors
+    add_link_options(-static -static-libgcc -static-libstdc++)
 endif()
 
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
