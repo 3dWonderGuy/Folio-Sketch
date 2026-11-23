@@ -382,10 +382,21 @@ void LayerManager::EnsureImGui(int vpWidth, int vpHeight, bool isSdlHost) {
     }
 }
 
+/**
+ * @brief Safely shuts down the ImGui OpenGL3 backend and context if active.
+ * 
+ * Verifies that the ImGui context exists and that the OpenGL3 renderer backend
+ * has not already been shut down before calling ImGui_ImplOpenGL3_Shutdown()
+ * to prevent assertion failures (IM_ASSERT(bd != nullptr)) on shutdown/exit.
+ */
 void LayerManager::ShutdownImGui() {
     if (m_imguiInitialized) {
-        ImGui_ImplOpenGL3_Shutdown();
         if (ImGui::GetCurrentContext() != nullptr) {
+            ImGuiIO& io = ImGui::GetIO();
+            // Only shutdown OpenGL3 backend if it is still registered and active
+            if (io.BackendRendererUserData != nullptr) {
+                ImGui_ImplOpenGL3_Shutdown();
+            }
             ImGui::DestroyContext();
         }
         m_imguiInitialized = false;
