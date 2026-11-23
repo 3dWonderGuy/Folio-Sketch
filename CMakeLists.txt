@@ -11,7 +11,9 @@ if(MSVC)
     set(CMAKE_OBJECT_PATH_MAX 1024)
     # Statically link MSVC C/C++ runtime (/MT in Release, /MTd in Debug)
     # This prevents 'VCRUNTIME140.dll / MSVCP140.dll missing' errors on target machines
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
+    # Ensure Abseil matches the static runtime (/MT, /MTd)
+    set(ABSL_MSVC_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
     add_compile_options(/FS /bigobj /utf-8 /MP)
     add_compile_definitions(
         NOMINMAX
