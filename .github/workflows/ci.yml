@@ -70,6 +70,7 @@ jobs:
         uses: seanmiddleditch/gha-setup-ninja@v5
 
       - name: Configure CMake
+        shell: bash
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_C_COMPILER=cl.exe \
@@ -80,16 +81,19 @@ jobs:
             -DFOLIO_SKETCH_BUILD_TESTS=ON
 
       - name: Compile Targets
+        shell: bash
         run: |
           cmake --build build --config Release
 
       - name: Run Regression Tests
+        shell: bash
         run: |
-          build\folio_sketch_tests.exe
+          ./build/folio_sketch_tests.exe
 
       - name: Run Headless Inspector Diagnostics
+        shell: bash
         run: |
-          build\folio_ink_inspector.exe --diagnose
+          ./build/folio_ink_inspector.exe --diagnose
 
   # =========================================================================
   # 3. ANDROID NATIVE NDK BUILD (arm64-v8a)
