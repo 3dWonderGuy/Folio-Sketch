@@ -84,6 +84,12 @@ bool DesktopPresenter::BeginWetDraw(int* outWidth, int* outHeight) {
 
 void DesktopPresenter::EndWetDraw() const {
     if (!m_initialized) return;
+#if FOLIO_DESKTOP_HAS_SDL3
+    if (m_window != nullptr) {
+        SDL_GL_SwapWindow(m_window);
+        return;
+    }
+#endif
     glFlush();
 }
 

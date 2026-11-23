@@ -21,6 +21,7 @@ set(FOLIO_BACKENDS_COMMON_HEADERS
 if(ANDROID)
     set(FOLIO_BACKENDS_PLATFORM_SOURCES
         android/android_frontbuffer.cpp
+        android/folio_android_jni.cpp
     )
     set(FOLIO_BACKENDS_PLATFORM_HEADERS
         android/android_frontbuffer.hpp
