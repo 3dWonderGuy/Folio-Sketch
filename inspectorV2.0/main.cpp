@@ -24,6 +24,9 @@
 #include "folio_backends/common/gl_capsule_renderer.hpp"
 #include "folio_backends/common/surface_presenter.hpp"
 #include "folio_backends/desktop/desktop_presenter.hpp"
+#if defined(__ANDROID__)
+#include "folio_backends/android/android_frontbuffer.hpp"
+#endif
 
 namespace {
 
@@ -207,6 +210,44 @@ int main(int argc, char* argv[]) {
     layerManager.onDocumentDirty = [&brain]() {
         brain.RequestRedraw();
     };
+
+    Folio::Backends::AndroidHostCallbacks androidCallbacks{};
+    androidCallbacks.onIngestPacket = [](float x, float y, float pressure, float tiltX, float tiltY,
+                                         double timeSec, bool isDown, bool isUp, bool isStylus, int pointerId) {
+        auto& mgr = Folio::V2::AppBrain::Instance().GetLayerManager();
+        Folio::V2::InputPhase phase = isDown ? Folio::V2::InputPhase::Down
+                                    : (isUp ? Folio::V2::InputPhase::Up : Folio::V2::InputPhase::Move);
+        if (mgr.HandleTouchForImGui(x, y, phase)) {
+            Folio::V2::AppBrain::Instance().RequestRedraw();
+            return;
+        }
+        Folio::V2::PointerPacket pkt;
+        pkt.device       = isStylus ? Folio::V2::DeviceType::Stylus : Folio::V2::DeviceType::Touch;
+        pkt.phase        = phase;
+        pkt.pointerId    = static_cast<int32_t>(pointerId);
+        pkt.x            = x;
+        pkt.y            = y;
+        pkt.pressure     = pressure;
+        pkt.tiltX        = tiltX;
+        pkt.tiltY        = tiltY;
+        pkt.timestampSec = timeSec;
+        mgr.ProcessPointer(pkt);
+        if (isUp) {
+            Folio::V2::AppBrain::Instance().RequestRedraw();
+        }
+    };
+    androidCallbacks.onRenderFrame = [](int width, int height, const float* surfaceTransformMatrix) {
+        auto& mgr = Folio::V2::AppBrain::Instance().GetLayerManager();
+        if (mgr.IsLiveInkingActive()) {
+            mgr.RenderStateBWetScanout(width, height, surfaceTransformMatrix);
+        } else {
+            mgr.RenderStateADocumentEngine(width, height, surfaceTransformMatrix, /*isSdlHost=*/false);
+        }
+    };
+    androidCallbacks.onClearCanvas = []() {
+        Folio::V2::AppBrain::Instance().GetLayerManager().ClearDocument();
+    };
+    Folio::Backends::SetAndroidHostCallbacks(androidCallbacks);
 
     // Request initial front-buffer render pass once surface is ready
     Folio::Backends::RequestAndroidFrontBufferFlush();

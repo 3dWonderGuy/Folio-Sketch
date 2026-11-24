@@ -83,4 +83,19 @@ private:
     bool m_ownsContext = false;
 };
 
+/**
+ * @struct AndroidHostCallbacks
+ * @brief Decoupled host callbacks so folio_backends/android has zero dependency on any specific app/UI.
+ */
+struct AndroidHostCallbacks {
+    void (*onIngestPacket)(float x, float y, float pressure, float tiltX, float tiltY,
+                           double timeSec, bool isDown, bool isUp, bool isStylus, int pointerId) = nullptr;
+    void (*onRenderFrame)(int width, int height, const float* surfaceTransformMatrix) = nullptr;
+    void (*onClearCanvas)() = nullptr;
+    void (*onUpdateSurfaceTransform)(const float* surfaceTransformMatrix) = nullptr;
+};
+
+void SetAndroidHostCallbacks(const AndroidHostCallbacks& callbacks);
+const AndroidHostCallbacks& GetAndroidHostCallbacks();
+
 } // namespace Folio::Backends
