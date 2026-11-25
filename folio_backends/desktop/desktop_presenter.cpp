@@ -10,7 +10,7 @@
 #if !defined(__ANDROID__) && !defined(__APPLE__)
 
 #if defined(_WIN32)
-#include "gl_loader.hpp"
+#include "inspectorV2.0/gl_loader.hpp"
 #endif
 
 #if __has_include(<SDL3/SDL.h>)

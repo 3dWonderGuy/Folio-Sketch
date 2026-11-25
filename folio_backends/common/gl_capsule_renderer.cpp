@@ -11,7 +11,7 @@
 #if defined(__ANDROID__)
 #include <GLES3/gl3.h>
 #elif defined(_WIN32)
-#include "gl_loader.hpp"
+#include "inspectorV2.0/gl_loader.hpp"
 #else
 #define GL_GLEXT_PROTOTYPES 1
 #include <GL/gl.h>
