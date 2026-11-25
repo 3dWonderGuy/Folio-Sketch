@@ -21,6 +21,7 @@ set(FOLIO_BACKENDS_COMMON_HEADERS
 if(ANDROID)
     set(FOLIO_BACKENDS_PLATFORM_SOURCES
         android/android_frontbuffer.cpp
+        android/folio_android_jni.cpp
     )
     set(FOLIO_BACKENDS_PLATFORM_HEADERS
         android/android_frontbuffer.hpp
@@ -56,11 +57,9 @@ target_include_directories(folio_backends
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../src>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../inspectorV2.0>
         $<INSTALL_INTERFACE:src>
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../src"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../inspectorV2.0"
 )
 
 target_link_libraries(folio_backends

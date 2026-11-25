@@ -14,7 +14,7 @@
 #include <GLES3/gl3.h>
 #include <SDL3/SDL.h>
 
-#include "inspectorV2.0/app_brain.hpp"
+#include "folio_backends/android/android_frontbuffer.hpp"
 
 #define LOG_TAG "FolioSketchNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -26,6 +26,7 @@ namespace {
 static JavaVM* g_jvm = nullptr;
 static jclass g_inkViewClass = nullptr;
 static jmethodID g_requestFrontBufferMethod = nullptr;
+static Folio::Backends::AndroidHostCallbacks g_hostCallbacks{};
 
 struct FolioAndroidSession {
     uint64_t wetFlushCount = 0;
@@ -34,6 +35,14 @@ struct FolioAndroidSession {
 } // namespace
 
 namespace Folio::Backends {
+
+void SetAndroidHostCallbacks(const AndroidHostCallbacks& callbacks) {
+    g_hostCallbacks = callbacks;
+}
+
+const AndroidHostCallbacks& GetAndroidHostCallbacks() {
+    return g_hostCallbacks;
+}
 
 void RequestAndroidFrontBufferFlush() {
     if (!g_jvm || !g_inkViewClass || !g_requestFrontBufferMethod) return;
@@ -108,31 +117,14 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeIngestPacket(
 
     const double timeSec = static_cast<double>(timestampNs) * 1e-9;
 
-    auto& layerMgr = Folio::V2::AppBrain::Instance().GetLayerManager();
-    Folio::V2::InputPhase phase = isDown ? Folio::V2::InputPhase::Down
-                                : (isUp ? Folio::V2::InputPhase::Up : Folio::V2::InputPhase::Move);
-
-    // Give Dear ImGui first opportunity to capture finger or stylus interactions on UI panels
-    if (layerMgr.HandleTouchForImGui(x, y, phase)) {
-        Folio::V2::AppBrain::Instance().RequestRedraw();
-        return;
+    const auto& cb = Folio::Backends::GetAndroidHostCallbacks();
+    if (cb.onIngestPacket) {
+        cb.onIngestPacket(x, y, pressure, tiltX, tiltY, timeSec,
+                          isDown != JNI_FALSE, isUp != JNI_FALSE, isStylus != JNI_FALSE,
+                          static_cast<int>(pointerId));
     }
 
-    // Route packet directly to the single C++ LayerManager (Stylus inking + Touch pan/zoom)
-    Folio::V2::PointerPacket pkt;
-    pkt.device       = isStylus ? Folio::V2::DeviceType::Stylus : Folio::V2::DeviceType::Touch;
-    pkt.phase        = phase;
-    pkt.pointerId    = static_cast<int32_t>(pointerId);
-    pkt.x            = x;
-    pkt.y            = y;
-    pkt.pressure     = pressure;
-    pkt.tiltX        = tiltX;
-    pkt.tiltY        = tiltY;
-    pkt.timestampSec = timeSec;
-    layerMgr.ProcessPointer(pkt);
-
     if (isUp) {
-        Folio::V2::AppBrain::Instance().RequestRedraw();
         // Wake SDL event loop if sleeping
         SDL_Event userEv{};
         userEv.type = SDL_EVENT_USER;
@@ -153,15 +145,9 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeRenderWet(
         matrixElements = env->GetFloatArrayElements(surfaceTransform, nullptr);
     }
 
-    auto& layerMgr = Folio::V2::AppBrain::Instance().GetLayerManager();
-
-    // Binary State Machine:
-    // - STATE B (IsLiveInkingActive): Direct front-buffer wet scanout (<0.15ms, zero glClear, zero ImGui rebuild)
-    // - STATE A (Idle / UI / Pan & Zoom / Pen Lift): Offscreen Document FBO bake + single opaque pass (zero glClear on FBO 0)
-    if (layerMgr.IsLiveInkingActive()) {
-        layerMgr.RenderStateBWetScanout(width, height, matrixElements);
-    } else {
-        layerMgr.RenderStateADocumentEngine(width, height, matrixElements, /*isSdlHost=*/false);
+    const auto& cb = Folio::Backends::GetAndroidHostCallbacks();
+    if (cb.onRenderFrame) {
+        cb.onRenderFrame(width, height, matrixElements);
     }
 
     if (matrixElements != nullptr) {
@@ -189,7 +175,10 @@ Java_org_foliosketch_android_FolioNativeBridge_nativeClearCanvas(
     auto* session = reinterpret_cast<FolioAndroidSession*>(handle);
     if (!session) return;
 
-    Folio::V2::AppBrain::Instance().GetLayerManager().ClearDocument();
+    const auto& cb = Folio::Backends::GetAndroidHostCallbacks();
+    if (cb.onClearCanvas) {
+        cb.onClearCanvas();
+    }
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glFlush();

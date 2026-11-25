@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <iomanip>
 #include <SDL3/SDL.h>
@@ -22,6 +23,10 @@
 #include "inspectorV2.0/testbed/testbed_samples.hpp"
 #include "folio_backends/common/gl_capsule_renderer.hpp"
 #include "folio_backends/common/surface_presenter.hpp"
+#include "folio_backends/desktop/desktop_presenter.hpp"
+#if defined(__ANDROID__)
+#include "folio_backends/android/android_frontbuffer.hpp"
+#endif
 
 namespace {
 
@@ -206,6 +211,44 @@ int main(int argc, char* argv[]) {
         brain.RequestRedraw();
     };
 
+    Folio::Backends::AndroidHostCallbacks androidCallbacks{};
+    androidCallbacks.onIngestPacket = [](float x, float y, float pressure, float tiltX, float tiltY,
+                                         double timeSec, bool isDown, bool isUp, bool isStylus, int pointerId) {
+        auto& mgr = Folio::V2::AppBrain::Instance().GetLayerManager();
+        Folio::V2::InputPhase phase = isDown ? Folio::V2::InputPhase::Down
+                                    : (isUp ? Folio::V2::InputPhase::Up : Folio::V2::InputPhase::Move);
+        if (mgr.HandleTouchForImGui(x, y, phase)) {
+            Folio::V2::AppBrain::Instance().RequestRedraw();
+            return;
+        }
+        Folio::V2::PointerPacket pkt;
+        pkt.device       = isStylus ? Folio::V2::DeviceType::Stylus : Folio::V2::DeviceType::Touch;
+        pkt.phase        = phase;
+        pkt.pointerId    = static_cast<int32_t>(pointerId);
+        pkt.x            = x;
+        pkt.y            = y;
+        pkt.pressure     = pressure;
+        pkt.tiltX        = tiltX;
+        pkt.tiltY        = tiltY;
+        pkt.timestampSec = timeSec;
+        mgr.ProcessPointer(pkt);
+        if (isUp) {
+            Folio::V2::AppBrain::Instance().RequestRedraw();
+        }
+    };
+    androidCallbacks.onRenderFrame = [](int width, int height, const float* surfaceTransformMatrix) {
+        auto& mgr = Folio::V2::AppBrain::Instance().GetLayerManager();
+        if (mgr.IsLiveInkingActive()) {
+            mgr.RenderStateBWetScanout(width, height, surfaceTransformMatrix);
+        } else {
+            mgr.RenderStateADocumentEngine(width, height, surfaceTransformMatrix, /*isSdlHost=*/false);
+        }
+    };
+    androidCallbacks.onClearCanvas = []() {
+        Folio::V2::AppBrain::Instance().GetLayerManager().ClearDocument();
+    };
+    Folio::Backends::SetAndroidHostCallbacks(androidCallbacks);
+
     // Request initial front-buffer render pass once surface is ready
     Folio::Backends::RequestAndroidFrontBufferFlush();
 
@@ -285,6 +328,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "[FolioInspectorV2] Failed to initialize OpenGL loader!" << std::endl;
     }
 
+    Folio::Backends::DesktopPresenter presenter;
+    presenter.Init(window);
+
     // Initialize Dear ImGui
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -316,6 +362,42 @@ int main(int argc, char* argv[]) {
     layerManager.RenderImGui(fbWidth, fbHeight, nullptr, /*isSdlHost=*/true);
     SDL_GL_SwapWindow(window);
 
+    GLuint docFbo = 0;
+    GLuint docTex = 0;
+    int docW = 0;
+    int docH = 0;
+    bool docFboValid = false;
+
+    auto ensureDocFbo = [&](int w, int h) {
+        if (w <= 0 || h <= 0) return;
+        if (docFbo != 0 && docW == w && docH == h) return;
+        if (docTex != 0) {
+            glDeleteTextures(1, &docTex);
+            docTex = 0;
+        }
+        if (docFbo != 0) {
+            glDeleteFramebuffers(1, &docFbo);
+            docFbo = 0;
+        }
+        glGenFramebuffers(1, &docFbo);
+        glGenTextures(1, &docTex);
+        glBindTexture(GL_TEXTURE_2D, docTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glBindFramebuffer(GL_FRAMEBUFFER, docFbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, docTex, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        docW = w;
+        docH = h;
+        docFboValid = false;
+    };
+
+    auto lastDocRenderTime = std::chrono::steady_clock::now();
+    bool wasLiveInking = false;
+    uint64_t newestInputNs = 0;
+    bool hasNewMotionInput = false;
+
     // Event Loop
     bool running = true;
     while (running) {
@@ -327,32 +409,105 @@ int main(int argc, char* argv[]) {
             hasEvent = SDL_WaitEvent(&event);
         }
 
+        bool receivedInputThisFrame = false;
         if (hasEvent) {
             do {
+                if (event.type == SDL_EVENT_MOUSE_MOTION ||
+                    event.type == SDL_EVENT_PEN_MOTION) {
+                    newestInputNs = event.common.timestamp;
+                    hasNewMotionInput = true;
+                    receivedInputThisFrame = true;
+                } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                           event.type == SDL_EVENT_MOUSE_BUTTON_UP ||
+                           event.type == SDL_EVENT_PEN_DOWN ||
+                           event.type == SDL_EVENT_PEN_UP) {
+                    receivedInputThisFrame = true;
+                }
                 ProcessSdlEvent(event, window, layerManager, io, needsRedraw, running);
             } while (SDL_PollEvent(&event));
         }
 
         // Flush any delayed packets scheduled for delivery
-        if (layerManager.FlushDelayedPackets()) {
+        const bool flushedDelayed = layerManager.FlushDelayedPackets();
+        if (flushedDelayed) {
             needsRedraw = true;
         }
 
+        const auto frameStart = std::chrono::steady_clock::now();
+        const double elapsedDocMs = std::chrono::duration<double, std::milli>(frameStart - lastDocRenderTime).count();
+        const bool isLiveInking = layerManager.IsLiveInkingActive();
+        const bool shouldRenderFrame = !isLiveInking || receivedInputThisFrame || needsRedraw || (animating && elapsedDocMs >= 16.6);
+        if (!shouldRenderFrame) {
+            continue;
+        }
         SDL_GetWindowSizeInPixels(window, &fbWidth, &fbHeight);
-        glViewport(0, 0, fbWidth, fbHeight);
+        ensureDocFbo(fbWidth, fbHeight);
 
-        layerManager.RenderDocumentCanvas(fbWidth, fbHeight);
-        if (layerManager.IsLiveInkingActive()) {
+        if (isLiveInking != wasLiveInking) {
+            SDL_GL_SetSwapInterval(isLiveInking ? 0 : 1);
+            wasLiveInking = isLiveInking;
+        }
+
+        const bool hasActiveVideo = animating;
+        const bool docDirty = needsRedraw;
+        const bool uiDirty = needsRedraw;
+        const bool shouldUpdateDocFbo =
+            !docFboValid ||
+            docW != fbWidth ||
+            docH != fbHeight ||
+            ((docDirty || uiDirty || hasActiveVideo) && (!isLiveInking || elapsedDocMs >= 16.6));
+
+        if (shouldUpdateDocFbo && docFbo != 0) {
+            glBindFramebuffer(GL_FRAMEBUFFER, docFbo);
+            glViewport(0, 0, fbWidth, fbHeight);
+            glDisable(GL_SCISSOR_TEST);
+
+            layerManager.RenderDocumentCanvas(fbWidth, fbHeight);
+
+            ImGui_ImplOpenGL3_NewFrame();
+            ImGui_ImplSDL3_NewFrame();
+            ImGui::NewFrame();
+            layerManager.RenderImGui(fbWidth, fbHeight, nullptr, /*isSdlHost=*/true);
+
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            lastDocRenderTime = frameStart;
+            docFboValid = true;
+        }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, fbWidth, fbHeight);
+        glDisable(GL_SCISSOR_TEST);
+
+        if (docFbo != 0) {
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, docFbo);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            glBlitFramebuffer(0, 0, fbWidth, fbHeight, 0, 0, fbWidth, fbHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        }
+
+        if (isLiveInking) {
             layerManager.RenderLiveInking(fbWidth, fbHeight);
         }
 
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplSDL3_NewFrame();
-        ImGui::NewFrame();
-        layerManager.RenderImGui(fbWidth, fbHeight, nullptr, /*isSdlHost=*/true);
-
+        const auto beforeSwap = std::chrono::steady_clock::now();
         SDL_GL_SwapWindow(window);
+        const auto afterSwap = std::chrono::steady_clock::now();
+
+        auto& telem = layerManager.GetMutableStylusTelemetry();
+        telem.engineDrawMs = std::chrono::duration<float, std::milli>(beforeSwap - frameStart).count();
+        telem.swapWaitMs = std::chrono::duration<float, std::milli>(afterSwap - beforeSwap).count();
+        if (hasNewMotionInput) {
+            telem.inputToSwapMs = static_cast<float>(SDL_GetTicksNS() - newestInputNs) / 1e6f;
+            hasNewMotionInput = false;
+        }
         needsRedraw = false;
+    }
+
+    if (docTex != 0) {
+        glDeleteTextures(1, &docTex);
+    }
+    if (docFbo != 0) {
+        glDeleteFramebuffers(1, &docFbo);
     }
 
     ImGui_ImplOpenGL3_Shutdown();

@@ -10,7 +10,7 @@
 #if !defined(__ANDROID__) && !defined(__APPLE__)
 
 #if defined(_WIN32)
-#include "gl_loader.hpp"
+#include "inspectorV2.0/gl_loader.hpp"
 #endif
 
 #if __has_include(<SDL3/SDL.h>)
@@ -84,6 +84,12 @@ bool DesktopPresenter::BeginWetDraw(int* outWidth, int* outHeight) {
 
 void DesktopPresenter::EndWetDraw() const {
     if (!m_initialized) return;
+#if FOLIO_DESKTOP_HAS_SDL3
+    if (m_window != nullptr) {
+        SDL_GL_SwapWindow(m_window);
+        return;
+    }
+#endif
     glFlush();
 }
 

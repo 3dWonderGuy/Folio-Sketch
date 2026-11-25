@@ -140,17 +140,17 @@ void InspectorGui::RenderTelemetryHud(LayerManager& layerManager, bool drawOpaqu
         const auto& telem = layerManager.GetStylusTelemetry();
         ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f), "PERFORMANCE");
         const float activeFps = (telem.displayFps > 0.0f) ? telem.displayFps : (io.Framerate > 0.0f ? io.Framerate : 120.0f);
-        const float activeFrameLat = (telem.frameLatencyMs > 0.0f) ? telem.frameLatencyMs : (activeFps > 0.0f ? (1000.0f / activeFps) : 8.33f);
         ImGui::Text("FPS:           %.1f", activeFps);
-        ImGui::Text("Frame Latency: %.2f ms", activeFrameLat);
-        if (telem.passDurationMs > 0.0f) {
-            ImGui::Text("Pass Duration: %.2f ms", telem.passDurationMs);
+        if (telem.inputToSwapMs > 0.0f) {
+            ImGui::Text("Input-to-Swap: %.2f ms", telem.inputToSwapMs);
+        } else {
+            ImGui::Text("Input-to-Swap: -- ms");
         }
+        ImGui::Text("Engine Draw:   %.2f ms", telem.engineDrawMs);
+        ImGui::Text("Swap Wait:     %.2f ms", telem.swapWaitMs);
         if (telem.sampleRateHz > 0.0f) {
-            ImGui::Text("Input Latency: %.2f ms", telem.inputLatencyMs);
             ImGui::Text("Sample Rate:   %.0f Hz", telem.sampleRateHz);
         } else {
-            ImGui::Text("Input Latency: -- ms");
             ImGui::Text("Sample Rate:   -- Hz");
         }
 

@@ -284,7 +284,6 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
         # Android FolioHostActivity loads libmain.so and executes SDL_main
         list(APPEND FOLIO_INSPECTOR_SOURCES
             "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0/main.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/folio_backends/android/folio_android_jni.cpp"
         )
         add_library(main SHARED ${FOLIO_INSPECTOR_SOURCES})
         set_target_properties(main PROPERTIES
@@ -309,7 +308,7 @@ if(FOLIO_SKETCH_BUILD_INSPECTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/inspectorV2.0"
     )
     if(ANDROID)
-        target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch folio_backends SDL3::SDL3 imgui)
+        target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch -Wl,--whole-archive folio_backends -Wl,--no-whole-archive SDL3::SDL3 imgui)
     else()
         target_link_libraries(${INSPECTOR_TARGET} PRIVATE folio_sketch folio_backends SDL3::SDL3 imgui)
     endif()

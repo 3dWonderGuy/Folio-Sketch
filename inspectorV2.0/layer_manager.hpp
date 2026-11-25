@@ -178,9 +178,13 @@ public:
         float displayFps = 120.0f;
         float frameLatencyMs = 8.33f;
         float passDurationMs = 0.0f;
+        float engineDrawMs = 0.0f;
+        float swapWaitMs = 0.0f;
+        float inputToSwapMs = 0.0f;
     };
 
     [[nodiscard]] const StylusTelemetry& GetStylusTelemetry() const noexcept { return m_telemetry; }
+    [[nodiscard]] StylusTelemetry& GetMutableStylusTelemetry() noexcept { return m_telemetry; }
 
 private:
     InputManager                        m_inputManager;
