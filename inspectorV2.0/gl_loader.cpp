@@ -34,6 +34,7 @@
 #undef glBlendEquation
 #undef glActiveTexture
 #undef glBindFramebuffer
+#undef glBlitFramebuffer
 #undef glDeleteFramebuffers
 #undef glGenFramebuffers
 #undef glFramebufferTexture2D
@@ -92,6 +93,7 @@ bool InitGlLoader() {
     LOAD_GL(glBlendEquation, PFNGLBLENDEQUATIONPROC);
     LOAD_GL(glActiveTexture, PFNGLACTIVETEXTUREPROC);
     LOAD_GL(glBindFramebuffer, PFNGLBINDFRAMEBUFFERPROC);
+    LOAD_GL(glBlitFramebuffer, PFNGLBLITFRAMEBUFFERPROC);
     LOAD_GL(glDeleteFramebuffers, PFNGLDELETEFRAMEBUFFERSPROC);
     LOAD_GL(glGenFramebuffers, PFNGLGENFRAMEBUFFERSPROC);
     LOAD_GL(glFramebufferTexture2D, PFNGLFRAMEBUFFERTEXTURE2DPROC);

@@ -62,6 +62,7 @@ struct GlFuncs {
     PFNGLBLENDEQUATIONPROC glBlendEquation = nullptr;
     PFNGLACTIVETEXTUREPROC glActiveTexture = nullptr;
     PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer = nullptr;
+    PFNGLBLITFRAMEBUFFERPROC glBlitFramebuffer = nullptr;
     PFNGLDELETEFRAMEBUFFERSPROC glDeleteFramebuffers = nullptr;
     PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers = nullptr;
     PFNGLFRAMEBUFFERTEXTURE2DPROC glFramebufferTexture2D = nullptr;
@@ -109,6 +110,7 @@ bool InitGlLoader();
 #define glBlendEquation               (::Folio::Debug::g_gl.glBlendEquation)
 #define glActiveTexture               (::Folio::Debug::g_gl.glActiveTexture)
 #define glBindFramebuffer             (::Folio::Debug::g_gl.glBindFramebuffer)
+#define glBlitFramebuffer             (::Folio::Debug::g_gl.glBlitFramebuffer)
 #define glDeleteFramebuffers          (::Folio::Debug::g_gl.glDeleteFramebuffers)
 #define glGenFramebuffers             (::Folio::Debug::g_gl.glGenFramebuffers)
 #define glFramebufferTexture2D        (::Folio::Debug::g_gl.glFramebufferTexture2D)
