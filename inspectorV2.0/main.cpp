@@ -362,39 +362,6 @@ int main(int argc, char* argv[]) {
     layerManager.RenderImGui(fbWidth, fbHeight, nullptr, /*isSdlHost=*/true);
     SDL_GL_SwapWindow(window);
 
-    GLuint docFbo = 0;
-    GLuint docTex = 0;
-    int docW = 0;
-    int docH = 0;
-    bool docFboValid = false;
-
-    auto ensureDocFbo = [&](int w, int h) {
-        if (w <= 0 || h <= 0) return;
-        if (docFbo != 0 && docW == w && docH == h) return;
-        if (docTex != 0) {
-            glDeleteTextures(1, &docTex);
-            docTex = 0;
-        }
-        if (docFbo != 0) {
-            glDeleteFramebuffers(1, &docFbo);
-            docFbo = 0;
-        }
-        glGenFramebuffers(1, &docFbo);
-        glGenTextures(1, &docTex);
-        glBindTexture(GL_TEXTURE_2D, docTex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glBindFramebuffer(GL_FRAMEBUFFER, docFbo);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, docTex, 0);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        docW = w;
-        docH = h;
-        docFboValid = false;
-    };
-
-    auto lastDocRenderTime = std::chrono::steady_clock::now();
-    bool wasLiveInking = false;
     uint64_t newestInputNs = 0;
     bool hasNewMotionInput = false;
 
@@ -428,40 +395,25 @@ int main(int argc, char* argv[]) {
         }
 
         // Flush any delayed packets scheduled for delivery
-        const bool flushedDelayed = layerManager.FlushDelayedPackets();
-        if (flushedDelayed) {
+        if (layerManager.FlushDelayedPackets()) {
             needsRedraw = true;
         }
 
         const auto frameStart = std::chrono::steady_clock::now();
-        const double elapsedDocMs = std::chrono::duration<double, std::milli>(frameStart - lastDocRenderTime).count();
         const bool isLiveInking = layerManager.IsLiveInkingActive();
-        const bool shouldRenderFrame = !isLiveInking || receivedInputThisFrame || needsRedraw || (animating && elapsedDocMs >= 16.6);
-        if (!shouldRenderFrame) {
-            continue;
-        }
-        SDL_GetWindowSizeInPixels(window, &fbWidth, &fbHeight);
-        ensureDocFbo(fbWidth, fbHeight);
-
-        if (isLiveInking != wasLiveInking) {
-            SDL_GL_SetSwapInterval(isLiveInking ? 0 : 1);
-            wasLiveInking = isLiveInking;
-        }
-
         const bool hasActiveVideo = animating;
         const bool docDirty = needsRedraw;
         const bool uiDirty = needsRedraw;
-        const bool shouldUpdateDocFbo =
-            !docFboValid ||
-            docW != fbWidth ||
-            docH != fbHeight ||
-            ((docDirty || uiDirty || hasActiveVideo) && (!isLiveInking || elapsedDocMs >= 16.6));
 
-        if (shouldUpdateDocFbo && docFbo != 0) {
-            glBindFramebuffer(GL_FRAMEBUFFER, docFbo);
-            glViewport(0, 0, fbWidth, fbHeight);
-            glDisable(GL_SCISSOR_TEST);
+        const bool docRefreshDue = presenter.NeedsDocRefresh(docDirty, uiDirty, hasActiveVideo, isLiveInking);
+        const bool shouldRenderFrame = !isLiveInking || receivedInputThisFrame || docRefreshDue;
+        if (!shouldRenderFrame) {
+            continue;
+        }
 
+        presenter.SetLiveInkingState(isLiveInking);
+
+        if (docRefreshDue && presenter.BeginDocPass(&fbWidth, &fbHeight)) {
             layerManager.RenderDocumentCanvas(fbWidth, fbHeight);
 
             ImGui_ImplOpenGL3_NewFrame();
@@ -469,28 +421,19 @@ int main(int argc, char* argv[]) {
             ImGui::NewFrame();
             layerManager.RenderImGui(fbWidth, fbHeight, nullptr, /*isSdlHost=*/true);
 
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            lastDocRenderTime = frameStart;
-            docFboValid = true;
+            presenter.EndDocPass();
         }
 
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, fbWidth, fbHeight);
-        glDisable(GL_SCISSOR_TEST);
-
-        if (docFbo != 0) {
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, docFbo);
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-            glBlitFramebuffer(0, 0, fbWidth, fbHeight, 0, 0, fbWidth, fbHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        }
+        presenter.BlitDocToScreen();
+        fbWidth = presenter.GetWidth();
+        fbHeight = presenter.GetHeight();
 
         if (isLiveInking) {
             layerManager.RenderLiveInking(fbWidth, fbHeight);
         }
 
         const auto beforeSwap = std::chrono::steady_clock::now();
-        SDL_GL_SwapWindow(window);
+        presenter.EndWetDraw();
         const auto afterSwap = std::chrono::steady_clock::now();
 
         auto& telem = layerManager.GetMutableStylusTelemetry();
@@ -503,12 +446,7 @@ int main(int argc, char* argv[]) {
         needsRedraw = false;
     }
 
-    if (docTex != 0) {
-        glDeleteTextures(1, &docTex);
-    }
-    if (docFbo != 0) {
-        glDeleteFramebuffers(1, &docFbo);
-    }
+    presenter.Shutdown();
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
