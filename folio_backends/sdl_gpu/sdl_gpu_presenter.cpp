@@ -48,21 +48,30 @@ SdlGpuPresenter::~SdlGpuPresenter() {
 }
 
 bool SdlGpuPresenter::Init(void* sdlWindow) {
+    return InitWithDevice(static_cast<SDL_Window*>(sdlWindow), nullptr);
+}
+
+bool SdlGpuPresenter::InitWithDevice(SDL_Window* sdlWindow, SDL_GPUDevice* externalDevice) {
     Shutdown();
 
-    m_window = static_cast<SDL_Window*>(sdlWindow);
+    m_window = sdlWindow;
     if (!m_window) return false;
 
-    m_device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr);
-    if (!m_device) {
-        std::cerr << "[SdlGpuPresenter] SDL_CreateGPUDevice failed: " << SDL_GetError() << std::endl;
-        return false;
-    }
-
-    if (!SDL_ClaimWindowForGPUDevice(m_device, m_window)) {
-        std::cerr << "[SdlGpuPresenter] SDL_ClaimWindowForGPUDevice failed: " << SDL_GetError() << std::endl;
-        Shutdown();
-        return false;
+    if (externalDevice) {
+        m_device = externalDevice;
+        m_ownsDevice = false;
+    } else {
+        m_device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr);
+        m_ownsDevice = true;
+        if (!m_device) {
+            std::cerr << "[SdlGpuPresenter] SDL_CreateGPUDevice failed: " << SDL_GetError() << std::endl;
+            return false;
+        }
+        if (!SDL_ClaimWindowForGPUDevice(m_device, m_window)) {
+            std::cerr << "[SdlGpuPresenter] SDL_ClaimWindowForGPUDevice failed: " << SDL_GetError() << std::endl;
+            Shutdown();
+            return false;
+        }
     }
 
     SDL_GetWindowSizeInPixels(m_window, &m_width, &m_height);
@@ -225,6 +234,7 @@ bool SdlGpuPresenter::EnsureInstanceBuffer(size_t instanceCount) {
 void SdlGpuPresenter::Shutdown() {
     if (m_device) {
         SDL_WaitForGPUIdle(m_device);
+        DestroyDocTexture();
         if (m_transferBuffer) {
             SDL_ReleaseGPUTransferBuffer(m_device, m_transferBuffer);
             m_transferBuffer = nullptr;
@@ -241,18 +251,103 @@ void SdlGpuPresenter::Shutdown() {
             SDL_ReleaseGPUGraphicsPipeline(m_device, m_pipeline);
             m_pipeline = nullptr;
         }
-        if (m_window) {
-            SDL_ReleaseWindowFromGPUDevice(m_device, m_window);
+        if (m_ownsDevice) {
+            if (m_window) {
+                SDL_ReleaseWindowFromGPUDevice(m_device, m_window);
+            }
+            SDL_DestroyGPUDevice(m_device);
         }
-        SDL_DestroyGPUDevice(m_device);
         m_device = nullptr;
     }
     m_window = nullptr;
+    m_ownsDevice = true;
     m_instanceCapacity = 0;
     m_width = 0;
     m_height = 0;
     m_initialized = false;
     m_wasLiveInking = false;
+}
+
+bool SdlGpuPresenter::EnsureDocTexture(int width, int height) {
+    if (!m_device || !m_window || width <= 0 || height <= 0) return false;
+    if (m_docTex && m_docW == width && m_docH == height) return true;
+
+    DestroyDocTexture();
+
+    SDL_GPUTextureCreateInfo tInfo{};
+    tInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    tInfo.format = SDL_GetGPUSwapchainTextureFormat(m_device, m_window);
+    tInfo.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    tInfo.width = static_cast<Uint32>(width);
+    tInfo.height = static_cast<Uint32>(height);
+    tInfo.layer_count_or_depth = 1;
+    tInfo.num_levels = 1;
+
+    m_docTex = SDL_CreateGPUTexture(m_device, &tInfo);
+    if (!m_docTex) return false;
+
+    m_docW = width;
+    m_docH = height;
+    m_docTexValid = false;
+    return true;
+}
+
+void SdlGpuPresenter::DestroyDocTexture() {
+    if (m_device && m_docTex) {
+        SDL_ReleaseGPUTexture(m_device, m_docTex);
+        m_docTex = nullptr;
+    }
+    m_docW = 0;
+    m_docH = 0;
+    m_docTexValid = false;
+}
+
+bool SdlGpuPresenter::NeedsDocRefresh(bool docDirty,
+                                      bool uiDirty,
+                                      bool hasActiveVideo,
+                                      bool isLiveInking,
+                                      double refreshIntervalMs) const {
+    if (!m_docTexValid || m_docW != m_width || m_docH != m_height) {
+        return true;
+    }
+    if (!docDirty && !uiDirty && !hasActiveVideo) {
+        return false;
+    }
+    if (!isLiveInking) {
+        return true;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    const double elapsedMs = std::chrono::duration<double, std::milli>(now - m_lastDocRenderTime).count();
+    return elapsedMs >= refreshIntervalMs;
+}
+
+bool SdlGpuPresenter::BeginDocPass(SDL_GPUCommandBuffer* /*cmd*/, int* outWidth, int* outHeight) {
+    if (!m_initialized || !m_window) return false;
+    SDL_GetWindowSizeInPixels(m_window, &m_width, &m_height);
+    if (!EnsureDocTexture(m_width, m_height)) return false;
+    if (outWidth) *outWidth = m_width;
+    if (outHeight) *outHeight = m_height;
+    return true;
+}
+
+void SdlGpuPresenter::EndDocPass() {
+    m_lastDocRenderTime = std::chrono::steady_clock::now();
+    m_docTexValid = true;
+}
+
+void SdlGpuPresenter::BlitDocToScreen(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* swapTex, uint32_t swW, uint32_t swH) {
+    if (!cmd || !swapTex || !m_docTex || m_docW <= 0 || m_docH <= 0) return;
+
+    SDL_GPUBlitInfo blit{};
+    blit.source.texture = m_docTex;
+    blit.source.w = static_cast<Uint32>(m_docW);
+    blit.source.h = static_cast<Uint32>(m_docH);
+    blit.destination.texture = swapTex;
+    blit.destination.w = swW;
+    blit.destination.h = swH;
+    blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+    blit.filter = SDL_GPU_FILTER_NEAREST;
+    SDL_BlitGPUTexture(cmd, &blit);
 }
 
 bool SdlGpuPresenter::SetPresentModeLowLatency(bool enableLowLatency) {

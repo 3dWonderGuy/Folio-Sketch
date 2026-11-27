@@ -13,6 +13,7 @@
 
 struct SDL_Window;
 struct SDL_GPUDevice;
+struct SDL_GPUCommandBuffer;
 struct SDL_GPUGraphicsPipeline;
 struct SDL_GPUBuffer;
 struct SDL_GPUTransferBuffer;
@@ -29,6 +30,7 @@ public:
     SdlGpuPresenter& operator=(const SdlGpuPresenter&) = delete;
 
     bool Init(void* sdlWindow = nullptr) override;
+    bool InitWithDevice(SDL_Window* sdlWindow, SDL_GPUDevice* externalDevice);
     void Shutdown() override;
 
     bool BeginWetDraw(int* outWidth = nullptr, int* outHeight = nullptr) override;
@@ -37,6 +39,19 @@ public:
 
     bool SetPresentModeLowLatency(bool enableLowLatency);
     void SetLiveInkingState(bool isLiveInking);
+
+    [[nodiscard]] bool NeedsDocRefresh(bool docDirty,
+                                       bool uiDirty,
+                                       bool hasActiveVideo,
+                                       bool isLiveInking,
+                                       double refreshIntervalMs = 16.6) const;
+
+    bool BeginDocPass(SDL_GPUCommandBuffer* cmd, int* outWidth = nullptr, int* outHeight = nullptr);
+    void EndDocPass();
+    void BlitDocToScreen(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* swapTex, uint32_t swW, uint32_t swH);
+
+    [[nodiscard]] SDL_GPUDevice* GetDevice() const noexcept { return m_device; }
+    [[nodiscard]] SDL_GPUTexture* GetDocTexture() const noexcept { return m_docTex; }
 
     bool RenderFrame(std::span<const CapsuleInstance> committedInstances,
                      std::span<const CapsuleInstance> wetInstances,
@@ -59,14 +74,23 @@ public:
 private:
     bool CreatePipeline();
     bool EnsureInstanceBuffer(size_t instanceCount);
+    bool EnsureDocTexture(int width, int height);
+    void DestroyDocTexture();
 
     SDL_Window* m_window = nullptr;
     SDL_GPUDevice* m_device = nullptr;
+    bool m_ownsDevice = true;
     SDL_GPUGraphicsPipeline* m_pipeline = nullptr;
     SDL_GPUBuffer* m_quadVbo = nullptr;
     SDL_GPUBuffer* m_instanceBuffer = nullptr;
     SDL_GPUTransferBuffer* m_transferBuffer = nullptr;
     size_t m_instanceCapacity = 0;
+
+    SDL_GPUTexture* m_docTex = nullptr;
+    int m_docW = 0;
+    int m_docH = 0;
+    bool m_docTexValid = false;
+    std::chrono::steady_clock::time_point m_lastDocRenderTime{};
 
     int m_width = 0;
     int m_height = 0;
