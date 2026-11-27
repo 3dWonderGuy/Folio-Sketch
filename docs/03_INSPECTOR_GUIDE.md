@@ -8,12 +8,20 @@ The `folio_ink_inspector` (`inspectorV2.0`) is the dedicated diagnostic testbed,
 
 ---
 
-## 1. Headless CLI Mode: `--diagnose`
+## 1. Headless & GPU Benchmark CLI Modes
 
+### Headless CI Diagnostics (`--diagnose`)
 For CI servers and regression test runs, the inspector executes without opening an X11, Wayland, or native window:
 
 ```bash
-./build/bin/folio_ink_inspector --diagnose
+./build/folio_ink_inspector --diagnose
+```
+
+### SDL3 GPU Latency A/B Test (`--sdl-gpu`)
+Launches the inspector using `Folio::Backends::SdlGpuPresenter` (Vulkan on Linux, D3D12 on Windows, Metal on macOS) with `SDL_GPU_PRESENTMODE_MAILBOX` / `IMMEDIATE` instead of OpenGL, displaying live `Input-to-Swap`, `Draw`, and `Swap` timings in the window title:
+
+```bash
+./build/folio_ink_inspector --sdl-gpu
 ```
 
 ### Automated Diagnostic Test Battery

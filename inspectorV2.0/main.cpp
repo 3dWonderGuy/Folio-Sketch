@@ -26,6 +26,8 @@
 #include "folio_backends/desktop/desktop_presenter.hpp"
 #if defined(__ANDROID__)
 #include "folio_backends/android/android_frontbuffer.hpp"
+#else
+#include "folio_backends/sdl_gpu/sdl_gpu_presenter.hpp"
 #endif
 
 namespace {
@@ -297,6 +299,213 @@ int main(int argc, char* argv[]) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::cerr << "[FolioInspectorV2] SDL_Init failed: " << SDL_GetError() << std::endl;
         return 1;
+    }
+
+    bool useSdlGpu = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--sdl-gpu") == 0) {
+            useSdlGpu = true;
+            break;
+        }
+    }
+
+    if (useSdlGpu) {
+        SDL_Window* gpuWin = SDL_CreateWindow(
+            "Folio Inspector V2.0 [SDL_GPU Latency Test]",
+            1600, 960,
+            SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+        );
+        if (!gpuWin) {
+            std::cerr << "[FolioInspectorV2] SDL_CreateWindow (SDL_GPU) failed: " << SDL_GetError() << std::endl;
+            SDL_Quit();
+            return 1;
+        }
+
+        Folio::Backends::SdlGpuPresenter gpuPresenter;
+        if (!gpuPresenter.Init(gpuWin)) {
+            std::cerr << "[FolioInspectorV2] SdlGpuPresenter::Init failed!" << std::endl;
+            SDL_DestroyWindow(gpuWin);
+            SDL_Quit();
+            return 1;
+        }
+
+        std::cout << "[FolioInspectorV2] SDL_GPU Driver: " << gpuPresenter.GetDriverName()
+                  << " | PresentMode: " << gpuPresenter.GetPresentModeName() << std::endl;
+
+        auto& layerManager = Folio::V2::AppBrain::Instance().GetLayerManager();
+        bool running = true;
+        bool needsRedraw = true;
+        uint64_t newestInputNs = 0;
+        bool hasNewMotionInput = false;
+        float lastInputToSwapMs = 0.0f;
+        float lastEngineDrawMs = 0.0f;
+        float lastSwapWaitMs = 0.0f;
+        auto lastTitleUpdate = std::chrono::steady_clock::now();
+
+        std::vector<Folio::CapsuleInstance> committedCapsules;
+        std::vector<Folio::CapsuleInstance> wetCapsules;
+        size_t cachedCommittedCount = 0;
+
+        while (running) {
+            SDL_Event event;
+            bool hasEvent = SDL_PollEvent(&event);
+            if (!hasEvent && !layerManager.IsLiveInkingActive() && !needsRedraw) {
+                hasEvent = SDL_WaitEvent(&event);
+            }
+
+            bool receivedInputThisFrame = false;
+            if (hasEvent) {
+                do {
+                    if (event.type == SDL_EVENT_QUIT ||
+                        (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
+                         event.window.windowID == SDL_GetWindowID(gpuWin))) {
+                        running = false;
+                        break;
+                    }
+                    if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_C) {
+                        layerManager.ClearDocument();
+                        committedCapsules.clear();
+                        cachedCommittedCount = 0;
+                        needsRedraw = true;
+                    }
+                    if (event.type == SDL_EVENT_WINDOW_EXPOSED ||
+                        event.type == SDL_EVENT_WINDOW_RESIZED ||
+                        event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+                        needsRedraw = true;
+                    }
+                    if (event.type == SDL_EVENT_MOUSE_MOTION && (event.motion.state & SDL_BUTTON_LMASK)) {
+                        float fx = 0.0f, fy = 0.0f;
+                        ScreenToFb(gpuWin, event.motion.x, event.motion.y, fx, fy);
+                        Folio::V2::PointerPacket pkt{};
+                        pkt.device = Folio::V2::DeviceType::Mouse;
+                        pkt.phase = Folio::V2::InputPhase::Move;
+                        pkt.pointerId = 0;
+                        pkt.x = fx;
+                        pkt.y = fy;
+                        pkt.pressure = 0.5f;
+                        pkt.timestampSec = static_cast<double>(event.motion.timestamp) * 1e-9;
+                        layerManager.ProcessPointer(pkt);
+                        newestInputNs = event.common.timestamp;
+                        hasNewMotionInput = true;
+                        receivedInputThisFrame = true;
+                    } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT) {
+                        float fx = 0.0f, fy = 0.0f;
+                        ScreenToFb(gpuWin, event.button.x, event.button.y, fx, fy);
+                        Folio::V2::PointerPacket pkt{};
+                        pkt.device = Folio::V2::DeviceType::Mouse;
+                        pkt.phase = Folio::V2::InputPhase::Down;
+                        pkt.pointerId = 0;
+                        pkt.x = fx;
+                        pkt.y = fy;
+                        pkt.pressure = 0.5f;
+                        pkt.timestampSec = static_cast<double>(event.button.timestamp) * 1e-9;
+                        layerManager.ProcessPointer(pkt);
+                        receivedInputThisFrame = true;
+                    } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT) {
+                        float fx = 0.0f, fy = 0.0f;
+                        ScreenToFb(gpuWin, event.button.x, event.button.y, fx, fy);
+                        Folio::V2::PointerPacket pkt{};
+                        pkt.device = Folio::V2::DeviceType::Mouse;
+                        pkt.phase = Folio::V2::InputPhase::Up;
+                        pkt.pointerId = 0;
+                        pkt.x = fx;
+                        pkt.y = fy;
+                        pkt.pressure = 0.5f;
+                        pkt.timestampSec = static_cast<double>(event.button.timestamp) * 1e-9;
+                        layerManager.ProcessPointer(pkt);
+                        receivedInputThisFrame = true;
+                        needsRedraw = true;
+                    } else if (event.type == SDL_EVENT_PEN_MOTION ||
+                               event.type == SDL_EVENT_PEN_DOWN ||
+                               event.type == SDL_EVENT_PEN_UP) {
+                        const bool isDown = (event.type == SDL_EVENT_PEN_DOWN);
+                        const bool isUp = (event.type == SDL_EVENT_PEN_UP);
+                        const float px = isDown || isUp ? event.pbutton.x : event.pmotion.x;
+                        const float py = isDown || isUp ? event.pbutton.y : event.pmotion.y;
+                        float fx = 0.0f, fy = 0.0f;
+                        ScreenToFb(gpuWin, px, py, fx, fy);
+                        Folio::V2::PointerPacket pkt{};
+                        pkt.device = Folio::V2::DeviceType::Stylus;
+                        pkt.phase = isDown ? Folio::V2::InputPhase::Down : (isUp ? Folio::V2::InputPhase::Up : Folio::V2::InputPhase::Move);
+                        pkt.pointerId = static_cast<int32_t>(event.pmotion.which);
+                        pkt.x = fx;
+                        pkt.y = fy;
+                        pkt.pressure = 0.5f;
+                        pkt.timestampSec = static_cast<double>(event.common.timestamp) * 1e-9;
+                        layerManager.ProcessPointer(pkt);
+                        if (!isDown && !isUp) {
+                            newestInputNs = event.common.timestamp;
+                            hasNewMotionInput = true;
+                        } else if (isUp) {
+                            needsRedraw = true;
+                        }
+                        receivedInputThisFrame = true;
+                    }
+                } while (SDL_PollEvent(&event));
+            }
+
+            const bool isLiveInking = layerManager.IsLiveInkingActive();
+            if (isLiveInking && !receivedInputThisFrame && !needsRedraw) {
+                continue;
+            }
+
+            gpuPresenter.SetLiveInkingState(isLiveInking);
+
+            auto appendCapsules = [](const std::vector<Folio::StrokePoint>& pts, uint32_t packedColor, std::vector<Folio::CapsuleInstance>& out) {
+                for (size_t i = 0; i + 1 < pts.size(); ++i) {
+                    Folio::CapsuleInstance inst{};
+                    inst.pointA = { static_cast<float>(pts[i].x), static_cast<float>(pts[i].y) };
+                    inst.pointB = { static_cast<float>(pts[i + 1].x), static_cast<float>(pts[i + 1].y) };
+                    inst.radii  = { pts[i].r, pts[i + 1].r };
+                    inst.colorRgba = packedColor;
+                    inst.colorRgbaEnd = packedColor;
+                    out.push_back(inst);
+                }
+            };
+
+            const auto& docStrokes = layerManager.GetDocumentStrokes();
+            if (docStrokes.size() != cachedCommittedCount) {
+                committedCapsules.clear();
+                for (const auto& s : docStrokes) {
+                    appendCapsules(s.points, s.color, committedCapsules);
+                }
+                cachedCommittedCount = docStrokes.size();
+            }
+
+            wetCapsules.clear();
+            if (isLiveInking) {
+                const auto& livePts = layerManager.GetLiveEngine().GetLiveModeledPoints();
+                if (!livePts.empty()) {
+                    appendCapsules(livePts, Folio::PackPremultipliedGpuColor(layerManager.GetActiveStyle().color), wetCapsules);
+                }
+            }
+
+            const auto& cs = layerManager.GetCanvasState();
+            Folio::Backends::CanvasTransform xf{ cs.panX, cs.panY, cs.zoom };
+            gpuPresenter.RenderFrame(committedCapsules, wetCapsules, xf, 0.0f, 0.25f, &lastEngineDrawMs, &lastSwapWaitMs);
+
+            if (hasNewMotionInput) {
+                lastInputToSwapMs = static_cast<float>(SDL_GetTicksNS() - newestInputNs) / 1e6f;
+                hasNewMotionInput = false;
+            }
+
+            const auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration<double, std::milli>(now - lastTitleUpdate).count() >= 200.0) {
+                char title[256];
+                std::snprintf(title, sizeof(title),
+                    "Folio [SDL_GPU: %s | %s] Input-to-Swap: %.2f ms | Draw: %.2f ms | Swap: %.2f ms (C to clear)",
+                    gpuPresenter.GetDriverName(), gpuPresenter.GetPresentModeName(),
+                    lastInputToSwapMs, lastEngineDrawMs, lastSwapWaitMs);
+                SDL_SetWindowTitle(gpuWin, title);
+                lastTitleUpdate = now;
+            }
+            needsRedraw = false;
+        }
+
+        gpuPresenter.Shutdown();
+        SDL_DestroyWindow(gpuWin);
+        SDL_Quit();
+        return 0;
     }
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
