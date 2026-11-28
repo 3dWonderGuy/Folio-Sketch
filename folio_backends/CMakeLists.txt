@@ -37,9 +37,12 @@ else()
     # Shared Desktop (Linux & Windows)
     set(FOLIO_BACKENDS_PLATFORM_SOURCES
         desktop/desktop_presenter.cpp
+        sdl_gpu/sdl_gpu_presenter.cpp
     )
     set(FOLIO_BACKENDS_PLATFORM_HEADERS
         desktop/desktop_presenter.hpp
+        sdl_gpu/sdl_gpu_presenter.hpp
+        sdl_gpu/capsule_shaders_spv.hpp
     )
 endif()
 

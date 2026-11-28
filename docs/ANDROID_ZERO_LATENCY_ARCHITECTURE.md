@@ -158,12 +158,10 @@ sequenceDiagram
    - Single `SurfaceView` attached to the window with `setZOrderOnTop(true)` and `PixelFormat.TRANSLUCENT`.
    - Ingests `MotionEvent`s: stylus packets trigger `renderFrontBufferedLayer`; pen lift triggers `commit()`.
 3. **C++ JNI Bridge (`folio_android_jni.cpp`)**:
-   - Implements `nativeIngestPacket`, `nativeRenderWet`, and `nativeRenderDry`.
-   - Directs wet inking to `GlCapsuleRenderer` to draw directly to the front buffer with sub-2ms latency.
-   - On stroke finish, commits the modeled points into `AppBrain::Instance().GetLayerManager().AddDocumentStroke(...)`.
-4. **C++ Application Brain (`inspectorV2.0/app_brain.hpp`)**:
-   - Central singleton owned by C++ and shared between SDL's host thread and the digitizer scanout engine.
-   - Synchronizes committed strokes, canvas transforms (pan/zoom), and brush configurations.
+   - Compiled directly inside `folio_backends` (`-Wl,--whole-archive` on Android) and decoupled from `inspectorV2.0/` via `Folio::Backends::AndroidHostCallbacks`.
+   - Implements `nativeIngestPacket`, `nativeRenderWet`, `nativeRenderDry`, and `nativeClearCanvas`, forwarding them to whatever callbacks the host registers via `SetAndroidHostCallbacks(...)`.
+4. **Host Application Engine (e.g., `inspectorV2.0/app_brain.hpp` or FolioNote)**:
+   - Registers `AndroidHostCallbacks` at startup to route packets into `LayerManager` / `InkEngine` and dispatch State A (offscreen document FBO bake + blit) vs State B (scissored front-buffer wet scanout).
 5. **SDL Host Thread (`inspectorV2.0/main.cpp`)**:
    - Runs `main()` / `SDL_main`.
    - Monitors `AppBrain::CheckAndResetRedraw()` without executing continuous GPU swaps, preserving the zero-latency bypass.

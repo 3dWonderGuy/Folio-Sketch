@@ -40,16 +40,46 @@ Stylus Hardware              Host App / Bridge              Folio Math Core     
 
 ## Coordinating Wet Overlays and Document FBOs
 
-To eliminate visual popping and frame tearing:
-1. **During Active Inking:**
-   - Draw background document FBO once or keep it frozen.
-   - Render the active stroke incrementally into the wet overlay using `GlCapsuleRenderer`.
-   - On Android, submit via `glFlush()` on the front-buffer surface (`AndroidFrontBuffer`).
-2. **On Pointer Up (The Handoff):**
-   - The engine finalizes the stroke, applying RDP decimation and Gaussian radius smoothing.
-   - The completed stroke is rasterized once into the background document FBO (`BakedCanvasLayer`).
-   - The wet capsule buffer is cleared via `Reset()`.
-   - The full document is scheduled for a standard double-buffered presentation. Because the geometry of the finalized stroke aligns with the wet capsules, the handoff is 100% optically seamless.
+See [02. Backends & Hardware Scanout](02_BACKENDS_AND_SCANOUT.md) for the complete architecture of `DesktopPresenter`, `SdlGpuPresenter`, and `AndroidFrontBuffer`.
+
+### Desktop Host Integration (`DesktopPresenter` — OpenGL 3.3 + SDL3)
+Use `Folio::Backends::DesktopPresenter` to get decoupled 60 Hz UI/video rendering inside `m_docFbo` and sub-millisecond fullscreen wet-ink blits without VAO sharing or scissor artifacts:
+
+```cpp
+Folio::Backends::DesktopPresenter presenter;
+presenter.Init(window); // Single double-buffered SDL_GLContext
+
+// Inside your SDL event loop (only render during live inking if input arrived or 60Hz refresh is due):
+const bool isLiveInking = bridge.IsActive();
+const bool docRefreshDue = presenter.NeedsDocRefresh(docDirty, uiDirty, hasActiveVideo, isLiveInking);
+if (isLiveInking && !receivedInputThisFrame && !docRefreshDue) {
+    continue; // Prevent 3-buffer swapchain overflow
+}
+
+presenter.SetLiveInkingState(isLiveInking); // SwapInterval(0) while inking, (1) on pen-up
+
+if (docRefreshDue && presenter.BeginDocPass(&fbW, &fbH)) {
+    RenderDocumentAndVideoAndUI(fbW, fbH);
+    presenter.EndDocPass();
+}
+
+presenter.BlitDocToScreen(); // Fullscreen glBlitFramebuffer (scissor disabled)
+if (isLiveInking) {
+    bridge.RenderWet(fbW, fbH); // Draws directly on FBO 0 in main GL context
+}
+presenter.EndWetDraw(); // SDL_GL_SwapWindow
+```
+
+### Android Host Integration (`AndroidHostCallbacks`)
+Register your engine callbacks at native startup so `folio_backends/android/folio_android_jni.cpp` forwards `GLFrontBufferedRenderer` events without depending on `inspectorV2.0/`:
+
+```cpp
+Folio::Backends::AndroidHostCallbacks cb{};
+cb.onIngestPacket = OnHostPointerPacket;
+cb.onRenderFrame  = OnHostRenderFrame;
+cb.onClearCanvas  = OnHostClearCanvas;
+Folio::Backends::SetAndroidHostCallbacks(cb);
+```
 
 ---
 

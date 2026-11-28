@@ -27,9 +27,10 @@ I could not find a good multiplatfrom inking engine and usualy I had to rely on 
 Comprehensive design documents, mathematical proofs, and architectural details are maintained in the [`docs/`](docs/) directory:
 
 - [**01. Core Architecture (Tier 1)**](docs/01_CORE_ARCHITECTURE.md): Pure headless C++20 math engine, 4-stage pipeline, Google Ink ODE solver, tremor filtering, and data boundaries.
-- [**02. Backends & Hardware Scanout (Tier 2)**](docs/02_BACKENDS_AND_SCANOUT.md): Analytic capsule SDF shaders, persistent VBO streaming, subpixel AA, and Android front-buffer bypass.
-- [**03. Inspector & Diagnostic Workbench Manual**](docs/03_INSPECTOR_GUIDE.md): Headless CI benchmarking (`--diagnose`), sliver tests, diagnostic tabs, and time-travel scrubber.
-- [**04. Production Integration Guide**](docs/04_INTEGRATION_GUIDE.md): Turnkey application integration blueprint, wet-to-dry handoff lifecycle, and host bridge example.
+- [**02. Backends & Hardware Scanout (Tier 2)**](docs/02_BACKENDS_AND_SCANOUT.md): Complete `folio_backends` guide — `DesktopPresenter` (`m_docFbo` blit + demand-driven swaps), `SdlGpuPresenter` (Vulkan/D3D12/Metal), `AndroidFrontBuffer` + `AndroidHostCallbacks`, `DisplaySurfaceTransform`, and Analytic Capsule SDF shaders.
+- [**03. Inspector & Diagnostic Workbench Manual**](docs/03_INSPECTOR_GUIDE.md): Headless CI benchmarking (`--diagnose`), SDL3 GPU latency benchmark (`--sdl-gpu`), sliver tests, diagnostic tabs, and time-travel scrubber.
+- [**04. Production Integration Guide**](docs/04_INTEGRATION_GUIDE.md): Turnkey application integration blueprint for Desktop (`DesktopPresenter` / `SdlGpuPresenter`), Android (`AndroidHostCallbacks`), and wet-to-dry handoff lifecycle.
+- [**Android Zero-Latency Hardware Guide**](docs/ANDROID_ZERO_LATENCY_ARCHITECTURE.md): Hardware DPU physics, Jetpack `GLFrontBufferedRenderer`, and coordinate transform deep dive for Android.
 
 ---
 
